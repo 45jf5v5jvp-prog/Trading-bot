@@ -87,7 +87,8 @@ const remote = {
   },
   async set(key, value) {
     if (!SHARING_ON) return;
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/kv`, {
+    /* on_conflict=key makes the upsert explicit against real Supabase/PostgREST. */
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/kv?on_conflict=key`, {
       method: 'POST',
       headers: { ..._kvHeaders(), 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }),
@@ -97,6 +98,19 @@ const remote = {
   async delete(key) {
     if (!SHARING_ON) return;
     await fetch(_kvUrl(key), { method: 'DELETE', headers: _kvHeaders() });
+  },
+  /* A cheap reachability check for the setup indicator on the home screen.
+     Distinguishes "not set up" from "wrong key / RLS" from "wrong URL / offline"
+     so a misconfiguration surfaces before the first tee, not during the round. */
+  async ping() {
+    if (!SHARING_ON) return { ok: false, reason: 'off' };
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/kv?select=key&limit=1`, { headers: _kvHeaders() });
+      if (res.ok) return { ok: true };
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'auth' };
+      if (res.status === 404) return { ok: false, reason: 'table' };
+      return { ok: false, reason: 'http', status: res.status };
+    } catch { return { ok: false, reason: 'network' }; }
   },
 };
 
@@ -2505,7 +2519,15 @@ function CodeCard({ code, note }) {
 }
 
 /* --- landing --- */
+const SHARE_STATUS = {
+  auth: 'Shared board: key or permissions rejected. Recheck the anon key and that you ran the setup SQL.',
+  table: 'Shared board: the "kv" table was not found. Run the setup SQL in Supabase.',
+  http: 'Shared board: the database returned an error. Check the setup.',
+  network: 'Shared board: cannot reach the database. Check the Supabase URL, or your connection.',
+};
 function Home({ onNew, onTrip, onJoin, resume, tripResume, theme, setTheme }) {
+  const [conn, setConn] = useState(null);
+  useEffect(() => { if (SHARING_ON) remote.ping().then(setConn).catch(() => setConn({ ok: false, reason: 'network' })); }, []);
   return (
     <div style={{ padding: '52px 18px 40px', maxWidth: 520, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 34 }}>
@@ -2545,6 +2567,20 @@ function Home({ onNew, onTrip, onJoin, resume, tripResume, theme, setTheme }) {
           ? 'One person keeps the card. Everybody else joins with the code and watches the money move. A trip is a stack of rounds on one leaderboard.'
           : 'One phone keeps the card for the group. A trip is a stack of rounds on one leaderboard.'}
       </div>
+
+      {SHARING_ON && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 16 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: 8, flex: '0 0 8px',
+            background: conn == null ? C.muted : conn.ok ? C.up : C.down,
+          }} />
+          <span style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: '0.04em', color: conn && !conn.ok ? C.down : C.muted, lineHeight: 1.5 }}>
+            {conn == null ? 'Checking the shared leaderboard…'
+              : conn.ok ? 'Shared leaderboard connected. The group can follow with a code.'
+              : (SHARE_STATUS[conn.reason] || 'Shared board: not reachable.')}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

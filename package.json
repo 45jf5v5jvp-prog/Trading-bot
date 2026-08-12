@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "singlefile": "vite build && node scripts/bundle-singlefile.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

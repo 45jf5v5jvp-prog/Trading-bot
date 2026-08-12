@@ -70,6 +70,20 @@ const html = `<!doctype html>
     <link rel="apple-touch-icon" href="${appleIcon}" />
     <link rel="icon" type="image/png" sizes="32x32" href="${favicon}" />
     <link rel="icon" type="image/png" sizes="192x192" href="${icon192}" />
+
+    <!-- ==========================================================
+         SHARED LEADERBOARD (optional)
+         Paste your Supabase project URL and public anon key here to let
+         everyone in the group follow the leaderboard on their own phone.
+         Leave both blank to run solo (one phone keeps the card).
+         This is plain text you can edit by hand — no rebuild needed.
+         ========================================================== -->
+    <script>
+      window.SIDE_ACTION_CONFIG = {
+        SUPABASE_URL: "",
+        SUPABASE_ANON_KEY: ""
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>

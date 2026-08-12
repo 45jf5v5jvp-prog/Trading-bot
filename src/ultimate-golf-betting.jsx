@@ -49,6 +49,76 @@ const oddSplit = (n) => Array.from({ length: n }, (_, i) => 2 * n - 1 - 2 * i);
 const pointsLabel = (n) => (n === 3 ? '9 Point (Nines)' : `${2 * n - 1} Point`);
 
 /* ==========================================================================
+   STORAGE
+   Two scopes, one interface (mirrors the shape the app was written against):
+     - device-local keys (the in-progress round, trip, theme) live in
+       localStorage, so they survive closing the browser on THIS phone.
+     - shared keys (a published round/trip under a group code) live in a
+       Supabase table so every phone in the group can read the same board.
+
+   Sharing is optional. Fill in window.SIDE_ACTION_CONFIG (see index.html) with
+   a Supabase URL + anon key to turn it on. Leave it blank and the app runs
+   solo: one phone keeps the card, everything saved on that device.
+   ========================================================================== */
+
+const _CFG = (typeof window !== 'undefined' && window.SIDE_ACTION_CONFIG) || {};
+const SUPABASE_URL = (_CFG.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_ANON_KEY = _CFG.SUPABASE_ANON_KEY || '';
+const SHARING_ON = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+/* A tiny key/value client over Supabase's REST (PostgREST) endpoint. No SDK,
+   so nothing to bundle. Table: kv(key text primary key, value text,
+   updated_at timestamptz). get() throws when a key is missing — the code-
+   picker relies on that to tell a free code from a taken one. */
+const _kvHeaders = () => ({
+  apikey: SUPABASE_ANON_KEY,
+  Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+});
+const _kvUrl = (key) => `${SUPABASE_URL}/rest/v1/kv?key=eq.${encodeURIComponent(key)}`;
+
+const remote = {
+  async get(key) {
+    if (!SHARING_ON) throw new Error('sharing off');
+    const res = await fetch(`${_kvUrl(key)}&select=value`, { headers: _kvHeaders() });
+    if (!res.ok) throw new Error(`kv get ${res.status}`);
+    const rows = await res.json();
+    if (!rows.length) throw new Error('missing');
+    return { value: rows[0].value };
+  },
+  async set(key, value) {
+    if (!SHARING_ON) return;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/kv`, {
+      method: 'POST',
+      headers: { ..._kvHeaders(), 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(`kv set ${res.status}`);
+  },
+  async delete(key) {
+    if (!SHARING_ON) return;
+    await fetch(_kvUrl(key), { method: 'DELETE', headers: _kvHeaders() });
+  },
+};
+
+/* The interface the rest of the app calls. `shared` picks the scope:
+   false/undefined -> this device (localStorage); true -> the group (Supabase). */
+const storage = {
+  async get(key, shared) {
+    if (shared) return remote.get(key);
+    const value = localStorage.getItem(key);
+    return value == null ? null : { value };
+  },
+  async set(key, value, shared) {
+    if (shared) return remote.set(key, value);
+    try { localStorage.setItem(key, value); } catch {}
+  },
+  async delete(key, shared) {
+    if (shared) return remote.delete(key);
+    try { localStorage.removeItem(key); } catch {}
+  },
+};
+
+/* ==========================================================================
    GAMES
    ========================================================================== */
 
@@ -760,7 +830,7 @@ function LineupBuilder({ names, count, lineup, setLineup, showTeams }) {
         <div style={{ display: 'grid', gap: 8 }}>
           {groups.map((g, gi) => (
             <div key={gi} style={{ background: C.card, borderRadius: 12, padding: '10px 11px' }}>
-              <Eyebrow style={{ marginBottom: 7 }}>group {gi + 1} · one cart</Eyebrow>
+              <Eyebrow style={{ marginBottom: 7 }}>group {gi + 1} · keeps its own card</Eyebrow>
               {chunk(g, 2).map((pair, pi) => {
                 const solo = pair.length === 1;
                 return (
@@ -787,7 +857,7 @@ function LineupBuilder({ names, count, lineup, setLineup, showTeams }) {
       <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
         {pool.length
           ? 'Tap a placed name to send him back to the pool.'
-          : showTeams ? 'Partners stay together all round.' : 'Groups just set who rides together.'}
+          : showTeams ? 'Partners stay together all round.' : 'Each group posts its own card.'}
       </div>
     </div>
   );
@@ -1198,9 +1268,10 @@ function Setup({ onStart, onBack, roster }) {
             <>
               <LineupBuilder names={names} count={count} lineup={lineup} setLineup={setLineup} showTeams={teamGame} />
               <div style={{ background: C.card2, borderRadius: 11, padding: '11px 13px', marginBottom: 18 }}>
-                <Eyebrow style={{ color: C.ink, marginBottom: 5 }}>one card for the field</Eyebrow>
+                <Eyebrow style={{ color: C.ink, marginBottom: 5 }}>one card per group</Eyebrow>
                 <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.chalk, lineHeight: 1.55 }}>
-                  Groups just sort out who rides together. One phone keeps the whole card and it all lands on the same leaderboard.
+                  You only see your own foursome out there, so each group posts its own scores. Send everyone the code.
+                  One man in each group taps Keep score and picks his group, and it all lands on the same leaderboard.
                 </div>
               </div>
             </>
@@ -1541,6 +1612,63 @@ function HoleFeed({ round, ledger }) {
   );
 }
 
+/* Who is actually out there posting. With two foursomes on the course you
+   cannot see the other group's scores, so you need to know somebody has it. */
+function GroupStatus({ round, coverage, meIdx }) {
+  const gs = round.groups || [];
+  const [copied, setCopied] = useState(false);
+  if (gs.length < 2) return null;
+
+  const fresh = (i) => i === meIdx || (coverage[i]?.on && Date.now() - (coverage[i].at || 0) < 20 * 60 * 1000);
+  const missing = gs.map((_, i) => i).filter(i => !fresh(i));
+
+  return (
+    <div style={{
+      background: missing.length ? C.card : C.card2, borderRadius: 12, padding: '12px 13px', marginBottom: 12,
+      border: `1px solid ${missing.length ? C.down : 'transparent'}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 9 }}>
+        <Eyebrow style={{ color: missing.length ? C.down : C.ink }}>
+          {missing.length ? `${missing.length} group${missing.length > 1 ? 's' : ''} not posting` : 'all groups posting'}
+        </Eyebrow>
+        {round.code && (
+          <Btn onClick={() => { try { navigator.clipboard.writeText(round.code); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { setCopied(false); } }}
+            style={{ marginLeft: 'auto', fontSize: 10.5, padding: '6px 10px', fontFamily: F_MONO, letterSpacing: '0.1em' }}>
+            {copied ? 'Copied' : round.code}
+          </Btn>
+        )}
+      </div>
+
+      {gs.map((g, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 0' }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: 7, marginTop: 5, flex: '0 0 7px',
+            background: fresh(i) ? C.up : C.down,
+          }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13, color: C.chalk }}>
+              Group {i + 1}{i === meIdx ? ' · you' : ''}
+            </div>
+            <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, lineHeight: 1.5 }}>
+              {g.map(id => short(nameOf(round, id))).join(', ')}
+            </div>
+          </div>
+          <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9, color: fresh(i) ? C.up : C.down, textTransform: 'uppercase', letterSpacing: '0.08em', paddingTop: 3 }}>
+            {i === meIdx ? 'yours' : fresh(i) ? (coverage[i]?.at ? ago(coverage[i].at) : 'on') : 'waiting'}
+          </span>
+        </div>
+      ))}
+
+      {!!missing.length && (
+        <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.chalk, lineHeight: 1.55, marginTop: 8 }}>
+          Send the code to one man in {missing.length > 1 ? 'each of those groups' : `group ${missing[0] + 1}`}. He taps
+          Join with a code, picks his group, and posts their scores. Nothing settles for a hole until every group is in.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettleUp({ round, ledger }) {
   const [mode, setMode] = useState('direct');
   const loser = [...round.players].sort((a, b) => (ledger.money[a.id] || 0) - (ledger.money[b.id] || 0))[0];
@@ -1664,7 +1792,7 @@ function PressSheet({ round, setRound, h, onClose }) {
   );
 }
 
-function Play({ round, setRound, onQuit }) {
+function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] }) {
   const [h, setH] = useState(() => { for (let i = 0; i < round.holes; i++) if (!holeComplete(round, i)) return i; return round.holes - 1; });
   const [tab, setTab] = useState('play');
   const [info, setInfo] = useState(null);
@@ -1676,8 +1804,8 @@ function Play({ round, setRound, onQuit }) {
   const par = round.pars[h];
   const has = (k) => round.games.includes(k);
   const locked = !!round.locked;
-  /* One phone keeps the whole card. */
-  const mine = round.players;
+  const mine = scope && scope.length ? round.players.filter(p => scope.includes(p.id)) : round.players;
+  const scoped = !!(scope && scope.length);
   const missing = Array.from({ length: round.holes }, (_, i) => i).filter(i => !holeComplete(round, i));
 
   const setScore = (pid, v) => { if (locked) return; setRound(r => ({ ...r, scores: { ...r.scores, [h]: { ...(r.scores[h] || {}), [pid]: v } } })); };
@@ -1714,6 +1842,7 @@ function Play({ round, setRound, onQuit }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '13px 16px 8px' }}>
         <div>
           <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 13, color: C.chalk }}>{APP_NAME}<span style={{ color: C.ink }}> GB</span></div>
+          {round.code && <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 12, letterSpacing: '0.12em', color: C.ink, marginTop: 2 }}>#{round.code}</div>}
         </div>
         <div style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9.5, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.5 }}>
           {round.course ? <>{round.course}<br /></> : null}
@@ -1735,6 +1864,16 @@ function Play({ round, setRound, onQuit }) {
 
       {tab === 'play' && (
         <div style={{ padding: '0 16px' }}>
+          {round.code && <GroupStatus round={round} coverage={coverage} meIdx={(groupNo || 1) - 1} />}
+
+          {scoped && (
+            <div style={{ background: C.card2, borderRadius: 11, padding: '10px 12px', marginBottom: 12 }}>
+              <Eyebrow style={{ color: C.ink }}>you are keeping group {groupNo}</Eyebrow>
+              <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.chalk, marginTop: 3, lineHeight: 1.5 }}>
+                Post these {mine.length}. Everything else on the leaderboard comes from the other groups' phones.
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 3, marginBottom: 12, overflowX: 'auto', paddingBottom: 3 }}>
             {Array.from({ length: round.holes }).map((_, i) => (
               <button key={i} onClick={() => setH(i)} style={{
@@ -2013,11 +2152,18 @@ function Play({ round, setRound, onQuit }) {
 
           <div style={{ marginTop: 14, padding: '11px 13px', background: C.card2, borderRadius: 12 }}>
             <Eyebrow style={{ marginBottom: 6 }}>what happened</Eyebrow>
-            {!complete && !holeLog.length && (
-              <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-                Post every score to settle this hole
-              </div>
-            )}
+            {!complete && !holeLog.length && (() => {
+              const gs = round.groups || [];
+              const behind = gs.map((g, i) => ({ i, g })).filter(({ g }) => g.some(id => gross(round, id, h) == null));
+              const others = behind.filter(({ i }) => i !== (groupNo || 1) - 1);
+              return (
+                <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+                  {gs.length > 1 && others.length && !behind.some(({ i }) => i === (groupNo || 1) - 1)
+                    ? `Your four are in. Waiting on group ${others.map(({ i }) => i + 1).join(' and ')}.`
+                    : 'Post every score to settle this hole'}
+                </div>
+              );
+            })()}
             {holeLog.map((l, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
                 <span style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, minWidth: 52, paddingTop: 2, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -2041,6 +2187,7 @@ function Play({ round, setRound, onQuit }) {
 
       {tab === 'money' && (
         <div style={{ padding: '4px 16px' }}>
+          {round.code && <CodeCard code={round.code} />}
           <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 25, color: C.chalk, letterSpacing: '-0.02em' }}>Leaderboard</div>
           <Eyebrow style={{ marginBottom: 16, marginTop: 3 }}>through {playedHoles(round).length} hole{playedHoles(round).length === 1 ? '' : 's'}</Eyebrow>
           <Standings round={round} ledger={ledger} />
@@ -2081,7 +2228,7 @@ function Play({ round, setRound, onQuit }) {
 
           <HoleFeed round={round} ledger={ledger} />
 
-          {!locked && (
+          {!locked && !guest && (
             <Btn kind="solid" onClick={() => setConfirming(true)} style={{ width: '100%', padding: 16, fontSize: 15, marginTop: 26 }}>
               Finish the round
             </Btn>
@@ -2215,8 +2362,150 @@ function Play({ round, setRound, onQuit }) {
   );
 }
 
+/* ==========================================================================
+   GROUP CODES
+   The host publishes the round under a five digit code. Anyone in the group
+   can punch in that code on their own phone and follow along read only.
+   Published rounds sit in shared storage, so treat the code like a door key.
+   ========================================================================== */
+
+const gameKey = (code) => `ugb:game:${code}`;
+
+/* Six characters out of 31, which is about 887 million codes. No 0/O and no
+   1/I/L, because somebody is going to read this off a phone in the sun. */
+const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const CODE_LEN = 6;
+const rollCode = () => Array.from({ length: CODE_LEN }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+const cleanCode = (v) => (v || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, CODE_LEN);
+
+async function freshCode() {
+  if (!SHARING_ON) return null;   // solo mode: no code, nothing published
+  for (let i = 0; i < 8; i++) {
+    const c = rollCode();
+    let taken = false;
+    try { await storage.get(gameKey(c), true); taken = true; } catch { /* free */ }
+    if (!taken) { try { await storage.get(tripKey(c), true); taken = true; } catch { /* free */ } }
+    if (!taken) return c;
+  }
+  return rollCode();
+}
+
+/* Per hole data every scorer owns for their own foursome. Everything else is
+   config the host owns. Split this way, two groups can post at the same time
+   without stepping on each other. */
+const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams'];
+const cardKey = (code, gi) => `${gameKey(code)}:c${gi}`;
+
+const emptyCard = () => Object.fromEntries(CARD_FIELDS.map(k => [k, {}]));
+
+/* Trim a card down to the players this device is responsible for. */
+function scopeCard(round, ids) {
+  const c = emptyCard();
+  for (const h in round.scores || {}) {
+    const kept = Object.entries(round.scores[h] || {}).filter(([pid]) => ids.includes(pid));
+    if (kept.length) c.scores[h] = Object.fromEntries(kept);
+  }
+  for (const h in round.junk || {}) {
+    for (const t in round.junk[h] || {}) {
+      const kept = (round.junk[h][t] || []).filter(pid => ids.includes(pid));
+      if (kept.length) { c.junk[h] = c.junk[h] || {}; c.junk[h][t] = kept; }
+    }
+  }
+  ['wolf', 'hammer', 'bbb', 'holeTeams'].forEach(k => { c[k] = round[k] || {}; });
+  return c;
+}
+
+function mergeRound(config, cards) {
+  const out = { ...config, ...emptyCard() };
+  for (const c of cards) {
+    if (!c) continue;
+    for (const h in c.scores || {}) out.scores[h] = { ...(out.scores[h] || {}), ...c.scores[h] };
+    for (const h in c.junk || {}) {
+      out.junk[h] = out.junk[h] || {};
+      for (const t in c.junk[h]) out.junk[h][t] = [...new Set([...(out.junk[h][t] || []), ...c.junk[h][t]])];
+    }
+    ['wolf', 'hammer', 'bbb', 'holeTeams'].forEach(k => {
+      for (const h in c[k] || {}) if (c[k][h] != null) out[k][h] = c[k][h];
+    });
+  }
+  return out;
+}
+
+async function publishConfig(round) {
+  if (!round?.code) return;
+  const config = { ...round };
+  CARD_FIELDS.forEach(k => delete config[k]);
+  await storage.set(gameKey(round.code), JSON.stringify({ config, at: Date.now() }), true);
+}
+
+async function publishCard(code, gi, card) {
+  if (!code) return;
+  await storage.set(cardKey(code, gi), JSON.stringify({ card, at: Date.now() }), true);
+}
+
+async function pullConfig(code) {
+  const r = await storage.get(gameKey(code), true);
+  if (!r?.value) throw new Error('empty');
+  const d = JSON.parse(r.value);
+  return d.config ? d : { config: d.round, at: d.at };   // tolerate an older single blob
+}
+
+/* Just the timestamps, so we can tell who is actually out there posting. */
+async function pullCardMeta(code, groupCount) {
+  const out = [];
+  for (let i = 0; i < Math.max(1, groupCount); i++) {
+    try { const r = await storage.get(cardKey(code, i), true); out.push({ on: true, at: JSON.parse(r.value).at || 0 }); }
+    catch { out.push({ on: false, at: 0 }); }
+  }
+  return out;
+}
+
+async function pullCards(code, groupCount) {
+  const out = [];
+  for (let i = 0; i < Math.max(1, groupCount); i++) {
+    try { const r = await storage.get(cardKey(code, i), true); out.push(JSON.parse(r.value).card); }
+    catch { out.push(null); }
+  }
+  return out;
+}
+
+/* Everything a follower or a second scorer needs, already stitched together. */
+async function pull(code) {
+  const { config, at } = await pullConfig(code);
+  const cards = await pullCards(code, (config.groups || [[]]).length);
+  return { round: mergeRound(config, cards), config, cards, at };
+}
+
+const publish = (round) => publishConfig(round);
+
+const ago = (ts) => {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  return `${Math.round(s / 3600)} hr ago`;
+};
+
+/* --- the code, shown big --- */
+function CodeCard({ code, note }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div style={{ background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 14, padding: '16px 16px 14px', marginBottom: 16 }}>
+      <Eyebrow style={{ color: C.ink }}>group code</Eyebrow>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+        <span style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 32, letterSpacing: '0.14em', color: C.chalk, lineHeight: 1 }}>{code}</span>
+        <Btn onClick={() => {
+          try { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { setCopied(false); }
+        }} style={{ marginLeft: 'auto', fontSize: 11 }}>{copied ? 'Copied' : 'Copy'}</Btn>
+      </div>
+      <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 9, lineHeight: 1.5 }}>
+        {note || 'Text this to the group. Anyone who taps Join with a code and enters it can watch the leaderboard from their own phone.'}
+      </div>
+    </div>
+  );
+}
+
 /* --- landing --- */
-function Home({ onNew, onTrip, resume, tripResume, theme, setTheme }) {
+function Home({ onNew, onTrip, onJoin, resume, tripResume, theme, setTheme }) {
   return (
     <div style={{ padding: '52px 18px 40px', maxWidth: 520, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 34 }}>
@@ -2248,10 +2537,238 @@ function Home({ onNew, onTrip, resume, tripResume, theme, setTheme }) {
       )}
 
       <Btn onClick={onNew} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a round</Btn>
-      <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16 }}>Start a trip</Btn>
+      <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: SHARING_ON ? 10 : 0 }}>Start a trip</Btn>
+      {SHARING_ON && <Btn onClick={onJoin} style={{ width: '100%', padding: '20px', fontSize: 16 }}>Join with a code</Btn>}
 
       <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 18, lineHeight: 1.6 }}>
-        One phone keeps the card for the group. A trip is a stack of rounds on one leaderboard.
+        {SHARING_ON
+          ? 'One person keeps the card. Everybody else joins with the code and watches the money move. A trip is a stack of rounds on one leaderboard.'
+          : 'One phone keeps the card for the group. A trip is a stack of rounds on one leaderboard.'}
+      </div>
+    </div>
+  );
+}
+
+/* --- join --- */
+function Join({ onFound, onBack }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const ready = cleanCode(code).length === CODE_LEN;
+
+  const [found, setFound] = useState(null);
+
+  const go = async () => {
+    const c = cleanCode(code);
+    if (c.length !== CODE_LEN) { setErr(`A code is ${CODE_LEN} characters.`); return; }
+    setBusy(true); setErr(null);
+    try {
+      const { kind, data } = await pullAny(c);
+      const groups = kind === 'game' ? (data.round.groups || []) : [];
+      if (kind === 'game' && groups.length > 1) setFound({ code: c, kind, data, groups });
+      else onFound(c, kind, data, null);
+    } catch { setErr(`Nothing running under ${c}. Check the code with whoever is keeping the card.`); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ padding: '48px 18px 40px', maxWidth: 520, margin: '0 auto' }}>
+      <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 26, color: C.chalk, letterSpacing: '-0.025em' }}>Join with a code</div>
+      <div style={{ fontFamily: F_DISP, fontSize: 13.5, color: C.muted, marginTop: 6, marginBottom: 22, lineHeight: 1.5 }}>
+        Six characters from whoever is keeping the card. Works for a single round or a whole trip.
+      </div>
+
+      {found && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 17, color: C.chalk, marginBottom: 4 }}>{found.data.round.course || 'Round'} is running</div>
+          <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
+            {found.groups.length} groups out there. Watch along, or keep the card for your own foursome.
+          </div>
+          <Btn onClick={() => onFound(found.code, 'game', found.data, null)} style={{ width: '100%', padding: 15, marginBottom: 12 }}>
+            Just watching
+          </Btn>
+          <Eyebrow style={{ marginBottom: 8 }}>or keep score for</Eyebrow>
+          {found.groups.map((g, gi) => (
+            <Btn key={gi} onClick={() => onFound(found.code, 'game', found.data, gi)} style={{ width: '100%', padding: 13, marginBottom: 6, fontSize: 12.5 }}>
+              Group {gi + 1} · {g.map(id => (found.data.round.players.find(p => p.id === id) || {}).name).filter(Boolean).join(', ')}
+            </Btn>
+          ))}
+          <Btn onClick={() => { setFound(null); setCode(''); }} style={{ width: '100%', padding: 13, marginTop: 8 }}>Different code</Btn>
+        </div>
+      )}
+
+      {!found && <><input value={code} inputMode="text" autoFocus
+        onChange={e => { setCode(cleanCode(e.target.value)); setErr(null); }}
+        placeholder="XXXXXX" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+        style={{ ...inputStyle, fontFamily: F_MONO, fontSize: 32, fontWeight: 700, letterSpacing: '0.18em', textAlign: 'center', padding: '18px 10px', marginBottom: 12 }} />
+
+      {err && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.down, lineHeight: 1.5, marginBottom: 12 }}>{err}</div>}
+
+      <Btn kind="solid" onClick={go} disabled={busy || !ready} style={{ width: '100%', padding: 17, fontSize: 15, marginBottom: 8 }}>
+        {busy ? 'Looking...' : 'Find the game'}
+      </Btn></>}
+      <Btn onClick={onBack} style={{ width: '100%', padding: 15 }}>Back</Btn>
+    </div>
+  );
+}
+
+/* --- read only follower view --- */
+/* A guest scorer. Owns exactly one group's card, polls for the rest. */
+function ScoreKeeper({ code, gi, initial, onLeave }) {
+  const [config, setConfig] = useState(initial.config);
+  const [cards, setCards] = useState(initial.cards);
+  const [stale, setStale] = useState(false);
+  const [coverage, setCoverage] = useState([]);
+  const dirty = useRef(false);
+
+  /* claim the group straight away so the host can see somebody has it */
+  useEffect(() => { publishCard(code, gi, initial.cards[gi] || emptyCard()).catch(() => {}); }, []); // eslint-disable-line
+
+  const scope = (config.groups || [[]])[gi] || [];
+  const round = useMemo(() => mergeRound(config, cards), [config, cards]);
+
+  /* pull everybody else's cards, keep our own local copy authoritative */
+  const refresh = async () => {
+    try {
+      const { config: cfg } = await pullConfig(code);
+      const fresh = await pullCards(code, (cfg.groups || [[]]).length);
+      setConfig(cfg);
+      setCards(prev => fresh.map((c, i) => (i === gi ? (prev[i] || c) : c)));
+      setCoverage(await pullCardMeta(code, (cfg.groups || [[]]).length));
+      setStale(false);
+    } catch { setStale(true); }
+  };
+  useEffect(() => { const t = setInterval(refresh, 12000); return () => clearInterval(t); }, [code, gi]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!dirty.current) return;
+    const t = setTimeout(() => { publishCard(code, gi, cards[gi] || emptyCard()).catch(() => {}); }, 1200);
+    return () => clearTimeout(t);
+  }, [cards, code, gi]);
+
+  const setRound = (upd) => {
+    dirty.current = true;
+    setCards(prev => {
+      const cur = mergeRound(config, prev);
+      const next = typeof upd === 'function' ? upd(cur) : upd;
+      const out = [...prev];
+      out[gi] = scopeCard(next, scope);
+      return out;
+    });
+  };
+
+  return (
+    <>
+      {stale && (
+        <div style={{ padding: '9px 16px', background: C.card2, fontFamily: F_MONO, fontSize: 10, color: C.down }}>
+          Cannot reach the other groups. Your scores are saved and will sync.
+        </div>
+      )}
+      <Play round={round} setRound={setRound} onQuit={onLeave} scope={scope} groupNo={gi + 1} guest coverage={coverage} />
+    </>
+  );
+}
+
+function Viewer({ code, initial, onLeave }) {
+  const [data, setData] = useState(initial);
+  const [tab, setTab] = useState('money');
+  const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
+
+  const refresh = async () => {
+    setBusy(true);
+    try { setData(await pull(code)); setStale(false); }
+    catch { setStale(true); }
+    setBusy(false);
+  };
+
+  useEffect(() => {
+    const t = setInterval(refresh, 12000);
+    return () => clearInterval(t);
+  }, [code]); // eslint-disable-line
+
+  const round = data.round;
+  const n = round.players.length;
+  const ledger = useMemo(() => fullLedger(round), [round]);
+  const done = playedHoles(round).length;
+
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', paddingBottom: 86 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '13px 16px 8px' }}>
+        <div>
+          <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 15, letterSpacing: '0.1em', color: C.ink }}>#{code}</div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: 2 }}>watching</div>
+        </div>
+        <div style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9.5, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.5 }}>
+          {round.course ? <>{round.course}<br /></> : null}
+          {round.games.map(k => gameName(k, n)).join(' · ')}
+        </div>
+        <button onClick={onLeave} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 17, cursor: 'pointer', padding: 0 }}>×</button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 12px' }}>
+        <span style={{ fontFamily: F_MONO, fontSize: 10, color: stale ? C.down : C.muted }}>
+          {stale ? 'Could not reach the card' : `through ${done} hole${done === 1 ? '' : 's'} · updated ${ago(data.at)}`}
+        </span>
+        <Btn onClick={refresh} disabled={busy} style={{ marginLeft: 'auto', fontSize: 10.5, padding: '7px 11px' }}>{busy ? '...' : 'Refresh'}</Btn>
+      </div>
+
+      {round.locked && (
+        <div style={{ margin: '0 16px 12px', padding: '11px 13px', background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 12 }}>
+          <Eyebrow style={{ color: C.ink }}>round is final</Eyebrow>
+          <div style={{ fontFamily: F_DISP, fontWeight: 600, fontSize: 12.5, color: C.muted, marginTop: 2 }}>Cards are in. This is what everybody owes.</div>
+        </div>
+      )}
+
+      {tab === 'money' && (
+        <div style={{ padding: '0 16px' }}>
+          <Standings round={round} ledger={ledger} />
+          <SettleUp round={round} ledger={ledger} />
+          <HoleFeed round={round} ledger={ledger} />
+          <div style={{ height: 12 }} />
+        </div>
+      )}
+
+      {tab === 'card' && (
+        <div style={{ padding: '0 10px', overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: F_MONO, fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th style={{ ...cell, position: 'sticky', left: 0, background: C.felt }} />
+                {round.pars.map((_, i) => <th key={i} style={{ ...cell, color: C.muted }}>{i + 1}</th>)}
+                <th style={{ ...cell, color: C.chalk }}>T</th>
+              </tr>
+              <tr>
+                <td style={{ ...cell, textAlign: 'left', color: C.muted, position: 'sticky', left: 0, background: C.felt }}>par</td>
+                {round.pars.map((p, i) => <td key={i} style={{ ...cell, color: C.muted }}>{p}</td>)}
+                <td style={{ ...cell, color: C.muted }}>{round.pars.reduce((a, b) => a + b, 0)}</td>
+              </tr>
+            </thead>
+            <tbody>
+              {round.players.map(p => {
+                const tot = round.pars.reduce((s, _, i) => s + (gross(round, p.id, i) || 0), 0);
+                return (
+                  <tr key={p.id}>
+                    <td style={{ ...cell, textAlign: 'left', color: C.chalk, fontFamily: F_DISP, fontWeight: 700, position: 'sticky', left: 0, background: C.felt, paddingRight: 7 }}>{short(p.name)}</td>
+                    {round.pars.map((pr, i) => {
+                      const sc = gross(round, p.id, i), rel = sc == null ? null : sc - pr;
+                      return <td key={i} style={{ ...cell, color: rel == null ? C.line : rel <= -1 ? C.up : rel === 0 ? C.chalk : rel === 1 ? C.muted : C.down }}>{sc ?? '·'}</td>;
+                    })}
+                    <td style={{ ...cell, color: C.chalk, fontWeight: 700 }}>{tot || '·'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', background: C.card, borderTop: `1px solid ${C.line}`, padding: '8px 16px 14px' }}>
+        <div style={{ display: 'flex', gap: 6, width: '100%', maxWidth: 490 }}>
+          {[['money', 'Leaderboard'], ['card', 'Card']].map(([k, l]) => (
+            <Btn key={k} active={tab === k} onClick={() => setTab(k)} style={{ flex: 1, padding: '12px 4px' }}>{l}</Btn>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -2262,6 +2779,21 @@ function Home({ onNew, onTrip, resume, tripResume, theme, setTheme }) {
    A trip is a bag of rounds sharing one roster. Money carries across every
    round so the whole week lands on one leaderboard.
    ========================================================================== */
+
+const tripKey = (code) => `ugb:trip:${code}`;
+
+async function publishTrip(trip) {
+  if (!trip?.code) return;
+  await storage.set(tripKey(trip.code), JSON.stringify({ trip, at: Date.now() }), true);
+}
+
+/* A code can belong to a single round or a whole trip. Try both. */
+async function pullAny(code) {
+  try { const d = await pull(code); return { kind: 'game', data: d }; } catch { /* not a round */ }
+  const r = await storage.get(tripKey(code), true);
+  if (!r?.value) throw new Error('empty');
+  return { kind: 'trip', data: JSON.parse(r.value) };
+}
 
 /* A round only lands on the trip board once it has been locked in. Live
    rounds still show their own numbers, they just do not move the total yet. */
@@ -2327,6 +2859,7 @@ function TripHub({ trip, onAddRound, onOpenRound, onLeave }) {
         <button onClick={onLeave} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 17, cursor: 'pointer', padding: 0 }}>×</button>
       </div>
 
+      {trip.code && <CodeCard code={trip.code} note="Text this to the group. Anyone who joins with it follows the whole trip, every round and the running total." />}
 
       <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 9 }}>
         <Eyebrow>trip standings</Eyebrow>
@@ -2400,18 +2933,94 @@ function TripHub({ trip, onAddRound, onOpenRound, onLeave }) {
   );
 }
 
+/* --- follower trip view --- */
+function TripView({ code, initial, onLeave }) {
+  const [data, setData] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
+  const [open, setOpen] = useState(null);
+
+  const refresh = async () => {
+    setBusy(true);
+    try { const r = await storage.get(tripKey(code), true); setData(JSON.parse(r.value)); setStale(false); }
+    catch { setStale(true); }
+    setBusy(false);
+  };
+  useEffect(() => { const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [code]); // eslint-disable-line
+
+  const trip = data.trip;
+  const { money, rounds, ledger, counted, live } = useMemo(() => tripTotals(trip), [trip]);
+  const shell = rosterAs(trip);
+  const openRound = open != null ? rounds.find(r => r.id === open) : null;
+
+  if (openRound) {
+    const r = openRound.round, led = fullLedger(r), n = r.players.length;
+    return (
+      <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 16px 40px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+          <Btn onClick={() => setOpen(null)} style={{ fontSize: 11 }}>Back to trip</Btn>
+          <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9.5, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            {openRound.label}
+          </span>
+        </div>
+        <Standings round={r} ledger={led} />
+        <HoleFeed round={r} ledger={led} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 16px 40px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 10 }}>
+        <div>
+          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 24, color: C.chalk, letterSpacing: '-0.025em' }}>{trip.name}</div>
+          <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 12, letterSpacing: '0.12em', color: C.ink, marginTop: 3 }}>#{code} · watching</div>
+        </div>
+        <button onClick={onLeave} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 17, cursor: 'pointer', padding: 0 }}>×</button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <span style={{ fontFamily: F_MONO, fontSize: 10, color: stale ? C.down : C.muted }}>
+          {stale ? 'Could not reach the trip' : `${counted} counted${live ? `, ${live} live` : ''} · updated ${ago(data.at)}`}
+        </span>
+        <Btn onClick={refresh} disabled={busy} style={{ marginLeft: 'auto', fontSize: 10.5, padding: '7px 11px' }}>{busy ? '...' : 'Refresh'}</Btn>
+      </div>
+
+      <Eyebrow style={{ marginBottom: 9 }}>trip standings</Eyebrow>
+      {counted ? (
+        <>
+          <Standings round={shell} ledger={ledger} />
+          <SettleUp round={shell} ledger={ledger} />
+        </>
+      ) : (
+        <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+          Nothing counted yet. Rounds join the total once they are locked in. Tap a live round below to see how it is going.
+        </div>
+      )}
+
+      <Eyebrow style={{ margin: '26px 0 9px' }}>the rounds</Eyebrow>
+      {[...rounds].reverse().map(r => <RoundRow key={r.id} trip={trip} r={r} onOpen={() => setOpen(r.id)} />)}
+      {!rounds.length && <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted }}>Nobody has teed off yet.</div>}
+    </div>
+  );
+}
+
 /* --- trip setup --- */
 function TripSetup({ onCreate, onBack }) {
   const [name, setName] = useState('');
   const [rows, setRows] = useState(Array(4).fill(null).map(() => ({ name: '', hcp: '' })));
+  const [busy, setBusy] = useState(false);
   const filled = rows.filter(r => r.name.trim());
   const ready = name.trim() && filled.length >= 2;
 
   const set = (i, k, v) => setRows(r => { const c = r.map(x => ({ ...x })); c[i][k] = v; return c; });
 
-  const go = () => {
+  const go = async () => {
+    setBusy(true);
+    let code = null;
+    try { code = await freshCode(); } catch { /* offline, run it local */ }
     onCreate({
-      code: null, name: name.trim(),
+      code, name: name.trim(),
       roster: filled.map(r => ({ id: uid(), name: r.name.trim(), hcp: Number(r.hcp) || 0 })),
       rounds: [], createdAt: Date.now(),
     });
@@ -2440,8 +3049,8 @@ function TripSetup({ onCreate, onBack }) {
 
       <div style={{ display: 'flex', gap: 8 }}>
         <Btn onClick={onBack} style={{ flex: '0 0 88px' }}>Back</Btn>
-        <Btn kind="solid" disabled={!ready} onClick={go} style={{ flex: 1, padding: 16, fontSize: 15 }}>
-          {`Start the trip${filled.length ? ` with ${filled.length}` : ''}`}
+        <Btn kind="solid" disabled={!ready || busy} onClick={go} style={{ flex: 1, padding: 16, fontSize: 15 }}>
+          {busy ? 'Setting up...' : `Start the trip${filled.length ? ` with ${filled.length}` : ''}`}
         </Btn>
       </div>
     </div>
@@ -2461,6 +3070,8 @@ export default function App() {
   const [trip, setTrip] = useState(null);
   const [savedTrip, setSavedTrip] = useState(null);
   const [activeId, setActiveId] = useState(null); // which trip round is open
+  const [coverage, setCoverage] = useState([]);
+  const [view, setView] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const first = useRef(true), firstTrip = useRef(true);
 
@@ -2471,27 +3082,59 @@ export default function App() {
     document.head.appendChild(l);
   }, []);
 
-  /* Everything is saved to this device with localStorage, so an in-progress
-     round or trip survives closing the browser. */
   useEffect(() => {
-    try { const r = localStorage.getItem('ugb:round'); if (r) setSaved(JSON.parse(r)); } catch {}
-    try { const t = localStorage.getItem('ugb:trip'); if (t) setSavedTrip(JSON.parse(t)); } catch {}
-    try { const th = localStorage.getItem('ugb:theme'); if (th) setTheme(th); } catch {}
-    setLoaded(true);
+    (async () => {
+      try { const r = await storage.get('ugb:round'); if (r?.value) setSaved(JSON.parse(r.value)); } catch {}
+      try { const t = await storage.get('ugb:trip'); if (t?.value) setSavedTrip(JSON.parse(t.value)); } catch {}
+      try { const th = await storage.get('ugb:theme'); if (th?.value) setTheme(th.value); } catch {}
+      setLoaded(true);
+    })();
   }, []);
 
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    try {
-      if (round) localStorage.setItem('ugb:round', JSON.stringify(round));
-      else localStorage.removeItem('ugb:round');
-    } catch {}
+    (async () => {
+      try {
+        if (round) await storage.set('ugb:round', JSON.stringify(round));
+        else await storage.delete('ugb:round');
+      } catch {}
+    })();
   }, [round]);
+
+  useEffect(() => {
+    if (!round?.code) return;
+    const t = setTimeout(() => {
+      publishConfig(round).catch(() => {});
+      publishCard(round.code, 0, scopeCard(round, (round.groups || [[]])[0] || round.players.map(p => p.id))).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [round]);
+
+  /* more than one group means other phones are posting too, so fold them in */
+  useEffect(() => {
+    const gs = (round?.groups || []).length;
+    if (!round?.code || gs < 2) return;
+    const sync = async () => {
+      try {
+        const cards = await pullCards(round.code, gs);
+        setCoverage(await pullCardMeta(round.code, gs));
+        setRound(r => {
+          const mineIds = (r.groups || [[]])[0] || [];
+          const merged = mergeRound(r, cards.map((c, i) => (i === 0 ? scopeCard(r, mineIds) : c)));
+          return { ...r, ...Object.fromEntries(CARD_FIELDS.map(k => [k, merged[k]])) };
+        });
+      } catch { /* offline, keep playing */ }
+    };
+    const t = setInterval(sync, 12000);
+    return () => clearInterval(t);
+  }, [round?.code, (round?.groups || []).length]); // eslint-disable-line
 
   useEffect(() => {
     if (firstTrip.current) { firstTrip.current = false; return; }
     if (!trip) return;
-    try { localStorage.setItem('ugb:trip', JSON.stringify(trip)); } catch {}
+    (async () => { try { await storage.set('ugb:trip', JSON.stringify(trip)); } catch {} })();
+    const t = setTimeout(() => { publishTrip(trip).catch(() => {}); }, 1500);
+    return () => clearTimeout(t);
   }, [trip]);
 
   /* the round currently open inside a trip */
@@ -2501,9 +3144,12 @@ export default function App() {
     rounds: t.rounds.map(r => r.id === activeId ? { ...r, round: typeof upd === 'function' ? upd(r.round) : upd } : r),
   }));
 
-  const startRound = (r) => {
-    setRound({ ...r, code: null });
-    setScreen('play');
+  const startRound = async (r) => {
+    let code = null;
+    try { code = await freshCode(); } catch {}
+    const full = { ...r, code };
+    setRound(full); setScreen('play');
+    if (code) publish(full).catch(() => {});
   };
 
   const addTripRound = (r) => {
@@ -2513,7 +3159,7 @@ export default function App() {
     setActiveId(id); setScreen('tripplay');
   };
 
-  const pickTheme = (t) => { setTheme(t); try { localStorage.setItem('ugb:theme', t); } catch {} };
+  const pickTheme = (t) => { setTheme(t); storage.set('ugb:theme', t).catch(() => {}); };
 
   const shell = (kids) => (
     <div style={{ minHeight: '100vh', background: C.felt, color: C.chalk, WebkitFontSmoothing: 'antialiased' }}>
@@ -2530,8 +3176,24 @@ export default function App() {
 
   if (!loaded) return shell(null);
 
+  if (screen === 'join') return shell(
+    <Join onBack={() => setScreen('home')} onFound={(code, kind, data, gi) => {
+      setView({ code, kind, data, gi });
+      setScreen(kind === 'trip' ? 'tripview' : gi != null ? 'keep' : 'view');
+    }} />
+  );
+  if (screen === 'keep' && view) return shell(
+    <ScoreKeeper code={view.code} gi={view.gi} initial={view.data} onLeave={() => { setView(null); setScreen('home'); }} />
+  );
+  if (screen === 'view' && view) return shell(
+    <Viewer code={view.code} initial={view.data} onLeave={() => { setView(null); setScreen('home'); }} />
+  );
+  if (screen === 'tripview' && view) return shell(
+    <TripView code={view.code} initial={view.data} onLeave={() => { setView(null); setScreen('home'); }} />
+  );
+
   if (screen === 'tripsetup') return shell(
-    <TripSetup onBack={() => setScreen('home')} onCreate={(t) => { setTrip(t); setScreen('trip'); }} />
+    <TripSetup onBack={() => setScreen('home')} onCreate={(t) => { setTrip(t); setScreen('trip'); publishTrip(t).catch(() => {}); }} />
   );
 
   if (screen === 'trip' && trip) return shell(
@@ -2546,13 +3208,15 @@ export default function App() {
   );
 
   if (screen === 'tripplay' && tripRound) return shell(
-    <Play round={tripRound} setRound={setTripRound} onQuit={() => setScreen('trip')} />
+    <Play round={{ ...tripRound, code: trip.code }} setRound={setTripRound} onQuit={() => setScreen('trip')}
+      scope={trip.code && (tripRound.groups || []).length > 1 ? tripRound.groups[0] : null} groupNo={1} coverage={coverage} />
   );
 
   if (screen === 'setup') return shell(<Setup onStart={startRound} onBack={() => setScreen('home')} />);
 
   if (screen === 'play' && round) return shell(
-    <Play round={round} setRound={setRound} onQuit={() => { setSaved(round); setRound(null); setScreen('home'); }} />
+    <Play round={round} setRound={setRound} onQuit={() => { setSaved(round); setRound(null); setScreen('home'); }}
+      scope={round.code && (round.groups || []).length > 1 ? round.groups[0] : null} groupNo={1} coverage={coverage} />
   );
 
   return shell(
@@ -2560,6 +3224,7 @@ export default function App() {
       theme={theme} setTheme={pickTheme}
       onNew={() => setScreen('setup')}
       onTrip={() => setScreen('tripsetup')}
+      onJoin={() => setScreen('join')}
       resume={saved?.games ? {
         label: `${saved.games.map(k => gameName(k, saved.players.length)).join(' + ')} · ${saved.players.map(p => p.name).join(', ')}`,
         go: () => { setRound(saved); setScreen('play'); },

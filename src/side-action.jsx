@@ -360,9 +360,61 @@ function bankerTransfers(map, players, bankerId) {
 }
 
 /* ==========================================================================
-   COURSE LOOKUP — OpenGolfAPI (free, keyless, ODbL)
+   COURSE LOOKUP
+
+   Two sources, tried in order:
+     1. GolfCourseAPI — a full database that returns every tee with per-hole
+        par, handicap index, and yardage. This is what makes "pick any course,
+        pick any tees, it all fills in" work. It needs a key, which must live
+        on a server, not in the page — so the app calls a relay (GOLF_PROXY)
+        that holds the key. (GOLF_API_KEY calls it directly; only for testing,
+        since a browser key is exposed and usually blocked by CORS.)
+     2. OpenGolfAPI — free and keyless, used when no relay is set up. Patchy
+        coverage and a single tee, but better than nothing.
+   Built-in courses (baked into the app) and the manual editor always work.
    ========================================================================== */
 
+const GOLF_PROXY = (_CFG.GOLF_PROXY || '').trim().replace(/\/+$/, '');
+const GOLF_API_KEY = (_CFG.GOLF_API_KEY || '').trim();
+const COURSE_DB_ON = !!(GOLF_PROXY || GOLF_API_KEY);
+
+/* Flatten a GolfCourseAPI course into { id, name, city, state, tees:[...] },
+   each tee { label, total, par[], hcp[], yards[] }. */
+function normalizeDbCourse(c) {
+  const tees = [];
+  const addSet = (arr, tag) => (arr || []).forEach(t => {
+    const holes = t.holes || [];
+    if (holes.length < 9) return;
+    tees.push({
+      label: `${t.tee_name || 'Tee'}${tag ? ` ${tag}` : ''}`,
+      total: Number(t.total_yards) || holes.reduce((a, h) => a + (Number(h.yardage) || 0), 0),
+      par: holes.map(h => Number(h.par) || null),
+      hcp: holes.map(h => Number(h.handicap) || null),
+      yards: holes.map(h => Number(h.yardage) || null),
+    });
+  });
+  addSet(c.tees?.male, ''); addSet(c.tees?.female, 'W');
+  return {
+    id: c.id, name: c.course_name || c.club_name || 'Course',
+    city: c.location?.city, state: c.location?.state, tees,
+  };
+}
+
+/* Search the full database (via the relay, or directly if only a key is set). */
+async function searchCourseDb(q) {
+  let res;
+  if (GOLF_PROXY) {
+    res = await fetch(`${GOLF_PROXY}?search_query=${encodeURIComponent(q)}`);
+  } else {
+    res = await fetch(`https://api.golfcourseapi.com/v1/search?search_query=${encodeURIComponent(q)}`,
+      { headers: { Authorization: `Key ${GOLF_API_KEY}` } });
+  }
+  if (!res.ok) throw new Error(`db ${res.status}`);
+  const d = await res.json();
+  return (d.courses || []).map(normalizeDbCourse).filter(c => c.tees.length);
+}
+
+/* --- OpenGolfAPI (keyless fallback) --- */
 const OG = 'https://api.opengolfapi.org/api/v1';
 
 async function searchCourses({ q, lat, lng, radius = 30 }) {
@@ -905,6 +957,7 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState(0);
   const [openCourse, setOpenCourse] = useState(BUILT_IN_COURSES.length === 1 ? BUILT_IN_COURSES[0].id : null);
+  const [picked, setPicked] = useState(null);   // a searched course whose tees are being chosen
 
   /* Drop a built-in course onto the card. Full 18-hole arrays; the round slices
      to however many holes are being played. */
@@ -955,6 +1008,23 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     setBusy(false);
   };
 
+  /* Apply a chosen tee from a searched (database) course. Fill any gaps in the
+     data with defaults; only trust the handicap row if it is a full 1-18 set. */
+  const fill18 = (arr, def) => Array.from({ length: 18 }, (_, i) => (arr && arr[i] != null) ? arr[i] : def[i]);
+  const validSi = (a) => a && a.length >= 18 && a.slice(0, 18).every(x => x >= 1 && x <= 18) && new Set(a.slice(0, 18)).size >= 18;
+  const applyDbTee = (course, tee) => {
+    setPars(fill18(tee.par, DEF_PAR));
+    setSi(validSi(tee.hcp) ? fill18(tee.hcp, DEF_SI) : [...DEF_SI]);
+    setYards(fill18(tee.yards, DEF_YDS).map(String));
+    setCourseName(`${course.name} · ${tee.label}`);
+    setPicked(null); setList(null); setErr(null);
+  };
+  const searchByName = () => {
+    if (!q.trim()) return;
+    setPicked(null);
+    run(() => COURSE_DB_ON ? searchCourseDb(q.trim()) : searchCourses({ q: q.trim() }));
+  };
+
   const shownBuiltIns = BUILT_IN_COURSES.filter(matchBuiltIn);
 
   return (
@@ -996,24 +1066,58 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         <Btn onClick={nearMe} style={{ flex: 1, fontSize: 12 }}>Courses near me</Btn>
-        <Btn onClick={() => q.trim() && run(() => searchCourses({ q: q.trim() }))} disabled={!q.trim()} style={{ flex: 1, fontSize: 12 }}>Search by name</Btn>
+        <Btn onClick={searchByName} disabled={!q.trim()} style={{ flex: 1, fontSize: 12 }}>Search by name</Btn>
       </div>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Course name" style={{ ...inputStyle, marginBottom: 8 }} />
+      <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchByName()} placeholder="Course name" style={{ ...inputStyle, marginBottom: 8 }} />
 
       {busy && <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.ink, padding: '6px 0' }}>Looking...</div>}
       {err && <div style={{ fontFamily: F_DISP, fontSize: 12, color: C.down, lineHeight: 1.5, marginBottom: 8 }}>{err}</div>}
 
-      {courseName && !list && (
+      {courseName && !list && !picked && (
         <div style={{ background: C.card2, borderRadius: 10, padding: '10px 12px', marginBottom: 10, border: `1px solid ${C.ball}` }}>
           <Eyebrow style={{ color: C.ink }}>playing</Eyebrow>
           <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 15, color: C.chalk, marginTop: 2 }}>{courseName}</div>
         </div>
       )}
 
-      {list && (
-        <div style={{ maxHeight: 240, overflowY: 'auto', marginBottom: 10 }}>
+      {/* a searched course is chosen — pick which tees */}
+      {picked && (
+        <div style={{ background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 12, padding: '11px 12px', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 9 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>{picked.name}</div>
+              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>{[picked.city, picked.state].filter(Boolean).join(', ')}</div>
+            </div>
+            <Btn onClick={() => setPicked(null)} style={{ marginLeft: 'auto', fontSize: 10.5, padding: '6px 9px' }}>Back</Btn>
+          </div>
+          <Eyebrow style={{ color: C.ink, marginBottom: 7 }}>which tees</Eyebrow>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {picked.tees.map((t, i) => {
+              const on = courseName === `${picked.name} · ${t.label}`;
+              return (
+                <Btn key={i} active={on} onClick={() => applyDbTee(picked, t)} style={{ flex: '1 1 68px', fontSize: 11.5, padding: '9px 4px', lineHeight: 1.25 }}>
+                  {t.label}<br /><span style={{ fontFamily: F_MONO, fontSize: 9, color: on ? C.onBall : C.muted }}>{t.total || '—'} yds</span>
+                </Btn>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {list && !picked && (
+        <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 10 }}>
           {!list.length && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, padding: '10px 0' }}>Nothing came back. Try a shorter name.</div>}
-          {list.map(c => (
+          {list.map(c => c.tees ? (
+            <div key={c.id} onClick={() => { setPicked(c); setList(null); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5, cursor: 'pointer' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{c.name}</div>
+                <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>
+                  {[c.city, c.state].filter(Boolean).join(', ')} · {c.tees.length} tee{c.tees.length === 1 ? '' : 's'}
+                </div>
+              </div>
+              <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, color: C.ink, whiteSpace: 'nowrap' }}>pick tees ▸</span>
+            </div>
+          ) : (
             <div key={c.id} onClick={() => pick(c)} style={{ padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5, cursor: 'pointer' }}>
               <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{c.course_name}</div>
               <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>
@@ -1050,7 +1154,7 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
       </div>
       <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
         Par {pars.slice(0, holes).reduce((a, b) => a + b, 0)}. Index decides which holes give strokes.<br />
-        Course data © OpenStreetMap contributors, ODbL, via OpenGolfAPI.
+        {COURSE_DB_ON ? 'Course data via GolfCourseAPI.' : 'Course data © OpenStreetMap contributors, ODbL, via OpenGolfAPI.'}
       </div>
     </div>
   );

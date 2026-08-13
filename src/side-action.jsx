@@ -931,24 +931,12 @@ function LineupBuilder({ names, count, lineup, setLineup, showTeams }) {
   );
 }
 
-/* Courses baked right into the app so they always show up, no database needed.
-   par + hcp (stroke index) drive every net game; yardages only feed the
-   Yardage game. Add more here the same way — one object per course. */
-const BUILT_IN_COURSES = [
-  {
-    id: 'tpc-rivers-bend',
-    name: "TPC River's Bend",
-    city: 'Maineville', state: 'OH',
-    par: [4, 4, 4, 4, 3, 5, 3, 5, 4, 4, 5, 3, 4, 4, 4, 3, 4, 5],
-    hcp: [5, 13, 1, 11, 15, 9, 17, 7, 3, 12, 6, 16, 10, 2, 4, 18, 8, 14],
-    tees: {
-      Black: [442, 405, 436, 344, 189, 568, 158, 553, 431, 388, 537, 191, 428, 461, 470, 213, 422, 544],
-      Blue:  [415, 375, 412, 315, 165, 543, 138, 524, 408, 369, 479, 168, 400, 434, 424, 207, 410, 529],
-      White: [384, 342, 335, 287, 150, 517, 120, 496, 366, 349, 457, 144, 363, 410, 378, 165, 369, 477],
-      Green: [332, 279, 279, 204, 117, 376, 90, 452, 313, 302, 423, 110, 328, 271, 320, 134, 314, 375],
-    },
-  },
-];
+/* Optional courses baked into the app that show up as a "your courses" quick
+   pick without a search. Empty now that live search covers every course,
+   including TPC River's Bend — everyone just searches for it. To pin a course
+   back to the top for everyone, add an object here:
+     { id, name, city, state, par:[18], hcp:[18], tees:{ TeeName:[18 yards] } } */
+const BUILT_IN_COURSES = [];
 
 function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYards, courseName, setCourseName }) {
   const [q, setQ] = useState('');

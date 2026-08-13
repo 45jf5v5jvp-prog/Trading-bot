@@ -62,7 +62,9 @@ const pointsLabel = (n) => (n === 3 ? '9 Point (Nines)' : `${2 * n - 1} Point`);
    ========================================================================== */
 
 const _CFG = (typeof window !== 'undefined' && window.SIDE_ACTION_CONFIG) || {};
-const SUPABASE_URL = (_CFG.SUPABASE_URL || '').replace(/\/+$/, '');
+/* Accept the URL however it was pasted: with or without a trailing slash, and
+   with or without the /rest/v1 suffix Supabase shows on its "Data API" page. */
+const SUPABASE_URL = (_CFG.SUPABASE_URL || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1$/, '');
 const SUPABASE_ANON_KEY = _CFG.SUPABASE_ANON_KEY || '';
 const SHARING_ON = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 

@@ -576,16 +576,25 @@ function calcVegas(round, stake) {
     const tms = round.players.length > 4 || round.blindDraw ? vegasTeamsAt(round, h) : teamsAt(round, h);
     if (!tms || tms.length < 2) continue;
     const par = round.pars[h];
+    const on = round.vegasFlip !== false;
     const info = tms.map(t => {
       const sc = t.map(id => net(round, id, h));
-      return { sc, birdie: round.vegasFlip !== false && sc.some(s => s <= par - 1) };
+      return {
+        sc,
+        grossBirdie: on && t.some(id => { const g = gross(round, id, h); return g != null && g <= par - 1; }),
+        netBirdie: on && sc.some(s => s <= par - 1),
+      };
     });
-    const anyBirdie = info.some(x => x.birdie);
+    const anyGross = info.some(x => x.grossBirdie);
     const maxPain = round.vegasPain === 'maxpain';
 
-    /* what team i's number reads as when it faces team j */
+    /* House rule: only a GROSS birdie flips. A NET birdie cancels the flip for
+       the team that has it, but never causes one.
+         maxpain - any gross birdie flips every team that has no net birdie
+         ditty   - your opponent's gross birdie flips you, unless you have a net
+                   birdie of your own to cancel it */
     const numFor = (i, j) => {
-      const flip = maxPain ? (anyBirdie && !info[i].birdie) : info[j].birdie;
+      const flip = maxPain ? (anyGross && !info[i].netBirdie) : (info[j].grossBirdie && !info[i].netBirdie);
       return combine(info[i].sc[0], info[i].sc[1], flip);
     };
 
@@ -606,10 +615,10 @@ function calcVegas(round, stake) {
 
     const shown = tms.map((t, i) => {
       const nat = combine(info[i].sc[0], info[i].sc[1], false);
-      const flipped = maxPain && anyBirdie && !info[i].birdie;
-      return `${tag(t)} ${flipped ? combine(info[i].sc[0], info[i].sc[1], true) : nat}${info[i].birdie ? '🐦' : ''} ${pts[i] > 0 ? '+' : ''}${pts[i]}`;
+      const flipped = maxPain && anyGross && !info[i].netBirdie;
+      return `${tag(t)} ${flipped ? combine(info[i].sc[0], info[i].sc[1], true) : nat}${info[i].netBirdie ? '🐦' : ''} ${pts[i] > 0 ? '+' : ''}${pts[i]}`;
     }).join('  ·  ');
-    const head = anyBirdie ? (maxPain ? 'Max pain, everybody flips. ' : 'Birdie flip. ') : '';
+    const head = anyGross ? (maxPain ? 'Max pain, everybody flips. ' : 'Birdie flip. ') : '';
     log.push({ h, text: head + shown, m });
   }
   return { money: total, points: null, log };

@@ -5,8 +5,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
    Scorecard first. Stack as many games as you want on top of it.
    ========================================================================== */
 
-const APP_NAME = 'ULTIMATE';
-const APP_SUB = 'GOLF BETTING';
+const APP_NAME = 'SIDE';
+const APP_SUB = 'ACTION';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -1857,7 +1857,7 @@ function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] })
     <div style={{ maxWidth: 520, margin: '0 auto', paddingBottom: 86 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '13px 16px 8px' }}>
         <div>
-          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 13, color: C.chalk }}>{APP_NAME}<span style={{ color: C.ink }}> GB</span></div>
+          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 13, color: C.chalk }}>{APP_NAME}<span style={{ color: C.ink }}> {APP_SUB}</span></div>
           {round.code && <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 12, letterSpacing: '0.12em', color: C.ink, marginTop: 2 }}>#{round.code}</div>}
         </div>
         <div style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9.5, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.5 }}>

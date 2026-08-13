@@ -879,12 +879,46 @@ function LineupBuilder({ names, count, lineup, setLineup, showTeams }) {
   );
 }
 
+/* Courses baked right into the app so they always show up, no database needed.
+   par + hcp (stroke index) drive every net game; yardages only feed the
+   Yardage game. Add more here the same way — one object per course. */
+const BUILT_IN_COURSES = [
+  {
+    id: 'tpc-rivers-bend',
+    name: "TPC River's Bend",
+    city: 'Maineville', state: 'OH',
+    par: [4, 4, 4, 4, 3, 5, 3, 5, 4, 4, 5, 3, 4, 4, 4, 3, 4, 5],
+    hcp: [5, 13, 1, 11, 15, 9, 17, 7, 3, 12, 6, 16, 10, 2, 4, 18, 8, 14],
+    tees: {
+      Black: [442, 405, 436, 344, 189, 568, 158, 553, 431, 388, 537, 191, 428, 461, 470, 213, 422, 544],
+      Blue:  [415, 375, 412, 315, 165, 543, 138, 524, 408, 369, 479, 168, 400, 434, 424, 207, 410, 529],
+      White: [384, 342, 335, 287, 150, 517, 120, 496, 366, 349, 457, 144, 363, 410, 378, 165, 369, 477],
+      Green: [332, 279, 279, 204, 117, 376, 90, 452, 313, 302, 423, 110, 328, 271, 320, 134, 314, 375],
+    },
+  },
+];
+
 function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYards, courseName, setCourseName }) {
   const [q, setQ] = useState('');
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState(0);
+  const [openCourse, setOpenCourse] = useState(BUILT_IN_COURSES.length === 1 ? BUILT_IN_COURSES[0].id : null);
+
+  /* Drop a built-in course onto the card. Full 18-hole arrays; the round slices
+     to however many holes are being played. */
+  const applyBuiltIn = (bc, tee) => {
+    setPars([...bc.par]);
+    setSi([...bc.hcp]);
+    setYards(bc.tees[tee].map(String));
+    setCourseName(`${bc.name} · ${tee}`);
+    setList(null); setErr(null);
+  };
+  const matchBuiltIn = (bc) => {
+    const s = q.trim().toLowerCase();
+    return !s || bc.name.toLowerCase().includes(s) || `${bc.city} ${bc.state}`.toLowerCase().includes(s);
+  };
 
   const run = async (fn) => {
     setBusy(true); setErr(null);
@@ -921,8 +955,45 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     setBusy(false);
   };
 
+  const shownBuiltIns = BUILT_IN_COURSES.filter(matchBuiltIn);
+
   return (
     <div style={{ marginBottom: 18 }}>
+      {!!shownBuiltIns.length && (
+        <div style={{ marginBottom: 12 }}>
+          <Eyebrow style={{ color: C.ink, marginBottom: 8 }}>your courses</Eyebrow>
+          {shownBuiltIns.map(bc => {
+            const open = openCourse === bc.id;
+            const par = bc.par.slice(0, holes).reduce((a, b) => a + b, 0);
+            return (
+              <div key={bc.id} style={{ background: C.card2, border: `1px solid ${open ? C.ball : 'transparent'}`, borderRadius: 12, padding: '11px 12px', marginBottom: 8 }}>
+                <div onClick={() => setOpenCourse(open ? null : bc.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>{bc.name}</div>
+                    <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>{bc.city}, {bc.state} · par {par}</div>
+                  </div>
+                  <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10.5, color: C.ink, whiteSpace: 'nowrap' }}>{open ? 'pick tees' : 'tap to pick'}</span>
+                </div>
+                {open && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                    {Object.keys(bc.tees).map(tee => {
+                      const on = courseName === `${bc.name} · ${tee}`;
+                      const yds = bc.tees[tee].slice(0, holes).reduce((a, b) => a + b, 0);
+                      return (
+                        <Btn key={tee} active={on} onClick={() => applyBuiltIn(bc, tee)} style={{ flex: '1 1 62px', fontSize: 12, padding: '9px 4px', lineHeight: 1.25 }}>
+                          {tee}<br /><span style={{ fontFamily: F_MONO, fontSize: 9, color: on ? C.onBall : C.muted }}>{yds} yds</span>
+                        </Btn>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, textAlign: 'center', marginTop: 2 }}>or search for another course below</div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         <Btn onClick={nearMe} style={{ flex: 1, fontSize: 12 }}>Courses near me</Btn>
         <Btn onClick={() => q.trim() && run(() => searchCourses({ q: q.trim() }))} disabled={!q.trim()} style={{ flex: 1, fontSize: 12 }}>Search by name</Btn>
@@ -1020,7 +1091,7 @@ function Setup({ onStart, onBack, roster }) {
   const [yards, setYards] = useState(DEF_YDS.map(String));
   const [yardMode, setYardMode] = useState('each');
   const [courseName, setCourseName] = useState('');
-  const [showCourse, setShowCourse] = useState(false);
+  const [showCourse, setShowCourse] = useState(true);
 
   const count = roster ? picked.length : rawCount;
   const setCount = setRawCount;
@@ -1404,8 +1475,14 @@ function Setup({ onStart, onBack, roster }) {
             );
           })()}
 
-          <div onClick={() => setShowCourse(s => !s)} style={{ cursor: 'pointer', marginBottom: 10 }}>
-            <Eyebrow>the course {showCourse ? '▴' : '▾'}</Eyebrow>
+          <div onClick={() => setShowCourse(s => !s)} style={{ cursor: 'pointer', marginBottom: 10, background: C.card, borderRadius: 12, padding: '13px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <Eyebrow style={{ color: C.ink }}>the course</Eyebrow>
+              <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {courseName || 'Pick your course or set the card'}
+              </div>
+            </div>
+            <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 13, color: C.muted }}>{showCourse ? '▴' : '▾'}</span>
           </div>
           {showCourse && <CoursePicker holes={holes} pars={pars} setPars={setPars} si={si} setSi={setSi}
             yards={yards} setYards={setYards} showYards={games.includes('yardage')}

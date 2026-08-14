@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
-
-const EMPTY_RULE = {
-  enabled: true, token: "", direction: "drops", thresholdPct: 10, lookbackHours: 24,
-  allocPct: 20, cooldownHours: 6, maxFires: 3, takeProfitPct: 15, stopLossPct: 20,
-  trailingStopPct: 8, timeExitMin: 0,
-};
+import RulesList from "../components/RulesList";
+import LaunchSettings from "../components/LaunchSettings";
 
 export default function Dashboard() {
   const {
@@ -14,7 +10,6 @@ export default function Dashboard() {
     connect, createVault, depositWpls, withdrawWpls, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
-  const [rule, setRule] = useState(EMPTY_RULE);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
@@ -22,18 +17,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!vaultAddress) return;
-    loadConfig(vaultAddress).then((c) => {
-      setConfig(c);
-      if (c.rules?.[0]) setRule({ ...EMPTY_RULE, ...c.rules[0] });
-    }).catch((e) => setStatus(`Could not load saved settings: ${e.message}`));
+    loadConfig(vaultAddress)
+      .then(setConfig)
+      .catch((e) => setStatus(`Could not load saved settings: ${e.message}`));
   }, [vaultAddress]);
 
   async function handleSave() {
     setSaving(true);
     setStatus("");
     try {
-      const next = { ...config, rules: [rule] };
-      const saved = await saveConfig(getProvider, vaultAddress, next);
+      const saved = await saveConfig(getProvider, vaultAddress, config);
       setConfig(saved);
       setStatus("Saved. The keeper picks this up on its next refresh cycle.");
     } catch (e) {
@@ -74,7 +67,7 @@ export default function Dashboard() {
   }
 
   return (
-    <main style={{ maxWidth: 640, margin: "40px auto", padding: "0 16px", fontFamily: "system-ui, sans-serif" }}>
+    <main style={{ maxWidth: 720, margin: "40px auto", padding: "0 16px", fontFamily: "system-ui, sans-serif" }}>
       <h1>Icaria Bots</h1>
 
       {!account && (
@@ -114,45 +107,26 @@ export default function Dashboard() {
 
           {config && (
             <>
-              <h2>Trading Rule</h2>
+              <h2>Safety</h2>
               <label>
-                Token address:{" "}
-                <input value={rule.token} onChange={(e) => setRule({ ...rule, token: e.target.value })} size={44} />
+                Never let one token exceed{" "}
+                <input type="number" min="0" max="100" value={config.maxHoldingPct}
+                  onChange={(e) => setConfig({ ...config, maxHoldingPct: Number(e.target.value) })} />
+                {"% "}of the vault (the most important safety setting - stops one bad rule from
+                putting the whole vault into one falling token)
               </label>
-              <br />
-              <label>
-                Direction:{" "}
-                <select value={rule.direction} onChange={(e) => setRule({ ...rule, direction: e.target.value })}>
-                  <option value="drops">drops</option>
-                  <option value="rises">rises</option>
-                </select>
-              </label>
-              <br />
-              <label>
-                Threshold %:{" "}
-                <input type="number" value={rule.thresholdPct}
-                  onChange={(e) => setRule({ ...rule, thresholdPct: Number(e.target.value) })} />
-              </label>
-              <br />
-              <label>
-                Allocate % of vault per trade:{" "}
-                <input type="number" value={rule.allocPct}
-                  onChange={(e) => setRule({ ...rule, allocPct: Number(e.target.value) })} />
-              </label>
-              <br />
-              <label>
-                Take profit %:{" "}
-                <input type="number" value={rule.takeProfitPct}
-                  onChange={(e) => setRule({ ...rule, takeProfitPct: Number(e.target.value) })} />
-              </label>
-              <br />
-              <label>
-                Stop loss %:{" "}
-                <input type="number" value={rule.stopLossPct}
-                  onChange={(e) => setRule({ ...rule, stopLossPct: Number(e.target.value) })} />
-              </label>
-              <br />
-              <button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save Settings"}</button>
+
+              <RulesList
+                rules={config.rules}
+                onChange={(rules) => setConfig({ ...config, rules })}
+              />
+
+              <LaunchSettings
+                launch={config.launch}
+                onChange={(launch) => setConfig({ ...config, launch })}
+              />
+
+              <button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save All Settings"}</button>
             </>
           )}
         </div>

@@ -1,0 +1,47 @@
+{
+  "_comment": "Copy to config.json. 'defaults' applies to any vault not listed under 'vaults'. Each vault key must be the vault's address in lowercase. This file is how you run your own bots before the web backend (CONFIG_API) exists. Amounts are in whole PLS; percentages are plain numbers (20 = 20%).",
+
+  "defaults": {
+    "maxHoldingPct": 40,
+    "launch": { "enabled": false },
+    "rules": []
+  },
+
+  "vaults": {
+    "0xyourvaultaddresslowercase000000000000000000": {
+      "maxHoldingPct": 40,
+
+      "launch": {
+        "enabled": false,
+        "perLaunchPls": 50000,
+        "maxPerDay": 4,
+        "takeProfitPct": 50,
+        "stopLossPct": 35,
+        "timeExitMin": 30,
+        "maxBuyTaxBps": 1000,
+        "maxSellTaxBps": 1000,
+        "requireLpLock": true,
+        "maxDeployerPct": 15,
+        "minLiquidityPls": 2000000
+      },
+
+      "rules": [
+        {
+          "enabled": true,
+          "token": "0xtokenaddresstobuythedipon0000000000000000",
+          "direction": "drops",
+          "thresholdPct": 10,
+          "lookbackHours": 24,
+          "allocPct": 20,
+          "cooldownHours": 6,
+          "maxFires": 3,
+
+          "takeProfitPct": 15,
+          "stopLossPct": 20,
+          "trailingStopPct": 8,
+          "timeExitMin": 0
+        }
+      ]
+    }
+  }
+}

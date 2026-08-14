@@ -1,0 +1,26 @@
+{
+  "name": "icaria-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Keeper service for Icaria bots on PulseChain",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --enable-source-maps dist/index.js",
+    "build": "tsc",
+    "screen": "tsx src/screener.ts",
+    "doctor": "tsx src/doctor.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "solc": "^0.8.24"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

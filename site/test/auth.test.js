@@ -1,0 +1,102 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { Wallet } = require("ethers");
+const { authorizeConfigWrite, buildMessage } = require("../lib/auth");
+
+const VAULT = "0x" + "e".repeat(40);
+const wallet = Wallet.createRandom();
+
+// A fake on-chain reader, so these tests never touch the network. It records
+// whether it was called at all, which is itself part of what several tests
+// verify (bad signatures/timestamps must be rejected BEFORE any chain read).
+function fakeReader(ownerToReturn, { throwInstead } = {}) {
+  const calls = [];
+  const fn = async (vaultAddress, rpcUrl) => {
+    calls.push({ vaultAddress, rpcUrl });
+    if (throwInstead) throw new Error(throwInstead);
+    return ownerToReturn;
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+test("rejects an expired timestamp without ever calling the chain reader", async () => {
+  const staleTs = Date.now() - 10 * 60 * 1000;
+  const signature = await wallet.signMessage(buildMessage(VAULT, staleTs));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    /expired/,
+  );
+  assert.equal(readOwner.calls.length, 0, "must not read chain for an already-expired message");
+});
+
+test("rejects a timestamp too far in the future", async () => {
+  const futureTs = Date.now() + 10 * 60 * 1000;
+  const signature = await wallet.signMessage(buildMessage(VAULT, futureTs));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: futureTs, signature, rpcUrl: "unused", readOwner }),
+    /expired/,
+  );
+});
+
+test("rejects a missing/invalid timestamp", async () => {
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: NaN, signature: "0xdeadbeef", rpcUrl: "unused", readOwner }),
+    /timestamp/,
+  );
+});
+
+test("rejects a garbage signature without ever calling the chain reader", async () => {
+  const ts = Date.now();
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: ts, signature: "0xnotasignature", rpcUrl: "unused", readOwner }),
+    /invalid signature/,
+  );
+  assert.equal(readOwner.calls.length, 0, "must not read chain for an unparseable signature");
+});
+
+test("rejects when the signer does not match the vault's on-chain owner", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildMessage(VAULT, ts));
+  const someoneElse = Wallet.createRandom().address;
+  const readOwner = fakeReader(someoneElse); // chain says a different address owns it
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
+});
+
+test("rejects a signature made for the WRONG vault address (message mismatch)", async () => {
+  const ts = Date.now();
+  const otherVault = "0x" + "f".repeat(40);
+  const signature = await wallet.signMessage(buildMessage(otherVault, ts)); // signed for a different vault
+  const readOwner = fakeReader(wallet.address); // even though this wallet DOES own VAULT
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/, // recovers a different signer since the signed message text differs
+  );
+});
+
+test("accepts a correctly-timed, validly-signed request from the vault's real owner", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildMessage(VAULT, ts));
+  const readOwner = fakeReader(wallet.address); // chain confirms this wallet owns the vault
+  const result = await authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+  assert.equal(readOwner.calls.length, 1);
+  assert.equal(readOwner.calls[0].vaultAddress, VAULT);
+});
+
+test("surfaces a readable error if the chain read itself fails (e.g. RPC down)", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildMessage(VAULT, ts));
+  const readOwner = fakeReader(null, { throwInstead: "connection refused" });
+  await assert.rejects(
+    authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /could not read vault owner on chain/,
+  );
+});

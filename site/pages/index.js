@@ -7,7 +7,7 @@ import LaunchSettings from "../components/LaunchSettings";
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultInfo, connecting, error,
-    connect, createVault, depositWpls, withdrawWpls, getProvider,
+    connect, createVault, depositWpls, withdrawWpls, setPaused, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [status, setStatus] = useState("");
@@ -66,6 +66,20 @@ export default function Dashboard() {
     }
   }
 
+  async function handleTogglePause() {
+    setTxBusy(true);
+    setStatus("");
+    try {
+      const next = !vaultInfo.paused;
+      await setPaused(next);
+      setStatus(next ? "Bot paused. The keeper cannot trade this vault until you resume it." : "Bot resumed.");
+    } catch (e) {
+      setStatus(`Pause/resume failed: ${e.message}`);
+    } finally {
+      setTxBusy(false);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 720, margin: "40px auto", padding: "0 16px", fontFamily: "system-ui, sans-serif" }}>
       <h1>Icaria Bots</h1>
@@ -90,7 +104,16 @@ export default function Dashboard() {
           <h2>Your Vault</h2>
           <p>Address: {vaultAddress}</p>
           <p>WPLS balance: {vaultInfo.wplsBalance}</p>
-          <p>Paused: {String(vaultInfo.paused)}</p>
+          <p>
+            Status: <strong>{vaultInfo.paused ? "PAUSED - the bot cannot trade" : "Active"}</strong>{" "}
+            <button onClick={handleTogglePause} disabled={txBusy}>
+              {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
+            </button>
+          </p>
+          <p style={{ fontSize: "0.9em", color: "#555" }}>
+            Pausing stops the keeper from trading immediately - it does not affect deposits or
+            withdrawals, which always stay available to you as the owner.
+          </p>
 
           <h2>Deposit / Withdraw</h2>
           <label>

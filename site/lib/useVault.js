@@ -124,8 +124,30 @@ export function useVault() {
     }
   }, [vaultAddress, getProvider, refreshVaultInfo]);
 
+  /**
+   * Pauses or resumes the vault. While paused, executeSwap reverts for the
+   * keeper (checked on chain, live() modifier) - the fastest way to stop the
+   * bot without touching the keeper server or its executor key. Owner-only,
+   * and withdraw stays available even while paused (the escape hatch is
+   * never gated by this).
+   */
+  const setPaused = useCallback(async (paused) => {
+    setError(null);
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const tx = await vault.setPaused(paused);
+      await tx.wait();
+      await refreshVaultInfo(vaultAddress);
+    } catch (e) {
+      setError(e.message || String(e));
+      throw e;
+    }
+  }, [vaultAddress, getProvider, refreshVaultInfo]);
+
   return {
     account, vaultAddress, vaultInfo, connecting, error,
-    connect, createVault, depositWpls, withdrawWpls, refreshVaultInfo, getProvider,
+    connect, createVault, depositWpls, withdrawWpls, setPaused, refreshVaultInfo, getProvider,
   };
 }

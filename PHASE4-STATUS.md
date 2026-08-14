@@ -21,37 +21,41 @@ Honest state: what's real and tested vs. what's still ahead.
    default to the OLD address as its executor** - call `setExecutor` on it
    immediately after creation, every time, until a fresh factory is deployed
    with the correct default.
-4. **Phase 4 (website) - started tonight, real progress, not finished.**
+4. **Phase 4 (website) - real, tested progress, not finished.**
    See `site/SITE-README.md` for the full picture. Summary:
    - A working config API (`GET`/`POST /api/vaults/:address/config`) that the
      keeper already knows how to talk to (`CONFIG_API` env var), backed by
-     real validation and real on-chain-ownership-verified writes. 23 automated
-     tests, all passing.
+     real validation and real on-chain-ownership-verified writes.
    - A real dashboard: wallet connect, live vault lookup and reads (owner,
      executor, paused, WPLS balance - nothing simulated), deposit, withdraw,
-     and a trading-rule editor that saves through the API above.
-   - Verified end to end with a real running server and curl, not just unit
-     tests - confirmed the whole request pipeline works up to the actual
-     blockchain call (which this specific sandbox can't reach, same
-     restriction as everything else PulseChain-related tonight - a real
-     server, like the one running the keeper, has no such restriction).
+     pause/resume, and an editor for any number of independent trading rules
+     plus the launch bot and holding-cap settings (previously invisible in
+     the UI even though the keeper/API already supported them).
+   - Real trade history in the dashboard: open positions, closed positions,
+     and recent trades, read directly (strictly read-only) from the keeper's
+     own database - answers "is my bot doing anything?" without SSH access.
+   - **35 automated tests, all passing**, plus real end-to-end curl tests
+     against the actual built-and-running app (not just unit tests) for
+     both the config and history endpoints.
    - **Not yet done:** deploying this site anywhere reachable, the
-     domain/DNS setup for `bots.icaria.pro`, and the rest of the original
-     `web/App.jsx` design (multiple bots, charts, launch-bot toggle UI). The
-     original simulated `web/App.jsx`/`Landing.jsx` files are still in the
-     repo under `web/` for their visual design reference, but the new,
-     functional site lives in `site/` and is what should actually get
+     domain/DNS setup for `bots.icaria.pro`, and a few pieces of the
+     original `web/App.jsx` vision - charts, CSV export, Telegram alerts,
+     and ladder-selling (which also needs keeper-side changes, not just
+     UI). The original simulated `web/App.jsx`/`Landing.jsx` files are
+     still in the repo under `web/` for visual design reference, but the
+     new, functional site lives in `site/` and is what should actually get
      deployed and built on going forward.
 
-## The three things that need YOUR input next, not more building
+## The two things that need YOUR input next, not more building
 
 1. **Decide where to deploy `site/`.** Recommendation and reasoning are in
    `site/SITE-README.md` - short version: the same VPS as the keeper, not
-   Vercel, because of how the config storage works.
+   Vercel, because of how the config storage works. Deploying `site/`
+   alongside `keeper/` (as this repo's layout already has them) also makes
+   the trade-history feature work with zero extra config, since it reads
+   the keeper's database by relative path by default.
 2. **DNS/domain for bots.icaria.pro**, once you're ready to point it at
    wherever the site ends up.
-3. **Whether/when to build out the rest of the original UI** (multiple bots,
-   charts, etc.) - all buildable the same way, on the same tested foundation.
 
 ## Everything is committed and pushed
 

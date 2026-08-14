@@ -1,0 +1,6 @@
+node_modules/
+.next/
+site.db
+site.db-wal
+site.db-shm
+.env.local

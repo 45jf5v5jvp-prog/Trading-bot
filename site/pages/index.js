@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
+import { loadHistory } from "../lib/loadHistory";
 import RulesList from "../components/RulesList";
 import LaunchSettings from "../components/LaunchSettings";
+import HistoryPanel from "../components/HistoryPanel";
 
 export default function Dashboard() {
   const {
@@ -10,6 +12,7 @@ export default function Dashboard() {
     connect, createVault, depositWpls, withdrawWpls, setPaused, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
+  const [history, setHistory] = useState(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
@@ -20,6 +23,9 @@ export default function Dashboard() {
     loadConfig(vaultAddress)
       .then(setConfig)
       .catch((e) => setStatus(`Could not load saved settings: ${e.message}`));
+    loadHistory(vaultAddress)
+      .then(setHistory)
+      .catch((e) => setStatus(`Could not load bot activity: ${e.message}`));
   }, [vaultAddress]);
 
   async function handleSave() {
@@ -127,6 +133,8 @@ export default function Dashboard() {
           <button onClick={handleWithdraw} disabled={txBusy || !amount}>
             {txBusy ? "Working..." : "Withdraw"}
           </button>
+
+          <HistoryPanel history={history} />
 
           {config && (
             <>

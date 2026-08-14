@@ -27,5 +27,10 @@ Deployed via Remix on 2026-08-14. Chain ID 369.
 4. Deposit a tiny amount into your vault and withdraw it back out before trusting
    it with anything more.
 
-## Your vault address
-_(fill in after calling `vaultOf`)_
+## Test vault (owned by Account 16, 0x366...28dd1 — used to prove deposit/withdraw)
+`0x523A8848E9a1D7F2E083625d1004f76e607BFCd7`
+
+Note: vault ownership is permanent and tied to whichever wallet called
+`createVault`. This vault belongs to Account 16 forever. When ready to use the
+bot for real, switch to the intended long-term wallet and call `createVault([])`
+again from that wallet to get a separate, real vault owned by it.

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { BrowserProvider, Contract, formatEther, ZeroAddress } from "ethers";
+import { BrowserProvider, Contract, formatEther, parseEther, ZeroAddress } from "ethers";
 import { CHAIN_ID, VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WPLS, ERC20_ABI } from "./contracts";
 
 /**
@@ -79,5 +79,53 @@ export function useVault() {
     }
   }, [account, getProvider, refreshVaultInfo]);
 
-  return { account, vaultAddress, vaultInfo, connecting, error, connect, createVault, refreshVaultInfo, getProvider };
+  /**
+   * Deposit WPLS into the connected vault. Two transactions: approve the
+   * vault to pull the tokens, then the deposit itself - the same two-step
+   * flow proven manually in Remix earlier tonight, now driven from the UI.
+   */
+  const depositWpls = useCallback(async (amountPls) => {
+    setError(null);
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const amount = parseEther(String(amountPls));
+      const wpls = new Contract(WPLS, ERC20_ABI, signer);
+      const approveTx = await wpls.approve(vaultAddress, amount);
+      await approveTx.wait();
+      const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const depositTx = await vault.deposit(WPLS, amount);
+      await depositTx.wait();
+      await refreshVaultInfo(vaultAddress);
+    } catch (e) {
+      setError(e.message || String(e));
+      throw e;
+    }
+  }, [vaultAddress, getProvider, refreshVaultInfo]);
+
+  /**
+   * Withdraw WPLS from the connected vault back to the owner's wallet.
+   * Owner-only on chain - this is the escape hatch, proven manually earlier
+   * tonight, now available directly from the UI.
+   */
+  const withdrawWpls = useCallback(async (amountPls) => {
+    setError(null);
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const amount = parseEther(String(amountPls));
+      const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const tx = await vault.withdraw(WPLS, amount);
+      await tx.wait();
+      await refreshVaultInfo(vaultAddress);
+    } catch (e) {
+      setError(e.message || String(e));
+      throw e;
+    }
+  }, [vaultAddress, getProvider, refreshVaultInfo]);
+
+  return {
+    account, vaultAddress, vaultInfo, connecting, error,
+    connect, createVault, depositWpls, withdrawWpls, refreshVaultInfo, getProvider,
+  };
 }

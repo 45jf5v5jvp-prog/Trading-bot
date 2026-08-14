@@ -9,11 +9,16 @@ const EMPTY_RULE = {
 };
 
 export default function Dashboard() {
-  const { account, vaultAddress, vaultInfo, connecting, error, connect, createVault, getProvider } = useVault();
+  const {
+    account, vaultAddress, vaultInfo, connecting, error,
+    connect, createVault, depositWpls, withdrawWpls, getProvider,
+  } = useVault();
   const [config, setConfig] = useState(null);
   const [rule, setRule] = useState(EMPTY_RULE);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [txBusy, setTxBusy] = useState(false);
 
   useEffect(() => {
     if (!vaultAddress) return;
@@ -35,6 +40,36 @@ export default function Dashboard() {
       setStatus(`Save failed: ${e.message}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDeposit() {
+    if (!amount) return;
+    setTxBusy(true);
+    setStatus("");
+    try {
+      await depositWpls(amount);
+      setStatus(`Deposited ${amount} WPLS.`);
+      setAmount("");
+    } catch (e) {
+      setStatus(`Deposit failed: ${e.message}`);
+    } finally {
+      setTxBusy(false);
+    }
+  }
+
+  async function handleWithdraw() {
+    if (!amount) return;
+    setTxBusy(true);
+    setStatus("");
+    try {
+      await withdrawWpls(amount);
+      setStatus(`Withdrew ${amount} WPLS.`);
+      setAmount("");
+    } catch (e) {
+      setStatus(`Withdraw failed: ${e.message}`);
+    } finally {
+      setTxBusy(false);
     }
   }
 
@@ -63,6 +98,19 @@ export default function Dashboard() {
           <p>Address: {vaultAddress}</p>
           <p>WPLS balance: {vaultInfo.wplsBalance}</p>
           <p>Paused: {String(vaultInfo.paused)}</p>
+
+          <h2>Deposit / Withdraw</h2>
+          <label>
+            Amount (WPLS):{" "}
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </label>
+          <br />
+          <button onClick={handleDeposit} disabled={txBusy || !amount}>
+            {txBusy ? "Working..." : "Deposit"}
+          </button>{" "}
+          <button onClick={handleWithdraw} disabled={txBusy || !amount}>
+            {txBusy ? "Working..." : "Withdraw"}
+          </button>
 
           {config && (
             <>

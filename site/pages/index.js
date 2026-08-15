@@ -5,6 +5,7 @@ import { loadHistory } from "../lib/loadHistory";
 import RulesList from "../components/RulesList";
 import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
+import Sun from "../components/Sun";
 
 export default function Dashboard() {
   const {
@@ -87,93 +88,132 @@ export default function Dashboard() {
   }
 
   return (
-    <main style={{ maxWidth: 720, margin: "40px auto", padding: "0 16px", fontFamily: "system-ui, sans-serif" }}>
-      <h1>Icaria Bots</h1>
-
-      {!account && (
-        <div>
-          <button onClick={connectInjected} disabled={connecting}>
-            {connecting ? "Connecting..." : "Connect Wallet"}
-          </button>{" "}
-          <button onClick={connectWalletConnect} disabled={connecting}>
-            {connecting ? "Connecting..." : "Connect via WalletConnect"}
-          </button>
-          <p style={{ fontSize: "0.9em", color: "#555" }}>
-            On desktop with a wallet extension installed, use "Connect Wallet." On a phone, or with
-            a wallet like Internet Money that isn't a browser extension, use "Connect via WalletConnect."
-          </p>
+    <div className="page">
+      <div className="container">
+        <div className="header">
+          <Sun size={26} />
+          <span className="brand wordmark">ICARIA</span>
+          <span className="wordmark-sub">Bots</span>
         </div>
-      )}
 
-      {account && !vaultAddress && (
-        <div>
-          <p>Connected: {account}</p>
-          <p>No vault found for this wallet yet.</p>
-          <button onClick={createVault}>Create My Vault</button>
-        </div>
-      )}
+        {!account && (
+          <div className="panel">
+            <p className="lede" style={{ marginBottom: 20 }}>
+              Connect the wallet that owns your vault to view its balance, adjust trading rules,
+              or deposit and withdraw.
+            </p>
+            <div className="row">
+              <button className="btn btn-primary" onClick={connectInjected} disabled={connecting}>
+                {connecting ? "Connecting..." : "Connect Wallet"}
+              </button>
+              <button className="btn" onClick={connectWalletConnect} disabled={connecting}>
+                {connecting ? "Connecting..." : "Connect via WalletConnect"}
+              </button>
+            </div>
+            <p className="hint">
+              On desktop with a wallet extension installed, use "Connect Wallet." On a phone, or with
+              a wallet like Internet Money that isn't a browser extension, use "Connect via WalletConnect."
+            </p>
+          </div>
+        )}
 
-      {account && vaultAddress && vaultInfo && (
-        <div>
-          <p>Connected: {account}</p>
-          <h2>Your Vault</h2>
-          <p>Address: {vaultAddress}</p>
-          <p>WPLS balance: {vaultInfo.wplsBalance}</p>
-          <p>
-            Status: <strong>{vaultInfo.paused ? "PAUSED - the bot cannot trade" : "Active"}</strong>{" "}
-            <button onClick={handleTogglePause} disabled={txBusy}>
-              {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
-            </button>
-          </p>
-          <p style={{ fontSize: "0.9em", color: "#555" }}>
-            Pausing stops the keeper from trading immediately - it does not affect deposits or
-            withdrawals, which always stay available to you as the owner.
-          </p>
+        {account && !vaultAddress && (
+          <div className="panel">
+            <p className="mono-addr" style={{ marginBottom: 14 }}>Connected: {account}</p>
+            <p className="lede" style={{ marginBottom: 16 }}>No vault found for this wallet yet.</p>
+            <button className="btn btn-primary" onClick={createVault}>Create My Vault</button>
+          </div>
+        )}
 
-          <h2>Deposit / Withdraw</h2>
-          <label>
-            Amount (WPLS):{" "}
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          </label>
-          <br />
-          <button onClick={handleDeposit} disabled={txBusy || !amount}>
-            {txBusy ? "Working..." : "Deposit"}
-          </button>{" "}
-          <button onClick={handleWithdraw} disabled={txBusy || !amount}>
-            {txBusy ? "Working..." : "Withdraw"}
-          </button>
+        {account && vaultAddress && vaultInfo && (
+          <div>
+            <div className="panel">
+              <p className="mono-addr" style={{ marginBottom: 4 }}>Connected: {account}</p>
+              <div className="section-label" style={{ marginTop: 18 }}>Your Vault</div>
+              <p className="mono-addr" style={{ marginBottom: 14 }}>{vaultAddress}</p>
 
-          <HistoryPanel history={history} />
+              <div className="row-between">
+                <div>
+                  <span className="num" style={{ fontSize: 28 }}>{vaultInfo.wplsBalance}</span>
+                  <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>WPLS</span>
+                </div>
+                <div className="row">
+                  <span className={vaultInfo.paused ? "badge badge-paused" : "badge badge-active"}>
+                    {vaultInfo.paused ? "Paused" : "Active"}
+                  </span>
+                  <button className="btn btn-small" onClick={handleTogglePause} disabled={txBusy}>
+                    {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
+                  </button>
+                </div>
+              </div>
+              <p className="hint">
+                Pausing stops the keeper from trading immediately. It does not affect deposits or
+                withdrawals, which always stay available to you as the owner.
+              </p>
+            </div>
 
-          {config && (
-            <>
-              <h2>Safety</h2>
-              <label>
-                Never let one token exceed{" "}
-                <input type="number" min="0" max="100" value={config.maxHoldingPct}
-                  onChange={(e) => setConfig({ ...config, maxHoldingPct: Number(e.target.value) })} />
-                {"% "}of the vault (the most important safety setting - stops one bad rule from
-                putting the whole vault into one falling token)
-              </label>
+            <div className="panel">
+              <div className="section-label">Deposit / Withdraw</div>
+              <div className="field-inline">
+                <label>Amount (WPLS)</label>
+                <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
+              </div>
+              <div className="row">
+                <button className="btn btn-primary" onClick={handleDeposit} disabled={txBusy || !amount}>
+                  {txBusy ? "Working..." : "Deposit"}
+                </button>
+                <button className="btn" onClick={handleWithdraw} disabled={txBusy || !amount}>
+                  {txBusy ? "Working..." : "Withdraw"}
+                </button>
+              </div>
+            </div>
 
-              <RulesList
-                rules={config.rules}
-                onChange={(rules) => setConfig({ ...config, rules })}
-              />
+            <div className="panel">
+              <HistoryPanel history={history} />
+            </div>
 
-              <LaunchSettings
-                launch={config.launch}
-                onChange={(launch) => setConfig({ ...config, launch })}
-              />
+            {config && (
+              <>
+                <div className="panel">
+                  <div className="section-label">Safety</div>
+                  <div className="field-inline">
+                    <label>Never let one token exceed</label>
+                    <input type="number" min="0" max="100" value={config.maxHoldingPct}
+                      onChange={(e) => setConfig({ ...config, maxHoldingPct: Number(e.target.value) })}
+                      style={{ width: 70 }} />
+                    <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>
+                  </div>
+                  <p className="hint">
+                    The most important safety setting. Stops one bad rule from putting the whole
+                    vault into one falling token.
+                  </p>
+                </div>
 
-              <button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save All Settings"}</button>
-            </>
-          )}
-        </div>
-      )}
+                <div className="panel">
+                  <RulesList
+                    rules={config.rules}
+                    onChange={(rules) => setConfig({ ...config, rules })}
+                  />
+                </div>
 
-      {status && <p>{status}</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-    </main>
+                <div className="panel">
+                  <LaunchSettings
+                    launch={config.launch}
+                    onChange={(launch) => setConfig({ ...config, launch })}
+                  />
+                </div>
+
+                <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                  {saving ? "Saving..." : "Save All Settings"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {status && <p className="status-msg" style={{ marginTop: 20 }}>{status}</p>}
+        {error && <p className="error-msg" style={{ marginTop: 20 }}>{error}</p>}
+      </div>
+    </div>
   );
 }

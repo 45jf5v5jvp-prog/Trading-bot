@@ -7,8 +7,8 @@ import { addRule, removeRuleAt, updateRuleAt } from "../lib/rulesListOps";
 export default function RulesList({ rules, onChange }) {
   return (
     <div>
-      <h2>Trading Rules</h2>
-      {rules.length === 0 && <p>No rules yet. Add one to start.</p>}
+      <div className="section-label">Trading Rules</div>
+      {rules.length === 0 && <p className="hint">No rules yet. Add one to start.</p>}
       {rules.map((r, i) => (
         <RuleEditor
           key={i}
@@ -17,7 +17,7 @@ export default function RulesList({ rules, onChange }) {
           onRemove={() => onChange(removeRuleAt(rules, i))}
         />
       ))}
-      <button type="button" onClick={() => onChange(addRule(rules))}>+ Add Rule</button>
+      <button type="button" className="btn btn-small" onClick={() => onChange(addRule(rules))}>+ Add Rule</button>
     </div>
   );
 }

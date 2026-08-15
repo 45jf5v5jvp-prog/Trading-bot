@@ -12,51 +12,62 @@ export default function RuleEditor({ rule, onChange, onRemove }) {
   };
 
   return (
-    <fieldset style={{ marginBottom: 12, padding: 12 }}>
-      <label>
-        <input type="checkbox" checked={rule.enabled} onChange={(e) => onChange({ ...rule, enabled: e.target.checked })} />
-        {" "}Enabled
-      </label>
-      <button type="button" onClick={onRemove} style={{ float: "right" }}>Remove</button>
-
-      <div>
-        <label>Token address: <input value={rule.token} onChange={set("token")} size={44} /></label>
-      </div>
-      <div>
-        <label>
-          Direction:{" "}
-          <select value={rule.direction} onChange={set("direction")}>
-            <option value="drops">drops</option>
-            <option value="rises">rises</option>
-          </select>
+    <div className="rule-panel">
+      <div className="rule-panel-header">
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={rule.enabled} onChange={(e) => onChange({ ...rule, enabled: e.target.checked })} />
+          Enabled
         </label>
+        <button type="button" className="btn btn-small btn-danger" onClick={onRemove}>Remove</button>
       </div>
-      <div>
-        <label>Threshold %: <input type="number" min="0" value={rule.thresholdPct} onChange={set("thresholdPct")} /></label>
-        {" "}
-        <label>over hours: <input type="number" min="0" value={rule.lookbackHours} onChange={set("lookbackHours")} /></label>
+
+      <div className="field">
+        <label>Token address</label>
+        <input value={rule.token} onChange={set("token")} style={{ width: "100%" }} />
       </div>
-      <div>
-        <label>Allocate % of vault per trade: <input type="number" min="0" max="100" value={rule.allocPct} onChange={set("allocPct")} /></label>
+
+      <div className="field-inline">
+        <label>Direction</label>
+        <select value={rule.direction} onChange={set("direction")}>
+          <option value="drops">drops</option>
+          <option value="rises">rises</option>
+        </select>
       </div>
-      <div>
-        <label>Cooldown hours: <input type="number" min="0" value={rule.cooldownHours} onChange={set("cooldownHours")} /></label>
-        {" "}
-        <label>Max fires/day: <input type="number" min="0" value={rule.maxFires} onChange={set("maxFires")} /></label>
+
+      <div className="field-inline">
+        <label>Threshold %</label>
+        <input type="number" min="0" value={rule.thresholdPct} onChange={set("thresholdPct")} style={{ width: 80 }} />
+        <label>over hours</label>
+        <input type="number" min="0" value={rule.lookbackHours} onChange={set("lookbackHours")} style={{ width: 80 }} />
       </div>
-      <div>
-        <em>Sell targets (leave 0 to disable):</em>
+
+      <div className="field-inline">
+        <label>Allocate % of vault per trade</label>
+        <input type="number" min="0" max="100" value={rule.allocPct} onChange={set("allocPct")} style={{ width: 80 }} />
       </div>
-      <div>
-        <label>Take profit %: <input type="number" min="0" value={rule.takeProfitPct ?? 0} onChange={set("takeProfitPct")} /></label>
-        {" "}
-        <label>Stop loss %: <input type="number" min="0" value={rule.stopLossPct ?? 0} onChange={set("stopLossPct")} /></label>
+
+      <div className="field-inline">
+        <label>Cooldown hours</label>
+        <input type="number" min="0" value={rule.cooldownHours} onChange={set("cooldownHours")} style={{ width: 80 }} />
+        <label>Max fires/day</label>
+        <input type="number" min="0" value={rule.maxFires} onChange={set("maxFires")} style={{ width: 80 }} />
       </div>
-      <div>
-        <label>Trailing stop %: <input type="number" min="0" value={rule.trailingStopPct ?? 0} onChange={set("trailingStopPct")} /></label>
-        {" "}
-        <label>Time exit (min): <input type="number" min="0" value={rule.timeExitMin ?? 0} onChange={set("timeExitMin")} /></label>
+
+      <div className="sub-label">Sell targets (leave 0 to disable)</div>
+
+      <div className="field-inline">
+        <label>Take profit %</label>
+        <input type="number" min="0" value={rule.takeProfitPct ?? 0} onChange={set("takeProfitPct")} style={{ width: 80 }} />
+        <label>Stop loss %</label>
+        <input type="number" min="0" value={rule.stopLossPct ?? 0} onChange={set("stopLossPct")} style={{ width: 80 }} />
       </div>
-    </fieldset>
+
+      <div className="field-inline">
+        <label>Trailing stop %</label>
+        <input type="number" min="0" value={rule.trailingStopPct ?? 0} onChange={set("trailingStopPct")} style={{ width: 80 }} />
+        <label>Time exit (min)</label>
+        <input type="number" min="0" value={rule.timeExitMin ?? 0} onChange={set("timeExitMin")} style={{ width: 80 }} />
+      </div>
+    </div>
   );
 }

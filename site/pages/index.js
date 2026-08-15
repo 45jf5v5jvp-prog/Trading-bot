@@ -9,7 +9,7 @@ import HistoryPanel from "../components/HistoryPanel";
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultInfo, connecting, error,
-    connect, createVault, depositWpls, withdrawWpls, setPaused, getProvider,
+    connectInjected, connectWalletConnect, createVault, depositWpls, withdrawWpls, setPaused, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [history, setHistory] = useState(null);
@@ -91,9 +91,18 @@ export default function Dashboard() {
       <h1>Icaria Bots</h1>
 
       {!account && (
-        <button onClick={connect} disabled={connecting}>
-          {connecting ? "Connecting..." : "Connect Wallet"}
-        </button>
+        <div>
+          <button onClick={connectInjected} disabled={connecting}>
+            {connecting ? "Connecting..." : "Connect Wallet"}
+          </button>{" "}
+          <button onClick={connectWalletConnect} disabled={connecting}>
+            {connecting ? "Connecting..." : "Connect via WalletConnect"}
+          </button>
+          <p style={{ fontSize: "0.9em", color: "#555" }}>
+            On desktop with a wallet extension installed, use "Connect Wallet." On a phone, or with
+            a wallet like Internet Money that isn't a browser extension, use "Connect via WalletConnect."
+          </p>
+        </div>
       )}
 
       {account && !vaultAddress && (

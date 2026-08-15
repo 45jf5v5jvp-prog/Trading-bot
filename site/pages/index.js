@@ -43,12 +43,25 @@ export default function Dashboard() {
     }
   }
 
+  async function handleCreateVault() {
+    setTxBusy(true);
+    setStatus("");
+    try {
+      await createVault(setStatus);
+      setStatus("Vault created.");
+    } catch (e) {
+      setStatus(`Create vault failed: ${e.message}`);
+    } finally {
+      setTxBusy(false);
+    }
+  }
+
   async function handleDeposit() {
     if (!amount) return;
     setTxBusy(true);
     setStatus("");
     try {
-      await depositWpls(amount);
+      await depositWpls(amount, setStatus);
       setStatus(`Deposited ${amount} WPLS.`);
       setAmount("");
     } catch (e) {
@@ -63,7 +76,7 @@ export default function Dashboard() {
     setTxBusy(true);
     setStatus("");
     try {
-      await withdrawWpls(amount);
+      await withdrawWpls(amount, setStatus);
       setStatus(`Withdrew ${amount} WPLS.`);
       setAmount("");
     } catch (e) {
@@ -78,7 +91,7 @@ export default function Dashboard() {
     setStatus("");
     try {
       const next = !vaultInfo.paused;
-      await setPaused(next);
+      await setPaused(next, setStatus);
       setStatus(next ? "Bot paused. The keeper cannot trade this vault until you resume it." : "Bot resumed.");
     } catch (e) {
       setStatus(`Pause/resume failed: ${e.message}`);
@@ -121,7 +134,9 @@ export default function Dashboard() {
           <div className="panel">
             <p className="mono-addr" style={{ marginBottom: 14 }}>Connected: {account}</p>
             <p className="lede" style={{ marginBottom: 16 }}>No vault found for this wallet yet.</p>
-            <button className="btn btn-primary" onClick={createVault}>Create My Vault</button>
+            <button className="btn btn-primary" onClick={handleCreateVault} disabled={txBusy}>
+              {txBusy ? "Working..." : "Create My Vault"}
+            </button>
           </div>
         )}
 

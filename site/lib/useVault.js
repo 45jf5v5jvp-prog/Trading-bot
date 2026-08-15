@@ -1,7 +1,32 @@
 import { useCallback, useRef, useState } from "react";
-import { BrowserProvider, Contract, formatEther, parseEther, ZeroAddress } from "ethers";
-import { CHAIN_ID, VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WPLS, ERC20_ABI } from "./contracts";
+import { BrowserProvider, Contract, JsonRpcProvider, formatEther, parseEther, ZeroAddress } from "ethers";
+import { CHAIN_ID, VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WPLS, ERC20_ABI, RPC_URL } from "./contracts";
 import { getWalletConnectProvider } from "./walletConnect";
+
+/**
+ * Waits for a transaction to confirm by polling our own known-good RPC
+ * endpoint, instead of the connected wallet's tx.wait(). Some wallet
+ * in-app browsers (seen with Internet Money) never resolve tx.wait()
+ * through their injected provider even after the transaction is mined on
+ * chain - the promise just hangs forever. That silently stranded users
+ * mid-deposit: the approve transaction would confirm fine, but the UI
+ * never got past awaiting it to ask for the second (deposit) signature.
+ * Polling a plain RPC directly sidesteps whatever the wallet's provider
+ * is doing internally.
+ */
+async function waitForReceipt(txHash, { timeoutMs = 120_000, intervalMs = 3000 } = {}) {
+  const rpc = new JsonRpcProvider(RPC_URL);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const receipt = await rpc.getTransactionReceipt(txHash);
+    if (receipt) return receipt;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(
+    "Transaction was sent, but confirmation is taking longer than expected. " +
+    `Check scan.pulsechain.com for ${txHash} before retrying - it may still land.`,
+  );
+}
 
 /**
  * All wallet + on-chain state for the dashboard, in one hook. Every value here
@@ -108,14 +133,16 @@ export function useVault() {
     setVaultInfo(null);
   }, []);
 
-  const createVault = useCallback(async () => {
+  const createVault = useCallback(async (onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const factory = new Contract(VAULT_FACTORY, VAULT_FACTORY_ABI, signer);
+      onProgress?.("Confirm the transaction in your wallet...");
       const tx = await factory.createVault([]);
-      await tx.wait();
+      onProgress?.("Waiting for it to confirm on-chain...");
+      await waitForReceipt(tx.hash);
       const addr = await factory.vaultOf(account);
       setVaultAddress(addr);
       await refreshVaultInfo(addr);
@@ -131,18 +158,22 @@ export function useVault() {
    * vault to pull the tokens, then the deposit itself - the same two-step
    * flow proven manually in Remix earlier tonight, now driven from the UI.
    */
-  const depositWpls = useCallback(async (amountPls) => {
+  const depositWpls = useCallback(async (amountPls, onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const amount = parseEther(String(amountPls));
       const wpls = new Contract(WPLS, ERC20_ABI, signer);
+      onProgress?.("Step 1 of 2: confirm the approval in your wallet...");
       const approveTx = await wpls.approve(vaultAddress, amount);
-      await approveTx.wait();
+      onProgress?.("Waiting for the approval to confirm on-chain...");
+      await waitForReceipt(approveTx.hash);
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      onProgress?.("Step 2 of 2: confirm the deposit in your wallet...");
       const depositTx = await vault.deposit(WPLS, amount);
-      await depositTx.wait();
+      onProgress?.("Waiting for the deposit to confirm on-chain...");
+      await waitForReceipt(depositTx.hash);
       await refreshVaultInfo(vaultAddress);
     } catch (e) {
       setError(e.message || String(e));
@@ -155,15 +186,17 @@ export function useVault() {
    * Owner-only on chain - this is the escape hatch, proven manually earlier
    * tonight, now available directly from the UI.
    */
-  const withdrawWpls = useCallback(async (amountPls) => {
+  const withdrawWpls = useCallback(async (amountPls, onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const amount = parseEther(String(amountPls));
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      onProgress?.("Confirm the withdrawal in your wallet...");
       const tx = await vault.withdraw(WPLS, amount);
-      await tx.wait();
+      onProgress?.("Waiting for it to confirm on-chain...");
+      await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);
     } catch (e) {
       setError(e.message || String(e));
@@ -178,14 +211,16 @@ export function useVault() {
    * and withdraw stays available even while paused (the escape hatch is
    * never gated by this).
    */
-  const setPaused = useCallback(async (paused) => {
+  const setPaused = useCallback(async (paused, onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      onProgress?.("Confirm the transaction in your wallet...");
       const tx = await vault.setPaused(paused);
-      await tx.wait();
+      onProgress?.("Waiting for it to confirm on-chain...");
+      await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);
     } catch (e) {
       setError(e.message || String(e));

@@ -172,6 +172,22 @@ input::placeholder { color: #55565f; }
 
 .sub-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ash); margin: 14px 0 8px; }
 
+.pnl-pos { color: var(--good); font-weight: 600; }
+.pnl-neg { color: var(--bad); font-weight: 600; }
+.pnl-flat { color: var(--ash); }
+
+.holding-card {
+  background: var(--chip);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.holding-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.holding-token { font-family: ui-monospace, monospace; font-size: 14px; color: var(--text); }
+.holding-pnl { font-size: 20px; }
+.holding-meta { color: var(--ash); font-size: 12.5px; margin-top: 6px; }
+
 table { border-collapse: collapse; width: 100%; margin-bottom: 8px; font-size: 13px; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge); }
 th { color: var(--ash); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }

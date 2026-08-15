@@ -24,9 +24,17 @@ export default function Dashboard() {
     loadConfig(vaultAddress)
       .then(setConfig)
       .catch((e) => setStatus(`Could not load saved settings: ${e.message}`));
-    loadHistory(vaultAddress)
-      .then(setHistory)
-      .catch((e) => setStatus(`Could not load bot activity: ${e.message}`));
+  }, [vaultAddress]);
+
+  // Polled independently of config (which only needs to load once) so open
+  // positions' live P/L keeps updating without the user refreshing the page.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const refresh = () => loadHistory(vaultAddress).then((h) => { if (!cancelled) setHistory(h); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
   async function handleSave() {

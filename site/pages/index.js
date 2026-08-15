@@ -179,7 +179,7 @@ export default function Dashboard() {
               <div className="section-label">Deposit / Withdraw</div>
               <div className="field-inline">
                 <label>Amount (WPLS)</label>
-                <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
+                <input type="number" onFocus={(e) => e.target.select()} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
               </div>
               <div className="row">
                 <button className="btn btn-primary" onClick={handleDeposit} disabled={txBusy || !amount}>
@@ -201,7 +201,7 @@ export default function Dashboard() {
                   <div className="section-label">Safety</div>
                   <div className="field-inline">
                     <label>Never let one token exceed</label>
-                    <input type="number" min="0" max="100" value={config.maxHoldingPct}
+                    <input type="number" onFocus={(e) => e.target.select()} min="0" max="100" value={config.maxHoldingPct}
                       onChange={(e) => setConfig({ ...config, maxHoldingPct: Number(e.target.value) })}
                       style={{ width: 70 }} />
                     <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>

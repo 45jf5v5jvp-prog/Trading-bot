@@ -1,22 +1,20 @@
+import { numberFieldProps } from "../lib/numberField";
+
 /**
  * Editor for one trading rule. Pure/controlled - all state lives in the
  * parent so saving is one explicit action, not a signed transaction per
  * keystroke.
  */
 export default function RuleEditor({ rule, onChange, onRemove }) {
-  const set = (field) => (e) => {
-    const raw = e.target.value;
-    const numericFields = ["thresholdPct", "lookbackHours", "allocPct", "cooldownHours", "maxFires",
-      "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin"];
-    onChange({ ...rule, [field]: numericFields.includes(field) ? Number(raw) : raw });
-  };
+  const set = (field) => (e) => onChange({ ...rule, [field]: e.target.value });
+  const num = (field) => numberFieldProps(rule[field] ?? 0, (v) => onChange({ ...rule, [field]: v }));
 
   return (
     <div className="rule-panel">
       <div className="rule-panel-header">
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
           <input type="checkbox" checked={rule.enabled} onChange={(e) => onChange({ ...rule, enabled: e.target.checked })} />
-          {rule.enabled ? "This rule is ON — the bot will act on it" : "This rule is OFF — saved but not active"}
+          {rule.enabled ? "This bot is ON — it will act automatically" : "This bot is OFF — saved but not active"}
         </label>
         <button type="button" className="btn btn-small btn-danger" onClick={onRemove}>Remove</button>
       </div>
@@ -36,37 +34,37 @@ export default function RuleEditor({ rule, onChange, onRemove }) {
 
       <div className="field-inline">
         <label>Threshold %</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.thresholdPct} onChange={set("thresholdPct")} style={{ width: 80 }} />
+        <input {...num("thresholdPct")} min="0" style={{ width: 80 }} />
         <label>over hours</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.lookbackHours} onChange={set("lookbackHours")} style={{ width: 80 }} />
+        <input {...num("lookbackHours")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Allocate % of vault per trade</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" max="100" value={rule.allocPct} onChange={set("allocPct")} style={{ width: 80 }} />
+        <input {...num("allocPct")} min="0" max="100" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Cooldown hours</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.cooldownHours} onChange={set("cooldownHours")} style={{ width: 80 }} />
+        <input {...num("cooldownHours")} min="0" style={{ width: 80 }} />
         <label>Max fires/day</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.maxFires} onChange={set("maxFires")} style={{ width: 80 }} />
+        <input {...num("maxFires")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="sub-label">Sell targets (leave 0 to disable)</div>
 
       <div className="field-inline">
         <label>Take profit %</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.takeProfitPct ?? 0} onChange={set("takeProfitPct")} style={{ width: 80 }} />
+        <input {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
         <label>Stop loss %</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.stopLossPct ?? 0} onChange={set("stopLossPct")} style={{ width: 80 }} />
+        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Trailing stop %</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.trailingStopPct ?? 0} onChange={set("trailingStopPct")} style={{ width: 80 }} />
+        <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
         <label>Time exit (min)</label>
-        <input type="number" onFocus={(e) => e.target.select()} min="0" value={rule.timeExitMin ?? 0} onChange={set("timeExitMin")} style={{ width: 80 }} />
+        <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
+import { numberFieldProps } from "../lib/numberField";
 import RulesList from "../components/RulesList";
 import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
@@ -201,13 +202,12 @@ export default function Dashboard() {
                   <div className="section-label">Safety</div>
                   <div className="field-inline">
                     <label>Never let one token exceed</label>
-                    <input type="number" onFocus={(e) => e.target.select()} min="0" max="100" value={config.maxHoldingPct}
-                      onChange={(e) => setConfig({ ...config, maxHoldingPct: Number(e.target.value) })}
-                      style={{ width: 70 }} />
+                    <input {...numberFieldProps(config.maxHoldingPct, (v) => setConfig({ ...config, maxHoldingPct: v }))}
+                      min="0" max="100" style={{ width: 70 }} />
                     <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>
                   </div>
                   <p className="hint">
-                    The most important safety setting. Stops one bad rule from putting the whole
+                    The most important safety setting. Stops one bad bot from putting the whole
                     vault into one falling token.
                   </p>
                 </div>

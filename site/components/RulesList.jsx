@@ -7,8 +7,11 @@ import { addRule, removeRuleAt, updateRuleAt } from "../lib/rulesListOps";
 export default function RulesList({ rules, onChange }) {
   return (
     <div>
-      <div className="section-label">Trading Rules</div>
-      {rules.length === 0 && <p className="hint">No rules yet. Add one to start.</p>}
+      <div className="section-label">Trading Bots</div>
+      <p className="hint" style={{ marginBottom: 14 }}>
+        Each one watches a single token and buys the dip (or the top) on its own - add as many as you want.
+      </p>
+      {rules.length === 0 && <p className="hint">No bots yet. Add one to start.</p>}
       {rules.map((r, i) => (
         <RuleEditor
           key={i}
@@ -17,7 +20,7 @@ export default function RulesList({ rules, onChange }) {
           onRemove={() => onChange(removeRuleAt(rules, i))}
         />
       ))}
-      <button type="button" className="btn btn-small" onClick={() => onChange(addRule(rules))}>+ Add Rule</button>
+      <button type="button" className="btn btn-small" onClick={() => onChange(addRule(rules))}>+ Add New Bot</button>
     </div>
   );
 }

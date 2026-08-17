@@ -24,27 +24,33 @@ function fmtPnl(pct) {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
-/** A rugged Launch Bot buy - down to (or effectively at) zero. Still
- * technically "open" until the keeper closes it, but showing it as a full
- * holding card next to positions that are actually alive just pushes those
- * off the screen. Treated as dead once it's clearly not coming back, not
- * only at an exact -100.0%, since a token can be down 99.9% and worth
- * fractions of a cent - still clutter, not still a decision to make. */
-function isDead(p) {
-  if (p.pnlPct !== null && p.pnlPct !== undefined && p.pnlPct <= -99) return true;
+/** A position the router currently can't price at any real size - either
+ * getAmountsOut reverts outright (livePrice.js leaves pnlPct/valueNowPls
+ * null - typically because the LP was pulled entirely) or it still quotes
+ * but for effectively nothing (rugged, not delisted). Either way there's
+ * no liquidity worth trading against right now. Not a permanent verdict:
+ * this runs fresh against live data on every 20s poll (see index.js), so
+ * if LP gets added back and the position becomes priceable/worth something
+ * again, it drops out of this bucket and reappears in Current Holdings on
+ * its own - nothing here pins a position as dead forever. */
+function hasNoLiquidity(p) {
+  if (p.pnlPct === null || p.pnlPct === undefined) return true;
+  if (p.pnlPct <= -99) return true;
   if (p.valueNowPls !== null && p.valueNowPls !== undefined && p.valueNowPls < 0.000001) return true;
   return false;
 }
 
-/** Compact one-line version of a dead position - same close button, none of
- * the visual weight, so a wall of rugs doesn't cost more than one line each. */
-function DeadPositionRow({ p, onClose, closeState }) {
+/** Compact one-line version of a no-liquidity position - same close button,
+ * none of the visual weight, so a wall of them doesn't cost more than one
+ * line each. */
+function NoLiquidityPositionRow({ p, onClose, closeState }) {
   const requested = closeState === "requested" || closeState === "pending";
+  const label = p.pnlPct === null || p.pnlPct === undefined ? "no liquidity to price" : "worth effectively nothing";
   return (
     <div className="row-between dead-position-row">
       <div className="row" style={{ gap: 10 }}>
         <span className="holding-token" style={{ fontSize: 12.5 }}>{short(p.token)}</span>
-        <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {p.spent_pls.toLocaleString()} ETH · worthless</span>
+        <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {p.spent_pls.toLocaleString()} ETH · {label}</span>
       </div>
       <button
         type="button"
@@ -103,12 +109,12 @@ function HoldingCard({ p, onClose, closeState }) {
  * Open positions are the main event: live value and P/L, refreshed on every
  * poll (see index.js), so this is the "should I close this?" screen. */
 export default function HistoryPanel({ history, onClosePosition, closeStates }) {
-  const [showDead, setShowDead] = useState(false);
+  const [showNoLiquidity, setShowNoLiquidity] = useState(false);
   if (!history) return null;
   const { positions, fires } = history;
   const noHistoryYet = positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0;
-  const alive = positions.open.filter((p) => !isDead(p));
-  const dead = positions.open.filter(isDead);
+  const priced = positions.open.filter((p) => !hasNoLiquidity(p));
+  const noLiquidity = positions.open.filter(hasNoLiquidity);
 
   return (
     <div>
@@ -117,22 +123,22 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
       {!noHistoryYet && positions.open.length === 0 && (
         <p className="hint">Nothing open right now. The bot isn't holding any tokens.</p>
       )}
-      {!noHistoryYet && alive.length === 0 && dead.length > 0 && (
-        <p className="hint">Nothing open worth showing right now - {dead.length} rugged {dead.length === 1 ? "position" : "positions"} below.</p>
+      {!noHistoryYet && priced.length === 0 && noLiquidity.length > 0 && (
+        <p className="hint">Nothing open worth showing right now - {noLiquidity.length} {noLiquidity.length === 1 ? "position" : "positions"} with no liquidity below.</p>
       )}
-      {alive.map((p) => (
+      {priced.map((p) => (
         <HoldingCard key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
       ))}
 
-      {dead.length > 0 && (
+      {noLiquidity.length > 0 && (
         <div className="dead-positions">
-          <button type="button" className="btn btn-small" onClick={() => setShowDead((s) => !s)}>
-            {showDead ? "Hide" : "Show"} {dead.length} rugged {dead.length === 1 ? "position" : "positions"} (-100%)
+          <button type="button" className="btn btn-small" onClick={() => setShowNoLiquidity((s) => !s)}>
+            {showNoLiquidity ? "Hide" : "Show"} {noLiquidity.length} {noLiquidity.length === 1 ? "position" : "positions"} with no liquidity
           </button>
-          {showDead && (
+          {showNoLiquidity && (
             <div style={{ marginTop: 10 }}>
-              {dead.map((p) => (
-                <DeadPositionRow key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
+              {noLiquidity.map((p) => (
+                <NoLiquidityPositionRow key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
               ))}
             </div>
           )}

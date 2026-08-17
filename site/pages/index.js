@@ -20,8 +20,8 @@ function fmtBalance(weth) {
 
 export default function Dashboard() {
   const {
-    account, vaultAddress, vaultKind, vaultInfo, connecting, error,
-    connectInjected, connectWalletConnect, createVault, depositWeth, withdrawWeth, setPaused, getProvider,
+    account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
+    connectInjected, connectWalletConnect, createVault, depositWeth, withdrawWeth, setPaused, refreshVaultInfo, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
   const [txBusy, setTxBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
 
   /** Every edit to config goes through here so "unsaved changes" stays accurate -
@@ -66,6 +67,33 @@ export default function Dashboard() {
     const id = setInterval(refresh, 20_000);
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
+
+  // Same idea for the vault's WETH balance/paused state - previously this
+  // only updated right after a deposit/withdraw/pause, so the balance would
+  // sit stale until the user did something. Silent failures here (e.g. the
+  // wallet was disconnected in the background) just skip a tick rather than
+  // surfacing an error every 20 seconds.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const id = setInterval(() => { if (!cancelled) refreshVaultInfo(vaultAddress).catch(() => {}); }, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [vaultAddress, refreshVaultInfo]);
+
+  /** Manual "Refresh" button - updates balance and holdings immediately
+   * instead of waiting for the next 20s poll, without reloading the page
+   * (which would otherwise mean reconnecting the wallet). */
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      const [, h] = await Promise.all([refreshVaultInfo(vaultAddress), loadHistory(vaultAddress)]);
+      setHistory(h);
+    } catch (e) {
+      setStatus(`Refresh failed: ${e.message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -162,7 +190,13 @@ export default function Dashboard() {
           <span className="wordmark-sub">Bots</span>
         </div>
 
-        {!account && (
+        {initializing && !account && (
+          <div className="panel">
+            <p className="lede" style={{ marginBottom: 0 }}>Reconnecting your wallet...</p>
+          </div>
+        )}
+
+        {!initializing && !account && (
           <div className="panel">
             <p className="lede" style={{ marginBottom: 20 }}>
               Connect the wallet that owns your vault to view its balance, adjust trading rules,
@@ -212,14 +246,19 @@ export default function Dashboard() {
                   <span className={vaultInfo.paused ? "badge badge-paused" : "badge badge-active"}>
                     {vaultInfo.paused ? "Paused" : "Active"}
                   </span>
+                  <button className="btn btn-small" onClick={handleRefresh} disabled={refreshing}>
+                    {refreshing ? "Refreshing..." : "Refresh"}
+                  </button>
                   <button className="btn btn-small" onClick={handleTogglePause} disabled={txBusy}>
                     {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
                   </button>
                 </div>
               </div>
               <p className="hint">
-                Pausing stops the keeper from trading immediately. It does not affect deposits or
-                withdrawals, which always stay available to you as the owner.
+                Balance and holdings update automatically every 20 seconds - use Refresh to update
+                immediately instead of waiting. Pausing stops the keeper from trading immediately.
+                It does not affect deposits or withdrawals, which always stay available to you as
+                the owner.
               </p>
             </div>
 

@@ -14,18 +14,36 @@ export default function Dashboard() {
     connectInjected, connectWalletConnect, createVault, depositWpls, withdrawWpls, setPaused, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
+  const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
   const [txBusy, setTxBusy] = useState(false);
 
+  /** Every edit to config goes through here so "unsaved changes" stays accurate -
+   * nothing takes effect for the keeper until Save All Settings actually signs
+   * and persists it, and that's easy to forget without a visible reminder. */
+  function updateConfig(next) {
+    setConfig(next);
+    setDirty(true);
+  }
+
   useEffect(() => {
     if (!vaultAddress) return;
     loadConfig(vaultAddress)
-      .then(setConfig)
+      .then((loaded) => { setConfig(loaded); setDirty(false); })
       .catch((e) => setStatus(`Could not load saved settings: ${e.message}`));
   }, [vaultAddress]);
+
+  // Backstop for the case where someone edits settings and closes the tab
+  // instead of scrolling down to Save All Settings.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   // Polled independently of config (which only needs to load once) so open
   // positions' live P/L keeps updating without the user refreshing the page.
@@ -44,6 +62,7 @@ export default function Dashboard() {
     try {
       const saved = await saveConfig(getProvider, vaultAddress, config);
       setConfig(saved);
+      setDirty(false);
       setStatus("Saved. The keeper picks this up on its next refresh cycle.");
     } catch (e) {
       setStatus(`Save failed: ${e.message}`);
@@ -198,11 +217,18 @@ export default function Dashboard() {
 
             {config && (
               <>
+                {dirty && (
+                  <div className="status-msg" style={{ marginBottom: 20, borderColor: "var(--amber)", color: "var(--amber)" }}>
+                    You have unsaved changes. Nothing below takes effect for the bot until you click
+                    "Save All Settings" at the bottom of this page.
+                  </div>
+                )}
+
                 <div className="panel">
                   <div className="section-label">Safety</div>
                   <div className="field-inline">
                     <label>Never let one token exceed</label>
-                    <input {...numberFieldProps(config.maxHoldingPct, (v) => setConfig({ ...config, maxHoldingPct: v }))}
+                    <input {...numberFieldProps(config.maxHoldingPct, (v) => updateConfig({ ...config, maxHoldingPct: v }))}
                       min="0" max="100" style={{ width: 70 }} />
                     <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>
                   </div>
@@ -215,19 +241,19 @@ export default function Dashboard() {
                 <div className="panel">
                   <RulesList
                     rules={config.rules}
-                    onChange={(rules) => setConfig({ ...config, rules })}
+                    onChange={(rules) => updateConfig({ ...config, rules })}
                   />
                 </div>
 
                 <div className="panel">
                   <LaunchSettings
                     launch={config.launch}
-                    onChange={(launch) => setConfig({ ...config, launch })}
+                    onChange={(launch) => updateConfig({ ...config, launch })}
                   />
                 </div>
 
-                <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving..." : "Save All Settings"}
+                <button className={dirty ? "btn btn-primary" : "btn"} onClick={handleSave} disabled={saving}>
+                  {saving ? "Saving..." : dirty ? "Save All Settings (unsaved changes)" : "Save All Settings"}
                 </button>
               </>
             )}

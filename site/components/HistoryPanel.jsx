@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { EXPLORER_URL } from "../lib/contracts";
 
 function fmtTs(unixSeconds) {
@@ -21,6 +22,40 @@ function fmtPnl(pct) {
   if (pct === null || pct === undefined) return "price unavailable";
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(1)}%`;
+}
+
+/** A rugged Launch Bot buy - down to (or effectively at) zero. Still
+ * technically "open" until the keeper closes it, but showing it as a full
+ * holding card next to positions that are actually alive just pushes those
+ * off the screen. Treated as dead once it's clearly not coming back, not
+ * only at an exact -100.0%, since a token can be down 99.9% and worth
+ * fractions of a cent - still clutter, not still a decision to make. */
+function isDead(p) {
+  if (p.pnlPct !== null && p.pnlPct !== undefined && p.pnlPct <= -99) return true;
+  if (p.valueNowPls !== null && p.valueNowPls !== undefined && p.valueNowPls < 0.000001) return true;
+  return false;
+}
+
+/** Compact one-line version of a dead position - same close button, none of
+ * the visual weight, so a wall of rugs doesn't cost more than one line each. */
+function DeadPositionRow({ p, onClose, closeState }) {
+  const requested = closeState === "requested" || closeState === "pending";
+  return (
+    <div className="row-between dead-position-row">
+      <div className="row" style={{ gap: 10 }}>
+        <span className="holding-token" style={{ fontSize: 12.5 }}>{short(p.token)}</span>
+        <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {p.spent_pls.toLocaleString()} ETH · worthless</span>
+      </div>
+      <button
+        type="button"
+        className="btn btn-small btn-danger"
+        onClick={() => onClose(p.id)}
+        disabled={requested}
+      >
+        {closeState === "pending" ? "..." : requested ? "Requested" : "Clear"}
+      </button>
+    </div>
+  );
 }
 
 /** One currently-held token: what the bot bought, what it's worth right now
@@ -68,9 +103,12 @@ function HoldingCard({ p, onClose, closeState }) {
  * Open positions are the main event: live value and P/L, refreshed on every
  * poll (see index.js), so this is the "should I close this?" screen. */
 export default function HistoryPanel({ history, onClosePosition, closeStates }) {
+  const [showDead, setShowDead] = useState(false);
   if (!history) return null;
   const { positions, fires } = history;
   const noHistoryYet = positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0;
+  const alive = positions.open.filter((p) => !isDead(p));
+  const dead = positions.open.filter(isDead);
 
   return (
     <div>
@@ -79,9 +117,27 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
       {!noHistoryYet && positions.open.length === 0 && (
         <p className="hint">Nothing open right now. The bot isn't holding any tokens.</p>
       )}
-      {positions.open.map((p) => (
+      {!noHistoryYet && alive.length === 0 && dead.length > 0 && (
+        <p className="hint">Nothing open worth showing right now - {dead.length} rugged {dead.length === 1 ? "position" : "positions"} below.</p>
+      )}
+      {alive.map((p) => (
         <HoldingCard key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
       ))}
+
+      {dead.length > 0 && (
+        <div className="dead-positions">
+          <button type="button" className="btn btn-small" onClick={() => setShowDead((s) => !s)}>
+            {showDead ? "Hide" : "Show"} {dead.length} rugged {dead.length === 1 ? "position" : "positions"} (-100%)
+          </button>
+          {showDead && (
+            <div style={{ marginTop: 10 }}>
+              {dead.map((p) => (
+                <DeadPositionRow key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {positions.closed.length > 0 && (
         <>

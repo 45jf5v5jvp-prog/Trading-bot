@@ -1,7 +1,7 @@
 import { parseEther, formatEther } from "ethers";
 import { CFG } from "./config.js";
 import { registry, type TradingRule, type VaultRecord } from "./registry.js";
-import { windowStats, coverageHours, ensureWatched } from "./prices.js";
+import { windowStats, ensureWatched } from "./prices.js";
 import { executeSwap } from "./executor.js";
 import { positionsValuePls } from "./positions.js";
 import { recordBuy, exceedsHoldingCap } from "./portfolio.js";
@@ -37,13 +37,14 @@ export async function evaluate(rule: TradingRule, v: VaultRecord): Promise<void>
 
   if (!(await ensureWatched(token))) return;
 
-  // The history gate. A rule cannot arm until the series covers its lookback.
-  const have = coverageHours(token);
-  if (have < rule.lookbackHours) {
-    log("debug", "rules", `${v.address} ${token} needs ${rule.lookbackHours}h, has ${have.toFixed(1)}h`);
-    return;
-  }
-
+  // Evaluates against whatever history exists so far, not just once the full
+  // lookback window has been observed. A truncated window can only understate
+  // the true high/low over the intended lookback period (the real extreme
+  // could be further back than we've watched), so this is conservative, never
+  // trigger-happy - it just means a fresh token isn't stuck refusing to check
+  // at all for a full lookback period before it's allowed to catch an obvious
+  // move. windowStats itself still refuses with too few points (< 3) to mean
+  // anything.
   const w = windowStats(token, rule.lookbackHours);
   if (!w) return;
 

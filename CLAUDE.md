@@ -13,7 +13,7 @@ Users deposit WETH into a per-user vault contract they own. A keeper service
 watches prices and new pairs and calls `executeSwap` on their vault. The
 platform takes 0.25% per trade plus a gas reimbursement, same as PulseChain.
 
-Two parts so far (site/ not ported yet - see Status):
+Three parts:
 - `contracts/` - BotVault, VaultFactory, SwapProbe. Identical Solidity to the
   PulseChain repo, unmodified. Chain-specific values are constructor/env
   arguments, never hardcoded in the contracts themselves.
@@ -21,16 +21,29 @@ Two parts so far (site/ not ported yet - see Status):
   keeper, adapted: `wpls`/`WPLS` renamed to `weth`/`WETH` throughout (it now
   holds a real WETH address, not WPLS), default Router/Factory/WETH addresses
   updated to Robinhood Chain's real deployments, gas/probe-size defaults
-  rescaled from PLS-magnitude to ETH-magnitude placeholders.
+  rescaled from PLS-magnitude to ETH-magnitude placeholders. Its `launch.ts`
+  scanner walks `eth_getLogs` in 10-block chunks - the RPC provider used here
+  (Alchemy free tier) caps ranges wider than that.
+- `site/` - the dashboard, forked from the PulseChain `site/` the same way
+  the keeper was: contract addresses, chain ID, and RPC come from env vars
+  (`site/lib/contracts.js`), `WPLS` renamed to `WETH` throughout, PLS-scale
+  UI copy and defaults rescaled to ETH. Not yet deployed to the server - see
+  `site/SITE-README.md`.
 
 ## Status
 
-**Nothing here has been deployed or run yet.** The keeper typechecks and its
-existing test suite passes against the renamed code. No contract has been
-deployed to Robinhood Chain, no live trade has happened, no gas costs have
-been measured. Everything numeric that looks like a real value (gas ceiling,
-probe size) is a placeholder pending real observation - see the comments in
-`keeper/.env.example` and `keeper/src/config.ts` for exactly which.
+**Contracts are deployed and the keeper is live on the server** (see
+Addresses below), running under `pm2` as `icaria-robinhood-keeper` in
+`DRY_RUN=true`. `doctor.ts` passes. The launch scanner is confirmed running
+without errors after the 10-block chunking fix. No vault has been created
+yet, so nothing has actually traded - no live trade has happened, no gas
+costs have been measured. Everything numeric that looks like a real trading
+value (gas ceiling, probe size) is a placeholder pending real observation -
+see the comments in `keeper/.env.example` and `keeper/src/config.ts` for
+exactly which. `site/` typechecks/builds/passes its test suite but has not
+been deployed to the server yet, and needs a browser-safe RPC URL (see
+`site/SITE-README.md`) before it can go live - do not reuse the keeper's own
+RPC URL for it if that URL has a private API key in it.
 
 ## Addresses used here, and how they were obtained
 
@@ -56,26 +69,35 @@ statement of where they came from, not a substitute for checking:
   cross-checked against a second source.
 - **RPC URL** - deliberately has no default anywhere in this codebase. No
   public mainnet RPC was verified during setup. Get one from
-  `docs.robinhood.com/chain/connecting` before running anything.
+  `docs.robinhood.com/chain/connecting` before running anything. The keeper's
+  own RPC is a paid Alchemy endpoint - do not reuse that URL for `site/`'s
+  browser-facing `NEXT_PUBLIC_RPC_URL`, since that gets bundled into client JS
+  and would leak the API key to every visitor.
+- **SwapProbe** `0xA5f4D7Ea50710D9C7c72f89E181A1b7aA50423C9` and
+  **VaultFactory** `0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54` - deployed to
+  Robinhood Chain mainnet via Remix from the user's own wallet, confirmed live
+  via `doctor.ts`. The `BotVault` implementation address (created by
+  `VaultFactory`'s constructor) was not separately recorded - not needed for
+  anything downstream of deployment.
 
 ## What would help most, in order
 
-1. Deploy `VaultFactory`/`BotVault`/`SwapProbe` to Robinhood Chain mainnet
-   (Remix, same flow as the PulseChain deployment) and record the addresses
-   here and in `keeper/.env`.
-2. Get a real mainnet RPC URL and fill in `keeper/.env` from
-   `keeper/.env.example`.
-3. Run `npm run doctor` in `keeper/` and fix everything it flags before
-   going anywhere near `DRY_RUN=false`.
-4. Deposit, withdraw, prove the exit works, exactly like the PulseChain bot's
-   own history (see that repo's HANDOFF.md for what that process looked like).
-5. Measure real gas costs and correct `MAX_GAS_PRICE_GWEI` and the executor's
-   reimbursement assumptions - both are unmeasured placeholders right now.
-6. Port `site/` from the PulseChain repo. Its contract addresses/RPC/chain ID
-   are already environment-driven (see `site/lib/contracts.js` there), so
-   this should mostly be a second deployment with different env vars plus a
-   landing page that lets a visitor choose PulseChain or Robinhood Chain
-   before connecting a wallet - not a rewrite.
+1. Get a browser-safe RPC URL (no embedded API key, or one restricted by
+   referrer to the site's domain) and deploy `site/` to the server alongside
+   the keeper (see `site/SITE-README.md` - runs on port 3001, keeper is
+   already on the default port for its own process).
+2. Create the first real vault (via the site once deployed, or Remix in the
+   meantime), deposit WETH, set its Trading Bot / Launch Bot config, and
+   confirm the keeper picks it up (`registry.active()` should show it).
+3. Deposit, withdraw, prove the exit works before trusting the entrance,
+   exactly like the PulseChain bot's own history (see that repo's
+   HANDOFF.md for what that process looked like).
+4. Measure real gas costs once trades actually happen, and correct
+   `MAX_GAS_PRICE_GWEI` and the executor's reimbursement assumptions - both
+   are unmeasured placeholders right now.
+5. Once both chains are live, a shared landing page that lets a visitor
+   choose PulseChain or Robinhood Chain before connecting a wallet - not
+   started yet.
 
 ## Invariants that must not break
 

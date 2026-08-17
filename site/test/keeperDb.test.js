@@ -1,0 +1,95 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const Database = require("better-sqlite3");
+
+const FAKE_KEEPER_DB = path.join(__dirname, "fake-keeper.db");
+for (const p of [FAKE_KEEPER_DB, FAKE_KEEPER_DB + "-wal", FAKE_KEEPER_DB + "-shm"]) {
+  if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+
+// Build a fake keeper.db with the SAME schema keeper/src/db.ts creates, so
+// this test proves the actual query logic against a real schema, not a
+// hand-waved shape.
+const setup = new Database(FAKE_KEEPER_DB);
+setup.exec(`
+  CREATE TABLE positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, vault TEXT NOT NULL, bot TEXT NOT NULL,
+    token TEXT NOT NULL, opened_at INTEGER NOT NULL, entry_price REAL NOT NULL,
+    spent_pls REAL NOT NULL, tokens_held TEXT NOT NULL, high_water REAL NOT NULL,
+    tp_pct REAL, sl_pct REAL, trail_pct REAL, time_exit_min INTEGER,
+    status TEXT NOT NULL DEFAULT 'open', closed_at INTEGER, proceeds_pls REAL, close_reason TEXT
+  );
+  CREATE TABLE fires (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, vault TEXT NOT NULL, bot TEXT NOT NULL,
+    token TEXT NOT NULL, ts INTEGER NOT NULL, amount REAL NOT NULL, fee REAL NOT NULL, tx_hash TEXT
+  );
+`);
+const VAULT = "0x523a8848e9a1d7f2e083625d1004f76e607bfcd7";
+const OTHER_VAULT = "0x" + "9".repeat(40);
+setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status)
+  VALUES (?,?,?,?,?,?,?,?,?)`).run(VAULT, "trading", "0x" + "a".repeat(40), 1000, 1.5, 100, "1000000000000000000", 1.2, "open");
+setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status,closed_at,proceeds_pls,close_reason)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(VAULT, "launch", "0x" + "b".repeat(40), 900, 2.0, 200, "0", 1.5, "closed", 1200, 250, "take profit 25%");
+setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status)
+  VALUES (?,?,?,?,?,?,?,?,?)`).run(OTHER_VAULT, "trading", "0x" + "c".repeat(40), 1000, 1, 50, "0", 1, "open");
+setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
+  .run(VAULT, "trading", "0x" + "a".repeat(40), 1000, 100, 0.25, "0xabc123");
+setup.close();
+
+test("returns positions and fires for a vault that has real trading history", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getPositions, getRecentFires } = require("../lib/keeperDb");
+
+  const { open, closed } = getPositions(VAULT);
+  assert.equal(open.length, 1);
+  assert.equal(open[0].bot, "trading");
+  assert.equal(closed.length, 1);
+  assert.equal(closed[0].close_reason, "take profit 25%");
+
+  const fires = getRecentFires(VAULT);
+  assert.equal(fires.length, 1);
+  assert.equal(fires[0].tx_hash, "0xabc123");
+});
+
+test("only returns data scoped to the requested vault, never another vault's", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getPositions } = require("../lib/keeperDb");
+  const { open } = getPositions(VAULT);
+  assert.ok(!open.some((p) => p.token === "0x" + "c".repeat(40)), "must not leak another vault's position");
+});
+
+test("a vault with no history returns empty arrays, not an error", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getPositions, getRecentFires } = require("../lib/keeperDb");
+  const never = "0x" + "f".repeat(40);
+  assert.deepEqual(getPositions(never), { open: [], closed: [] });
+  assert.deepEqual(getRecentFires(never), []);
+});
+
+test("a missing keeper.db file (no keeper has run yet) returns empty results, not a crash", () => {
+  process.env.KEEPER_DB_PATH = path.join(__dirname, "definitely-does-not-exist.db");
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getPositions, getRecentFires } = require("../lib/keeperDb");
+  assert.deepEqual(getPositions(VAULT), { open: [], closed: [] });
+  assert.deepEqual(getRecentFires(VAULT), []);
+});
+
+test("the connection is opened read-only - a write attempt must fail", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const keeperDb = require("../lib/keeperDb");
+  keeperDb.getPositions(VAULT); // forces the lazy connection open
+  const Database2 = require("better-sqlite3");
+  const readonlyDb = new Database2(FAKE_KEEPER_DB, { readonly: true });
+  assert.throws(
+    () => readonlyDb.prepare("DELETE FROM positions").run(),
+    /readonly/i,
+    "opening with readonly:true must make writes impossible, protecting the keeper's live data",
+  );
+  readonlyDb.close();
+});

@@ -1,0 +1,195 @@
+/* Icaria dashboard theme. Same palette and fonts as web/App.jsx and
+   web/Landing.jsx (the brand definition), just applied to the real,
+   data-backed dashboard instead of the simulated demo. */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&display=swap');
+
+:root {
+  --bg: #0b0b0d;
+  --panel: #121215;
+  --edge: #26262b;
+  --chip: #1b1b1f;
+  --text: #f5f3ef;
+  --ash: #8a8b94;
+  --amber: #c98a3e;
+  --glow: #7a4e1e;
+  --good: #4fbf8b;
+  --bad: #e5484d;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+a { color: var(--amber); }
+
+h1, h2, h3 { font-weight: 600; }
+
+.brand { font-family: 'Montserrat', system-ui, sans-serif; }
+.say { font-family: 'Newsreader', Georgia, serif; }
+.num { font-variant-numeric: tabular-nums; }
+
+.page {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(122, 78, 30, 0.18), transparent 60%),
+    var(--bg);
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 20px 64px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 0 32px;
+  border-bottom: 1px solid var(--edge);
+  margin-bottom: 28px;
+}
+
+.wordmark {
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  font-weight: 800;
+}
+
+.wordmark-sub {
+  color: var(--ash);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-left: 4px;
+}
+
+.section-label {
+  font-family: 'Montserrat', system-ui, sans-serif;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--amber);
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  padding: 22px;
+  margin-bottom: 20px;
+}
+
+.panel + .panel { margin-top: 0; }
+
+.lede {
+  font-family: 'Newsreader', Georgia, serif;
+  font-weight: 300;
+  color: var(--ash);
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+.mono-addr {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--ash);
+  word-break: break-all;
+}
+
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--ash); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+.field-inline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.field-inline label { color: var(--ash); font-size: 13px; white-space: nowrap; }
+
+input[type="text"], input[type="number"], input, select {
+  background: var(--chip);
+  border: 1px solid var(--edge);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+input[type="checkbox"] { accent-color: var(--amber); width: 15px; height: 15px; vertical-align: middle; }
+input:focus, select:focus { border-color: var(--amber); }
+input::placeholder { color: #55565f; }
+
+.btn {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: var(--chip);
+  color: var(--text);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--amber); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.btn-primary:hover:not(:disabled) { background: var(--amber); border-color: var(--amber); color: var(--bg); }
+
+.btn-danger { color: var(--bad); border-color: #4a2020; }
+.btn-danger:hover:not(:disabled) { border-color: var(--bad); }
+
+.btn-small { padding: 5px 12px; font-size: 11px; }
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+.badge-active { background: #123527; color: var(--good); }
+.badge-paused { background: #2a1012; color: var(--bad); }
+
+.status-msg { color: var(--text); background: var(--chip); border: 1px solid var(--edge); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+.error-msg { color: var(--bad); background: #2a1012; border: 1px solid #4a2020; border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+.hint { font-size: 12.5px; color: var(--ash); line-height: 1.5; margin: 8px 0 0; }
+
+.rule-panel { background: var(--chip); border: 1px solid var(--edge); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+.rule-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+
+.sub-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ash); margin: 14px 0 8px; }
+
+.pnl-pos { color: var(--good); font-weight: 600; }
+.pnl-neg { color: var(--bad); font-weight: 600; }
+.pnl-flat { color: var(--ash); }
+
+.holding-card {
+  background: var(--chip);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.holding-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.holding-token { font-family: ui-monospace, monospace; font-size: 14px; color: var(--text); }
+.holding-pnl { font-size: 20px; }
+.holding-meta { color: var(--ash); font-size: 12.5px; margin-top: 6px; }
+
+table { border-collapse: collapse; width: 100%; margin-bottom: 8px; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge); }
+th { color: var(--ash); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+td { color: var(--text); }
+.table-wrap { overflow-x: auto; }

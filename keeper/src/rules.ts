@@ -73,12 +73,12 @@ export async function evaluate(rule: TradingRule, v: VaultRecord): Promise<void>
   const tokenNow = byToken.get(token) ?? 0;
   if (exceedsHoldingCap(tokenNow + buyPls, totalValue, v.maxHoldingPct)) {
     log("info", "rules", `${v.address} ${token}: holding cap ${v.maxHoldingPct}% would be exceeded ` +
-      `(${(tokenNow + buyPls).toFixed(0)}/${totalValue.toFixed(0)} PLS), skipping buy`);
+      `(${(tokenNow + buyPls).toFixed(0)}/${totalValue.toFixed(0)} ETH), skipping buy`);
     return;
   }
 
   log("info", "rules", `Trigger: ${token} ${rule.direction} ${(move * 100).toFixed(2)}% ` +
-    `over ${rule.lookbackHours}h, buying ${formatEther(amountIn)} PLS for ${v.address}`);
+    `over ${rule.lookbackHours}h, buying ${formatEther(amountIn)} ETH for ${v.address}`);
 
   const res = await executeSwap({
     vault: v.address,

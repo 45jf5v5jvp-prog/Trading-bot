@@ -40,8 +40,8 @@ async function main(): Promise<void> {
   } else {
     process.env.KEEPER_ADDRESS = keeper.address;
     const bal = await provider.getBalance(keeper.address);
-    log("info", "main", `Keeper ${keeper.address}, ${Number(bal) / 1e18} PLS for gas`);
-    if (bal === 0n) log("error", "main", "Keeper has no PLS. Every transaction will fail.");
+    log("info", "main", `Keeper ${keeper.address}, ${Number(bal) / 1e18} ETH for gas`);
+    if (bal === 0n) log("error", "main", "Keeper has no ETH. Every transaction will fail.");
   }
 
   await verifyChain();

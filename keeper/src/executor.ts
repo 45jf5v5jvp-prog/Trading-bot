@@ -119,7 +119,7 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
   const [ceiling, shareBps] = await Promise.all([vault.maxGasFee(), vault.maxGasFeeBps()]);
   if (gasFee > BigInt(ceiling))
     return { ok: false, amountOut: 0n,
-      reason: `gas is ${formatEther(gasFee)} PLS, above their ceiling. Skipped rather than overpaid.` };
+      reason: `gas is ${formatEther(gasFee)} ETH, above their ceiling. Skipped rather than overpaid.` };
 
   // The share-of-trade check only makes sense against the WETH side. Buying,
   // that's the input. Selling, it's the expected proceeds. Comparing a gas
@@ -128,7 +128,7 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
   const plsSide = isBuy ? req.amountIn : quoted;
   if (gasFee > (plsSide * BigInt(shareBps)) / 10_000n)
     return { ok: false, amountOut: 0n,
-      reason: `gas is ${formatEther(gasFee)} PLS, over their share-of-trade limit for a ${formatEther(plsSide)} PLS trade. Skipped.` };
+      reason: `gas is ${formatEther(gasFee)} ETH, over their share-of-trade limit for a ${formatEther(plsSide)} ETH trade. Skipped.` };
 
   try {
     await vault.executeSwap.staticCall(req.path, req.amountIn, minOut, gasFee);
@@ -137,8 +137,8 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
   }
 
   if (CFG.dryRun) {
-    log("info", "exec", `DRY RUN ${req.bot} ${req.tokenLabel} in=${formatEther(req.amountIn)} PLS ` +
-      `minOut=${minOut} gasFee=${formatEther(gasFee)} PLS`);
+    log("info", "exec", `DRY RUN ${req.bot} ${req.tokenLabel} in=${formatEther(req.amountIn)} ETH ` +
+      `minOut=${minOut} gasFee=${formatEther(gasFee)} ETH`);
     return { ok: true, amountOut: quoted };
   }
   if (!(await gasOk())) return { ok: false, amountOut: 0n, reason: "gas price above cap" };

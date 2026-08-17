@@ -71,7 +71,7 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
     return;
   }
   log("info", "launch", `Screened ${token}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
-    `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} PLS`);
+    `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} ETH`);
 
   await ensureWatched(token);
 
@@ -113,12 +113,17 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
         spentPls: L.perLaunchPls, tokensOut: res.amountOut,
         tpPct: L.takeProfitPct, slPct: L.stopLossPct, timeExitMin: L.timeExitMin,
       });
-      log("info", "launch", `Opened ${L.perLaunchPls} PLS in ${token} for ${v.address}`);
+      log("info", "launch", `Opened ${L.perLaunchPls} ETH in ${token} for ${v.address}`);
     } else {
       log("warn", "launch", `${v.address} skipped ${token}: ${res.reason}`);
     }
   });
 }
+
+// Alchemy's free tier caps eth_getLogs to a 10-block range per request - a
+// paid plan raises this, but until then the scanner has to walk the chain in
+// small windows instead of one big range, or every single scan fails.
+const LOG_CHUNK_BLOCKS = 10;
 
 export async function scan(): Promise<void> {
   const head = await provider.getBlockNumber();
@@ -127,26 +132,37 @@ export async function scan(): Promise<void> {
 
   const from = Math.max(last + 1, head - 4000); // cap catch-up per pass
   const f = new Contract(CFG.factory, FACTORY_ABI, provider) as Dyn;
+  const filter = f.filters.PairCreated;
+  if (!filter) { log("error", "launch", "PairCreated filter unavailable on factory ABI"); return; }
 
-  try {
-    const filter = f.filters.PairCreated;
-    if (!filter) throw new Error('PairCreated filter unavailable on factory ABI');
-    const logs = await f.queryFilter(filter(), from, head);
-    for (const ev of logs) {
-      const a = (ev as any).args;
-      if (!a) continue;
-      const [t0, t1, pair] = [a[0] as string, a[1] as string, a[2] as string];
-      const token = t0.toLowerCase() === CFG.weth.toLowerCase() ? t1
-                  : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
-                  : null;
-      if (!token) continue; // only PLS-quoted pairs are snipeable
-      await handleNewPair(token, pair, ev.transactionHash);
+  let totalNew = 0;
+  let chunkStart = from;
+  while (chunkStart <= head) {
+    const chunkEnd = Math.min(chunkStart + LOG_CHUNK_BLOCKS - 1, head);
+    try {
+      const logs = await f.queryFilter(filter(), chunkStart, chunkEnd);
+      for (const ev of logs) {
+        const a = (ev as any).args;
+        if (!a) continue;
+        const [t0, t1, pair] = [a[0] as string, a[1] as string, a[2] as string];
+        const token = t0.toLowerCase() === CFG.weth.toLowerCase() ? t1
+                    : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
+                    : null;
+        if (!token) continue; // only WETH-quoted pairs are snipeable
+        await handleNewPair(token, pair, ev.transactionHash);
+      }
+      totalNew += logs.length;
+      // Checkpoint after every successful chunk, not just at the end - a
+      // failure partway through a big catch-up shouldn't lose the progress
+      // already made, or every retry re-scans from the very start again.
+      meta.set("last_pair_block", String(chunkEnd));
+      chunkStart = chunkEnd + 1;
+    } catch (e) {
+      log("error", "launch", `Scan ${chunkStart}-${chunkEnd} failed: ${(e as Error).message}`);
+      return;
     }
-    meta.set("last_pair_block", String(head));
-    if (logs.length) log("debug", "launch", `Scanned ${from}-${head}, ${logs.length} new pairs`);
-  } catch (e) {
-    log("error", "launch", `Scan ${from}-${head} failed: ${(e as Error).message}`);
   }
+  if (totalNew) log("debug", "launch", `Scanned ${from}-${head}, ${totalNew} new pairs`);
 }
 
 export { formatEther };

@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserProvider, Contract, JsonRpcProvider, formatEther, parseEther, ZeroAddress } from "ethers";
 import { CHAIN_ID, VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WPLS, ERC20_ABI, RPC_URL } from "./contracts";
-import { getWalletConnectProvider } from "./walletConnect";
+import { getWalletConnectProvider, walletConnectConfigured } from "./walletConnect";
 
 /**
  * Waits for a transaction to confirm by polling our own known-good RPC
@@ -45,6 +45,11 @@ export function useVault() {
   const [vaultAddress, setVaultAddress] = useState(null);
   const [vaultInfo, setVaultInfo] = useState(null); // { owner, executor, paused, wplsBalance }
   const [connecting, setConnecting] = useState(false);
+  // True only during the very first silent-reconnect attempt after a page
+  // load - lets index.js hold off showing "Connect Wallet" for the split
+  // second it takes to find out a wallet is already authorized, instead of
+  // flashing the disconnected screen before flipping back to connected.
+  const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState(null);
   const rawProviderRef = useRef(null); // the active EIP-1193 provider, whichever method connected it
 
@@ -86,6 +91,47 @@ export function useVault() {
       await refreshVaultInfo(addr);
     }
   }, [refreshVaultInfo]);
+
+  /**
+   * Reconnects on page load without ever prompting the wallet, so a plain
+   * browser refresh doesn't log the user out and force them through
+   * Connect Wallet again. Two paths, tried in the same order manual connect
+   * prefers:
+   *  - Injected (MetaMask/Rabby/etc): eth_accounts (not eth_requestAccounts)
+   *    returns accounts the wallet already authorized for this site with no
+   *    popup at all - that's the whole trick.
+   *  - WalletConnect: EthereumProvider restores its own session from
+   *    localStorage during init() when one exists, so if init() comes back
+   *    already .connected there's nothing left to prompt for either.
+   * Any failure here (wrong network, no prior authorization, no persisted
+   * WalletConnect session) is swallowed on purpose - it just means falling
+   * back to the ordinary "Connect Wallet" screen, not an error worth
+   * alarming the user with on every page load.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    async function tryReconnect() {
+      try {
+        if (typeof window !== "undefined" && window.ethereum) {
+          const accounts = await window.ethereum.request({ method: "eth_accounts" });
+          if (!cancelled && accounts?.length) {
+            await finishConnecting(window.ethereum, accounts);
+            return;
+          }
+        }
+      } catch { /* fall through to WalletConnect */ }
+      try {
+        if (!cancelled && walletConnectConfigured()) {
+          const wcProvider = await getWalletConnectProvider();
+          if (!cancelled && wcProvider.connected && wcProvider.accounts?.length) {
+            await finishConnecting(wcProvider, wcProvider.accounts);
+          }
+        }
+      } catch { /* no persisted session - fine, user connects manually */ }
+    }
+    tryReconnect().finally(() => { if (!cancelled) setInitializing(false); });
+    return () => { cancelled = true; };
+  }, [finishConnecting]);
 
   /** Browser extension (MetaMask, Rabby, ...) or a wallet app's own built-in browser. */
   const connectInjected = useCallback(async () => {
@@ -229,7 +275,7 @@ export function useVault() {
   }, [vaultAddress, getProvider, refreshVaultInfo]);
 
   return {
-    account, vaultAddress, vaultInfo, connecting, error,
+    account, vaultAddress, vaultInfo, connecting, initializing, error,
     connectInjected, connectWalletConnect, disconnect,
     createVault, depositWpls, withdrawWpls, setPaused, refreshVaultInfo, getProvider,
   };

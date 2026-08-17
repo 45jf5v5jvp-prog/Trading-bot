@@ -1779,6 +1779,9 @@ function HoleFeed({ round, ledger }) {
           <div key={h} style={{ background: C.card, borderRadius: 11, marginBottom: 6, overflow: 'hidden' }}>
             <div onClick={() => setOpen(isOpen ? -1 : h)} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', cursor: 'pointer' }}>
               <span style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 15, color: C.chalk, minWidth: 22 }}>{h + 1}</span>
+              {holeMult(round, h) > 1 && (
+                <span style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 10, color: C.onBall, background: C.ball, borderRadius: 5, padding: '2px 5px', lineHeight: 1 }}>{holeMult(round, h)}×</span>
+              )}
               <span style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, minWidth: 44 }}>
                 {lines.length} line{lines.length === 1 ? '' : 's'}
               </span>

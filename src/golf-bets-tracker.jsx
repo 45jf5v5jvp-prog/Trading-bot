@@ -266,6 +266,14 @@ function sideNet(r, side, h) { const v = side.map(id => net(r, id, h)).filter(x 
    exception: a match needs the same two sides start to finish. */
 const teamsAt = (r, h) => (r.partnerMode === 'rotate' && r.holeTeams?.[h]) || r.teams;
 
+/* Per-hole multiplier: a hole can be flagged 2x-5x so it counts extra. It
+   defaults to 1 (a no-op), so with nothing set the scoring is exactly as
+   before. It scales the per-hole games below — not the match-play games,
+   Hammer (its own doubling) or junk (its own ladder). */
+const MULT_GAMES = ['skins', 'wolf', 'vegas', 'points', 'yardage', 'stableford', 'bbb'];
+const holeMult = (round, h) => Number(round.mult?.[h]) || 1;
+const scaleMap = (m, x) => { if (x !== 1) for (const k in m) m[k] = (m[k] || 0) * x; return m; };
+
 /* Round robin: new pairing every six holes, three pairings covers eighteen. */
 /* Stable pseudo random so every phone in the group draws the same partner. */
 const hashStr = (str) => { let x = 2166136261; for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619); } return Math.abs(x); };
@@ -455,7 +463,7 @@ function calcSkins(round, stake) {
     if (w.length === 1) {
       const val = stake * carry, m = zero(round);
       round.players.forEach(p => { m[p.id] = p.id === w[0].id ? val * (round.players.length - 1) : -val; });
-      addInto(total, m);
+      addInto(total, scaleMap(m, holeMult(round, h)));
       log.push({ h, text: `${nameOf(round, w[0].id)} takes ${carry} skin${carry > 1 ? 's' : ''}`, m });
       carry = 1;
     } else {
@@ -552,7 +560,7 @@ function calcWolf(round, stake) {
       if (call === 'lone') { others.forEach(id => m[id] = 1); text = 'Lone wolf caught, 1 point each to the field'; }
       else { others.forEach(id => m[id] = 3); text = `Field takes it, 3 each to ${others.map(id => nameOf(round, id)).join(' + ')}`; }
     } else text = 'Halved, no points';
-    addInto(pts, m);
+    addInto(pts, scaleMap(m, holeMult(round, h)));
     log.push({ h, text, m });
   }
   return { money: settle(round, pts, stake), points: pts, log };
@@ -611,6 +619,8 @@ function calcVegas(round, stake) {
         pts[w] += diff; pts[l] -= diff;
       }
     }
+    const mx = holeMult(round, h);
+    if (mx !== 1) { scaleMap(m, mx); for (let z = 0; z < pts.length; z++) pts[z] *= mx; }
     addInto(total, m);
 
     const shown = tms.map((t, i) => {
@@ -654,7 +664,7 @@ function calcPoints(round, stake) {
   for (const h of playedHoles(round)) {
     const rows = round.players.map(p => ({ id: p.id, n: net(round, p.id, h) })).sort((a, b) => a.n - b.n);
     const m = allocate(rows, split);
-    addInto(pts, m);
+    addInto(pts, scaleMap(m, holeMult(round, h)));
     log.push({ h, text: rows.map(r => `${nameOf(round, r.id)} ${fmtP(m[r.id])}`).join('  ·  '), m });
   }
   return { money: settle(round, pts, stake), points: pts, log };
@@ -666,7 +676,7 @@ function calcStableford(round, stake) {
   for (const h of playedHoles(round)) {
     const m = zero(round);
     round.players.forEach(p => { m[p.id] = val(net(round, p.id, h) - round.pars[h]); });
-    addInto(pts, m);
+    addInto(pts, scaleMap(m, holeMult(round, h)));
     log.push({ h, text: round.players.map(p => `${nameOf(round, p.id)} ${m[p.id]}`).join('  ·  '), m });
   }
   return { money: settle(round, pts, stake), points: pts, log };
@@ -680,7 +690,7 @@ function calcBBB(round, stake) {
     const m = zero(round), parts = [];
     for (const [k, lbl] of keys) if (rec[k]) { m[rec[k]] = (m[rec[k]] || 0) + 1; parts.push(`${lbl} ${nameOf(round, rec[k])}`); }
     if (!parts.length) continue;
-    addInto(pts, m);
+    addInto(pts, scaleMap(m, holeMult(round, h)));
     log.push({ h, text: parts.join('  ·  '), m });
   }
   return { money: settle(round, pts, stake), points: pts, log };
@@ -698,7 +708,7 @@ function calcYardage(round, rate) {
     const m = zero(round);
     const each = round.yardMode === 'split' ? r2(val / (n - 1)) : val;
     round.players.forEach(p => { m[p.id] = p.id === w[0].id ? each * (n - 1) : -each; });
-    addInto(total, m);
+    addInto(total, scaleMap(m, holeMult(round, h)));
     log.push({ h, text: `${yds} yds, ${money(val)}, ${nameOf(round, w[0].id)} takes it`, m });
   }
   return { money: total, points: null, log };
@@ -1241,7 +1251,7 @@ function Setup({ onStart, onBack, roster }) {
       stakes: Object.fromEntries(games.map(k => [k, Number(stakeOf(k)) || 1])),
       course: courseName, pars: pars.slice(0, holes), si: si.slice(0, holes),
       yards: yards.slice(0, holes).map((y, i) => Number(y) || defYards(pars[i])), yardMode,
-      scores: {}, wolf: {}, hammer: {}, bbb: {}, junk: {}, presses: [], holeTeams: {},
+      scores: {}, wolf: {}, hammer: {}, bbb: {}, junk: {}, presses: [], holeTeams: {}, mult: {},
       pointsSplit: oddSplit(count), partnerMode, vegasFlip: true, vegasPain, skinsCarry,
       groups, blindDraw: oddMan && blindDraw,
       junkOn, junkValue: Number(junkValue) || 1, junkValues, junkEscalate, junkMode,
@@ -2072,6 +2082,9 @@ function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] })
   const wolfId = has('wolf') ? round.players[h % n].id : null;
   const call = round.wolf?.[h];
   const setCall = (v) => { if (locked) return; setRound(r => ({ ...r, wolf: { ...r.wolf, [h]: v } })); };
+  const holeX = holeMult(round, h);
+  const setMult = (v) => { if (locked) return; setRound(r => ({ ...r, mult: { ...(r.mult || {}), [h]: v } })); };
+  const multGamesOn = round.games.some(k => MULT_GAMES.includes(k));
   const ham = round.hammer?.[h] || { mult: 1, conceded: null };
   const setHam = (patch) => { if (locked) return; setRound(r => ({ ...r, hammer: { ...r.hammer, [h]: { ...ham, ...patch } } })); };
   const bbb = round.bbb?.[h] || {};
@@ -2141,10 +2154,27 @@ function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] })
             <button onClick={() => setH(x => Math.max(0, x - 1))} style={navBtn}>◀</button>
             <div style={{ flex: 1, textAlign: 'center' }}>
               <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 36, color: C.chalk, lineHeight: 1, letterSpacing: '-0.03em' }}>{h + 1}</div>
-              <Eyebrow style={{ marginTop: 3 }}>par {par} · index {round.si[h]}</Eyebrow>
+              <Eyebrow style={{ marginTop: 3 }}>par {par} · index {round.si[h]}{holeX > 1 && <span style={{ color: C.ball }}> · {holeX}× HOLE</span>}</Eyebrow>
             </div>
             <button onClick={() => setH(x => Math.min(round.holes - 1, x + 1))} style={navBtn}>▶</button>
           </div>
+
+          {multGamesOn && (
+            <div style={panel}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                <Eyebrow style={{ color: holeX > 1 ? C.ink : C.muted }}>this hole counts</Eyebrow>
+                {holeX > 1 && <span style={{ marginLeft: 8, fontFamily: F_MONO, fontWeight: 700, fontSize: 12, color: C.ball }}>{holeX}×</span>}
+                <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9, color: C.muted, textAlign: 'right', lineHeight: 1.4 }}>
+                  {round.games.filter(k => MULT_GAMES.includes(k)).map(k => gameName(k, n)).join(', ')}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 5 }}>
+                {[1, 2, 3, 4, 5].map(mx => (
+                  <Btn key={mx} active={holeX === mx} disabled={locked} onClick={() => setMult(mx)} style={{ flex: 1, fontSize: 13, padding: '10px 3px' }}>{mx}×</Btn>
+                ))}
+              </div>
+            </div>
+          )}
 
           {has('wolf') && (
             <div style={panel}>
@@ -2644,7 +2674,7 @@ async function freshCode() {
 /* Per hole data every scorer owns for their own foursome. Everything else is
    config the host owns. Split this way, two groups can post at the same time
    without stepping on each other. */
-const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams'];
+const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams', 'mult'];
 const cardKey = (code, gi) => `${gameKey(code)}:c${gi}`;
 
 const emptyCard = () => Object.fromEntries(CARD_FIELDS.map(k => [k, {}]));
@@ -2662,7 +2692,7 @@ function scopeCard(round, ids) {
       if (kept.length) { c.junk[h] = c.junk[h] || {}; c.junk[h][t] = kept; }
     }
   }
-  ['wolf', 'hammer', 'bbb', 'holeTeams'].forEach(k => { c[k] = round[k] || {}; });
+  ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult'].forEach(k => { c[k] = round[k] || {}; });
   return c;
 }
 
@@ -2675,7 +2705,7 @@ function mergeRound(config, cards) {
       out.junk[h] = out.junk[h] || {};
       for (const t in c.junk[h]) out.junk[h][t] = [...new Set([...(out.junk[h][t] || []), ...c.junk[h][t]])];
     }
-    ['wolf', 'hammer', 'bbb', 'holeTeams'].forEach(k => {
+    ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult'].forEach(k => {
       for (const h in c[k] || {}) if (c[k][h] != null) out[k][h] = c[k][h];
     });
   }

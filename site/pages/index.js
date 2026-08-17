@@ -8,6 +8,12 @@ import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
+function fmtBalance(wpls) {
+  const n = Number(wpls);
+  if (!Number.isFinite(n)) return wpls;
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultInfo, connecting, error,
@@ -177,7 +183,7 @@ export default function Dashboard() {
 
               <div className="row-between">
                 <div>
-                  <span className="num" style={{ fontSize: 28 }}>{vaultInfo.wplsBalance}</span>
+                  <span className="num" style={{ fontSize: 28 }}>{fmtBalance(vaultInfo.wplsBalance)}</span>
                   <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>WPLS</span>
                 </div>
                 <div className="row">

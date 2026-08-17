@@ -2,7 +2,8 @@ import { parseEther, formatEther } from "ethers";
 import { CFG } from "./config.js";
 import { registry, type TradingRule, type VaultRecord } from "./registry.js";
 import { windowStats, ensureWatched } from "./prices.js";
-import { executeSwap } from "./executor.js";
+import { executeSwap, executeSwapMultiVenue } from "./executor.js";
+import { findBestVenue } from "./venues.js";
 import { positionsValuePls } from "./positions.js";
 import { recordBuy, exceedsHoldingCap } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
@@ -78,16 +79,31 @@ export async function evaluate(rule: TradingRule, v: VaultRecord): Promise<void>
     return;
   }
 
-  log("info", "rules", `Trigger: ${token} ${rule.direction} ${(move * 100).toFixed(2)}% ` +
-    `over ${rule.lookbackHours}h, buying ${formatEther(amountIn)} ETH for ${v.address}`);
+  // Whichever venue prices best for this size right now - see venues.ts. A
+  // plain V2-only vault (BotVault) has no way to execute on V3, so it's
+  // limited to whatever V2 offers even if V3 is genuinely better priced.
+  const venue = await findBestVenue(token, Number(formatEther(amountIn)));
+  if (!venue) { log("debug", "rules", `${v.address} ${token}: no venue with real liquidity`); return; }
+  if (venue.kind === "v3" && v.kind !== "multiVenue") {
+    log("debug", "rules", `${v.address} ${token}: best venue is V3, this vault can only trade V2`);
+    return;
+  }
 
-  const res = await executeSwap({
-    vault: v.address,
-    bot: "trading",
-    path: [CFG.weth, token],
-    amountIn,
-    tokenLabel: token,
-  });
+  log("info", "rules", `Trigger: ${token} ${rule.direction} ${(move * 100).toFixed(2)}% ` +
+    `over ${rule.lookbackHours}h, buying ${formatEther(amountIn)} ETH for ${v.address} via ${venue.kind}`);
+
+  const res = venue.kind === "v2"
+    ? (v.kind === "multiVenue"
+        ? await executeSwapMultiVenue({
+            vault: v.address, bot: "trading", venue: { kind: "v2", path: [CFG.weth, token] },
+            amountIn, tokenLabel: token,
+          })
+        : await executeSwap({ vault: v.address, bot: "trading", path: [CFG.weth, token], amountIn, tokenLabel: token }))
+    : await executeSwapMultiVenue({
+        vault: v.address, bot: "trading",
+        venue: { kind: "v3", tokenIn: CFG.weth, tokenOut: token, fee: venue.fee },
+        amountIn, tokenLabel: token,
+      });
   if (!res.ok) { log("warn", "rules", `Skipped: ${res.reason}`); return; }
 
   // Track the buy so the sell side (take profit / stop loss / trailing / time)

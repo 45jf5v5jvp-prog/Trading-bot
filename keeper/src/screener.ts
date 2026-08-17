@@ -93,6 +93,30 @@ async function deployerPct(token: string, deployer: string | null): Promise<numb
   }
 }
 
+/**
+ * Binary search for the earliest block at which `token` has contract code,
+ * searching no later than `atOrBeforeBlock` (the block the pair was created
+ * in - the token obviously already existed by then, so it's a safe upper
+ * bound and keeps this to ~log2(atOrBeforeBlock) calls instead of walking
+ * block-by-block).
+ *
+ * Assumes code, once deployed, stays deployed (no selfdestruct-then-redeploy
+ * at the same address) - true for the overwhelming majority of ERC20s, and a
+ * false negative here just means treating a redeployed address as "new,"
+ * which is the conservative direction to be wrong in for a launch sniper.
+ */
+async function findDeployBlock(token: string, atOrBeforeBlock: number): Promise<number> {
+  let lo = 0;
+  let hi = atOrBeforeBlock;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const code = await provider.getCode(token, mid);
+    if (code === "0x") lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /** PLS-side depth of the token's WETH pair. */
 async function liquidityPls(token: string): Promise<{ liq: number; pair: string }> {
   const pair: string = await factory.getPair(token, CFG.weth);
@@ -108,6 +132,7 @@ export async function screen(
   token: string,
   deployer: string | null,
   limits: ScreenLimits,
+  pairBlockNumber: number,
 ): Promise<Screen> {
   const out: Screen = {
     token, sellable: false, buyTaxBps: 0, sellTaxBps: 0, roundTripLossBps: 0,
@@ -119,6 +144,14 @@ export async function screen(
   if (!pair) return { ...out, reason: "no WETH pair" };
   if (liq < limits.minLiquidityPls)
     return { ...out, reason: `liquidity ${Math.round(liq)} below floor ${limits.minLiquidityPls}` };
+
+  // Before the expensive probe simulation: is this token actually new, or an
+  // old one that just got a fresh WETH pairing? Checked here, ahead of
+  // simulate(), so an old token gets rejected without spending a probe call on it.
+  const deployBlock = await findDeployBlock(token, pairBlockNumber);
+  const ageBlocks = pairBlockNumber - deployBlock;
+  if (ageBlocks > CFG.maxTokenAgeBlocks)
+    return { ...out, reason: `token contract is ${ageBlocks} blocks old - existed before this pairing, not a fresh launch` };
 
   const sim = await simulate(token);
   if (!sim) return { ...out, reason: "simulation unavailable, refusing to guess" };

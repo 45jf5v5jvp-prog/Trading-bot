@@ -59,6 +59,16 @@ export const CFG = {
   simAmountEth: num("SIM_AMOUNT_ETH", "0.02"),
   honeypotMaxLossBps: num("HONEYPOT_MAX_LOSS_BPS", "1200"),
 
+  // Rejects a pair whose TOKEN contract already existed more than this many
+  // blocks before the pair was created - catches an old/established token
+  // getting a brand-new WETH pairing and having the launch bot mistake that
+  // for a fresh launch. Robinhood Chain runs ~0.1s blocks (measured directly
+  // against the chain, not assumed - see CLAUDE.md), so 36000 blocks is
+  // roughly 1 hour - deploy-then-launch-fast token creators clear this easily;
+  // a token that's been sitting around for weeks does not, regardless of
+  // which quote asset just got paired with it.
+  maxTokenAgeBlocks: num("MAX_TOKEN_AGE_BLOCKS", "36000"),
+
   dbPath: opt("DB_PATH", "./keeper.db"),
   logLevel: opt("LOG_LEVEL", "info"),
 };

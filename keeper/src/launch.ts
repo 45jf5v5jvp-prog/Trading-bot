@@ -43,7 +43,7 @@ async function deployerOf(txHash: string): Promise<string | null> {
   } catch { return null; }
 }
 
-async function handleNewPair(token: string, pair: string, txHash: string): Promise<void> {
+async function handleNewPair(token: string, pair: string, txHash: string, blockNumber: number): Promise<void> {
   if (seen.has(token.toLowerCase())) return;
   seen.add(token.toLowerCase());
 
@@ -63,7 +63,7 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
     minLiquidityPls: Math.min(...candidates.map((c) => c.launch.minLiquidityPls)),
   };
 
-  const s = await screen(token, deployer, strictest);
+  const s = await screen(token, deployer, strictest, blockNumber);
   recordScreen(s);
 
   if (!s.sellable) {
@@ -149,7 +149,7 @@ export async function scan(): Promise<void> {
                     : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
                     : null;
         if (!token) continue; // only WETH-quoted pairs are snipeable
-        await handleNewPair(token, pair, ev.transactionHash);
+        await handleNewPair(token, pair, ev.transactionHash, ev.blockNumber);
       }
       totalNew += logs.length;
       // Checkpoint after every successful chunk, not just at the end - a

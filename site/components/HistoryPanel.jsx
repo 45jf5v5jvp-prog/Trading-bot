@@ -105,12 +105,12 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
           <div className="sub-label">Recent Trades</div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount (PLS)</th><th>Fee</th><th>Tx</th></tr></thead>
+              <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount (PLS)</th><th>Tx</th></tr></thead>
               <tbody>
                 {fires.map((f) => (
                   <tr key={f.id}>
                     <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTs(f.ts)}</td>
-                    <td>{f.amount}</td><td>{f.fee}</td>
+                    <td>{f.amount}</td>
                     <td>{f.tx_hash ? <a href={`https://scan.pulsechain.com/tx/${f.tx_hash}`} target="_blank" rel="noreferrer">{short(f.tx_hash)}</a> : "-"}</td>
                   </tr>
                 ))}

@@ -1,7 +1,7 @@
 {
-  "name": "Side Action",
-  "short_name": "Side Action",
-  "description": "A golf betting tracker. Made by Scratch Certified.",
+  "name": "Golf Bets Tracker",
+  "short_name": "Golf Bets Tracker",
+  "description": "Track your golf bets and settle up. Made by Scratch Certified.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -1,9 +1,9 @@
 {
-  "name": "side-action",
+  "name": "golf-bets-tracker",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Side Action — a golf betting tracker. Made by Scratch Certified.",
+  "description": "Golf Bets Tracker — track your golf bets and settle up. Made by Scratch Certified.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -1,4 +1,4 @@
-// Side Action — course search relay (Supabase Edge Function)
+// Golf Bets Tracker — course search relay (Supabase Edge Function)
 //
 // Holds the GolfCourseAPI key server-side (so it never ships to the phone) and
 // adds CORS so the app can call it from the browser. The app hits:

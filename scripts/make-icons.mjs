@@ -1,6 +1,6 @@
 /*
  * Generates the app icons from scratch — no image dependencies.
- * A gold golf ball on the app's dark-green ink, matching the Side Action palette.
+ * A gold golf ball on the app's dark-green ink, matching the Golf Bets Tracker palette.
  * Renders at 4x and box-downsamples for smooth, anti-aliased edges.
  */
 import zlib from 'node:zlib';

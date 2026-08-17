@@ -1,6 +1,6 @@
-# Side Action
+# Golf Bets Tracker
 
-A golf betting tracker. Made by Scratch Certified.
+Track your golf bets and settle up. Made by Scratch Certified.
 
 A Vite + React single-page app. One phone keeps the card for the whole group; an
 in-progress round or trip is saved on that device (via `localStorage`) and survives
@@ -68,7 +68,7 @@ Turn it on:
 3. In **Project Settings → API**, copy the **Project URL** and the **anon public**
    key.
 4. Paste them into the `window.SIDE_ACTION_CONFIG` block near the top of
-   `index.html` (or `sideaction.html` — it's plain text you can edit by hand, no
+   `index.html` (or `golf-bets-tracker.html` — it's plain text you can edit by hand, no
    rebuild needed):
 
    ```html

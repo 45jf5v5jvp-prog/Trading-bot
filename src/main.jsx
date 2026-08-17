@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './side-action.jsx';
+import App from './golf-bets-tracker.jsx';
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>

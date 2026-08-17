@@ -1,5 +1,5 @@
 /*
- * Builds a single self-contained sideaction.html from the Vite production build.
+ * Builds a single self-contained golf-bets-tracker.html from the Vite production build.
  * Inlines the JS bundle, the manifest, and the icons (as data URIs) so the whole
  * app is one portable file with no external files to host alongside it.
  * Run `npm run build` first, then `node scripts/bundle-singlefile.mjs`.
@@ -28,9 +28,9 @@ const favicon = dataUri('favicon-32.png', 'image/png');
 
 // Manifest with inlined icons, itself inlined as a data URI
 const manifest = {
-  name: 'Side Action',
-  short_name: 'Side Action',
-  description: 'A golf betting tracker. Made by Scratch Certified.',
+  name: 'Golf Bets Tracker',
+  short_name: 'Golf Bets Tracker',
+  description: 'Track your golf bets and settle up. Made by Scratch Certified.',
   start_url: '.',
   scope: '.',
   display: 'standalone',
@@ -53,8 +53,8 @@ const html = `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 
-    <title>Side Action</title>
-    <meta name="description" content="Side Action — a golf betting tracker. Made by Scratch Certified." />
+    <title>Golf Bets Tracker</title>
+    <meta name="description" content="Golf Bets Tracker — track your golf bets and settle up. Made by Scratch Certified." />
 
     <!-- Theme + web app manifest (inlined) -->
     <meta name="theme-color" content="#F1F5EC" />
@@ -64,7 +64,7 @@ const html = `<!doctype html>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Side Action" />
+    <meta name="apple-mobile-web-app-title" content="Golf Bets Tracker" />
 
     <!-- Icons (inlined) -->
     <link rel="apple-touch-icon" href="${appleIcon}" />
@@ -94,7 +94,7 @@ ${bundle}
 </html>
 `;
 
-const out = path.join(root, 'sideaction.html');
+const out = path.join(root, 'golf-bets-tracker.html');
 fs.writeFileSync(out, html);
 const kb = (fs.statSync(out).size / 1024).toFixed(0);
-console.log(`wrote sideaction.html (${kb} KB, one self-contained file)`);
+console.log(`wrote golf-bets-tracker.html (${kb} KB, one self-contained file)`);

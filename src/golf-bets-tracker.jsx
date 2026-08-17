@@ -5,8 +5,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
    Scorecard first. Stack as many games as you want on top of it.
    ========================================================================== */
 
-const APP_NAME = 'SIDE';
-const APP_SUB = 'ACTION';
+const APP_NAME = 'GOLF BETS';
+const APP_SUB = 'TRACKER';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the

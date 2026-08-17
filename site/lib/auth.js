@@ -25,6 +25,20 @@ function buildMessage(vaultAddress, timestampMs) {
   return `Icaria: update bot config for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape of message, for the "close this position" action - a distinct
+ * action string so a signature for one action can never be replayed as
+ * authorization for a different one. */
+function buildCloseMessage(vaultAddress, positionId, timestampMs) {
+  return `Icaria: close position ${positionId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
+function checkFresh(timestampMs) {
+  if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
+  const age = Date.now() - timestampMs;
+  if (age > MESSAGE_MAX_AGE_MS || age < -MESSAGE_MAX_AGE_MS)
+    throw new Error("signed message expired, please try again");
+}
+
 /** Default reader: an actual on-chain call. Tests inject a fake instead, so no
  * test in this codebase ever makes a real network call for this function. */
 async function defaultReadOwner(vaultAddress, rpcUrl) {
@@ -34,20 +48,16 @@ async function defaultReadOwner(vaultAddress, rpcUrl) {
 }
 
 /**
- * Throws Error with a caller-safe message on any authorization failure.
+ * Core of every vault-owner-gated action: the caller must have signed
+ * `message` with the wallet that is, right now, the on-chain owner() of
+ * `vaultAddress`. Throws Error with a caller-safe message on any failure.
  * `readOwner` defaults to a real chain read; tests override it to avoid
  * network I/O while still exercising the exact same authorization logic.
  */
-async function authorizeConfigWrite({ vaultAddress, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
-  if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
-  const age = Date.now() - timestampMs;
-  if (age > MESSAGE_MAX_AGE_MS || age < -MESSAGE_MAX_AGE_MS)
-    throw new Error("signed message expired, please try saving again");
-
-  const expectedMessage = buildMessage(vaultAddress, timestampMs);
+async function authorizeVaultAction({ vaultAddress, message, signature, rpcUrl, readOwner = defaultReadOwner }) {
   let signer;
   try {
-    signer = verifyMessage(expectedMessage, signature);
+    signer = verifyMessage(message, signature);
   } catch {
     throw new Error("invalid signature");
   }
@@ -65,4 +75,19 @@ async function authorizeConfigWrite({ vaultAddress, timestampMs, signature, rpcU
   return { signer };
 }
 
-module.exports = { authorizeConfigWrite, buildMessage, MESSAGE_MAX_AGE_MS };
+async function authorizeConfigWrite({ vaultAddress, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildMessage(vaultAddress, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
+async function authorizeClose({ vaultAddress, positionId, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildCloseMessage(vaultAddress, positionId, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
+module.exports = {
+  authorizeConfigWrite, authorizeClose, authorizeVaultAction,
+  buildMessage, buildCloseMessage, MESSAGE_MAX_AGE_MS,
+};

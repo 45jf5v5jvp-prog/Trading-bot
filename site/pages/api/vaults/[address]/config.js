@@ -3,7 +3,11 @@ const { getConfig, setConfig } = require("../../../../lib/store");
 const { authorizeConfigWrite } = require("../../../../lib/auth");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.pulsechain.com";
+// No fallback on purpose - unlike the PulseChain site this was forked from,
+// there is no safe public default RPC to fall back to here. Falling back to
+// PulseChain's RPC would check ownership against the wrong chain entirely,
+// silently accepting or rejecting signatures for the wrong network.
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
 
 /**
  * GET  /api/vaults/:address/config  - public read. This is the exact endpoint

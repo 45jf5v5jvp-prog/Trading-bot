@@ -1863,11 +1863,37 @@ function GroupStatus({ round, coverage, meIdx }) {
   );
 }
 
-function SettleUp({ round, ledger }) {
+/* --- Venmo pay links -----------------------------------------------------
+   No account linking (Venmo has no third-party P2P API). Instead we store each
+   player's @handle and build a prefilled payment link: tapping it opens Venmo
+   with the person, amount, and note filled in — the payer just hits Pay.
+   Handles are remembered by name in localStorage so they carry across rounds. */
+const cleanVenmo = (h) => (h || '').trim().replace(/^@+/, '').replace(/\s+/g, '');
+const VENMO_DIR = 'ugb:venmo';
+const venmoDir = () => { try { return JSON.parse(localStorage.getItem(VENMO_DIR) || '{}'); } catch { return {}; } };
+const saveVenmo = (name, handle) => {
+  const key = (name || '').trim().toLowerCase(); if (!key) return;
+  try { const d = venmoDir(); if (handle) d[key] = handle; else delete d[key]; localStorage.setItem(VENMO_DIR, JSON.stringify(d)); } catch {}
+};
+const venmoOf = (p) => cleanVenmo(p?.venmo || venmoDir()[(p?.name || '').trim().toLowerCase()] || '');
+/* Amount prefill is honored by most Venmo versions; if a version ignores it,
+   the right person and note still open and the amount is right there on screen. */
+const venmoLink = (handle, amount, note) =>
+  `https://venmo.com/${encodeURIComponent(handle)}?txn=pay&amount=${Math.abs(amount).toFixed(2)}&note=${encodeURIComponent(note || 'Golf bets')}`;
+
+function SettleUp({ round, ledger, setRound }) {
   const [mode, setMode] = useState('direct');
   const loser = [...round.players].sort((a, b) => (ledger.money[a.id] || 0) - (ledger.money[b.id] || 0))[0];
   const [banker, setBanker] = useState(loser.id);
+  const [editVenmo, setEditVenmo] = useState(false);
   const list = mode === 'direct' ? directTransfers(ledger.money, round.players) : bankerTransfers(ledger.money, round.players, banker);
+  const note = round.course ? `Golf — ${round.course}` : 'Golf bets';
+
+  const setVenmo = (pid, handle) => {
+    const clean = cleanVenmo(handle);
+    saveVenmo(round.players.find(p => p.id === pid)?.name, clean);
+    if (setRound) setRound(r => ({ ...r, players: r.players.map(p => p.id === pid ? { ...p, venmo: clean } : p) }));
+  };
 
   return (
     <div style={{ marginTop: 24 }}>
@@ -1885,19 +1911,50 @@ function SettleUp({ round, ledger }) {
       )}
       {!list.length ? (
         <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, padding: '12px 0' }}>Everybody is square. Nobody owes anybody.</div>
-      ) : list.map((t, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', background: C.card, borderRadius: 10, marginBottom: 6 }}>
-          <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.down }}>{nameOf(round, t.from)}</span>
-          <span style={{ fontFamily: F_MONO, fontSize: 12, color: C.muted }}>pays</span>
-          <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.up }}>{nameOf(round, t.to)}</span>
-          <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 16, color: C.chalk }}>{money(t.amt)}</span>
-        </div>
-      ))}
+      ) : list.map((t, i) => {
+        const handle = venmoOf(round.players.find(p => p.id === t.to));
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', background: C.card, borderRadius: 10, marginBottom: 6 }}>
+            <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.down }}>{nameOf(round, t.from)}</span>
+            <span style={{ fontFamily: F_MONO, fontSize: 12, color: C.muted }}>pays</span>
+            <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.up }}>{nameOf(round, t.to)}</span>
+            <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 16, color: C.chalk }}>{money(t.amt)}</span>
+            {handle && (
+              <a href={venmoLink(handle, t.amt, note)} target="_blank" rel="noopener noreferrer"
+                style={{ textDecoration: 'none', fontFamily: F_DISP, fontWeight: 700, fontSize: 11, letterSpacing: '0.03em', padding: '7px 11px', borderRadius: 8, border: `1px solid ${C.ball}`, background: C.card2, color: C.ink, whiteSpace: 'nowrap' }}>Pay</a>
+            )}
+          </div>
+        );
+      })}
       <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
         {mode === 'direct'
           ? `${list.length} handoff${list.length === 1 ? '' : 's'} and everybody is square.`
           : `${nameOf(round, banker)} collects from the losers and pays out the winners.`}
       </div>
+
+      {setRound && (
+        <div style={{ marginTop: 14 }}>
+          <div onClick={() => setEditVenmo(v => !v)} style={{ cursor: 'pointer' }}>
+            <Eyebrow>venmo handles {editVenmo ? '▴' : '▾'}</Eyebrow>
+          </div>
+          {editVenmo && (
+            <div style={{ marginTop: 8 }}>
+              {round.players.map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13, color: C.chalk, width: 84, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                  <span style={{ fontFamily: F_MONO, fontSize: 14, color: C.muted }}>@</span>
+                  <input value={venmoOf(p)} onChange={e => setVenmo(p.id, e.target.value)} placeholder="venmo-username"
+                    autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                    style={{ ...inputStyle, flex: 1, padding: '8px 10px', fontSize: 13 }} />
+                </div>
+              ))}
+              <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 4, lineHeight: 1.6 }}>
+                Saved by name for next time. On each line, Pay opens Venmo prefilled — the payer just confirms.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2386,7 +2443,7 @@ function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] })
           <Eyebrow style={{ marginBottom: 16, marginTop: 3 }}>through {playedHoles(round).length} hole{playedHoles(round).length === 1 ? '' : 's'}</Eyebrow>
           <Standings round={round} ledger={ledger} />
 
-          <SettleUp round={round} ledger={ledger} />
+          <SettleUp round={round} ledger={ledger} setRound={setRound} />
 
           {(round.games.length > 1 || round.junkOn?.length) && (
             <>

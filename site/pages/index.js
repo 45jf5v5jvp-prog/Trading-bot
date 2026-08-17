@@ -20,7 +20,7 @@ function fmtBalance(weth) {
 
 export default function Dashboard() {
   const {
-    account, vaultAddress, vaultInfo, connecting, error,
+    account, vaultAddress, vaultKind, vaultInfo, connecting, error,
     connectInjected, connectWalletConnect, createVault, depositWeth, withdrawWeth, setPaused, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
@@ -198,7 +198,10 @@ export default function Dashboard() {
             <div className="panel">
               <p className="mono-addr" style={{ marginBottom: 4 }}>Connected: {account}</p>
               <div className="section-label" style={{ marginTop: 18 }}>Your Vault</div>
-              <p className="mono-addr" style={{ marginBottom: 14 }}>{vaultAddress}</p>
+              <p className="mono-addr" style={{ marginBottom: 4 }}>{vaultAddress}</p>
+              <p className="hint" style={{ marginBottom: 14 }}>
+                {vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
+              </p>
 
               <div className="row-between">
                 <div>

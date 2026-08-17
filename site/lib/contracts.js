@@ -7,6 +7,11 @@ export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "4663");
 // visitor). Use a separate, domain-restricted RPC key for this specifically.
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
 export const VAULT_FACTORY = process.env.NEXT_PUBLIC_VAULT_FACTORY || "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54";
+// V2+V3 capable vaults (contracts/MultiVenueVault.sol). Blank until deployed
+// and verified - see CLAUDE.md. When set, new vaults are created here
+// instead of the V2-only factory above; existing V2-only vaults are
+// unaffected and keep working exactly as they do today.
+export const MULTI_VENUE_VAULT_FACTORY = process.env.NEXT_PUBLIC_MULTI_VENUE_VAULT_FACTORY || "";
 export const WETH = process.env.NEXT_PUBLIC_WETH || "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
 // Same router the keeper itself trades through (keeper/.env ROUTER) - used
 // here read-only, just to price open positions live.

@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -46,4 +46,28 @@ test("setConfig overwrites a previous config for the same vault", () => {
   setConfig(vault, { ...base, maxHoldingPct: 10 }, Date.now());
   setConfig(vault, { ...base, maxHoldingPct: 90 }, Date.now());
   assert.equal(getConfig(vault).maxHoldingPct, 90);
+});
+
+test("pendingCloseIds is empty for a vault with no close requests", () => {
+  const vault = "0x" + "e".repeat(40);
+  assert.deepEqual(pendingCloseIds(vault), []);
+});
+
+test("requestClose then pendingCloseIds round-trips the position id", () => {
+  const vault = "0x" + "f".repeat(40);
+  requestClose(vault, 7, Date.now());
+  assert.deepEqual(pendingCloseIds(vault), [7]);
+});
+
+test("requestClose is idempotent - clicking twice does not duplicate the request", () => {
+  const vault = "0x1".padEnd(42, "1");
+  requestClose(vault, 3, Date.now());
+  requestClose(vault, 3, Date.now());
+  assert.deepEqual(pendingCloseIds(vault), [3]);
+});
+
+test("requestClose is case-insensitive on the vault address, like config", () => {
+  const lower = "0x2".padEnd(42, "2");
+  requestClose(lower.toUpperCase(), 9, Date.now());
+  assert.deepEqual(pendingCloseIds(lower), [9]);
 });

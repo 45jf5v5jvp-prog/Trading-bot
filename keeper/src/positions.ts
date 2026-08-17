@@ -78,7 +78,30 @@ async function markToMarket(r: Row): Promise<{ value: number; held: bigint } | n
   }
 }
 
-async function checkAndClose(r: Row, now: number): Promise<void> {
+/**
+ * Which open positions the owner has asked to close via the dashboard, for
+ * one vault. Only the keeper's key can actually call the vault's
+ * onlyExecutor executeSwap, so a dashboard button can't sell directly - it
+ * writes a request the site stores, and this is that request read back.
+ * Same CONFIG_API the bot settings come from; without it set, manual close
+ * simply isn't available yet (falls back to config.json territory, which
+ * has no place to record a close request either).
+ */
+async function fetchCloseRequests(vault: string): Promise<Set<number>> {
+  const api = process.env.CONFIG_API;
+  if (!api) return new Set();
+  try {
+    const res = await fetch(`${api}/vaults/${vault}/close-requests`);
+    if (!res.ok) return new Set();
+    const ids = (await res.json()) as number[];
+    return new Set(ids);
+  } catch (e) {
+    log("warn", "positions", `Close-request fetch failed for ${vault}: ${(e as Error).message}`);
+    return new Set();
+  }
+}
+
+async function checkAndClose(r: Row, now: number, manualClose: boolean): Promise<void> {
   const m = await markToMarket(r);
   if (!m) return;
 
@@ -90,7 +113,10 @@ async function checkAndClose(r: Row, now: number): Promise<void> {
     db.prepare(`UPDATE positions SET high_water=? WHERE id=?`).run(highWater, r.id);
   }
 
-  const reason = sellSignal(
+  // An owner-requested close always wins over whatever the normal exit
+  // targets say - they asked for it directly, so it doesn't need to clear
+  // take-profit/stop-loss/trailing/time thresholds first.
+  const reason = manualClose ? "closed by owner" : sellSignal(
     { tpPct: r.tp_pct, slPct: r.sl_pct, trailPct: r.trail_pct, timeExitMin: r.time_exit_min,
       openedAt: r.opened_at, highWater },
     ratio, now,
@@ -136,7 +162,8 @@ export async function tick(): Promise<void> {
   }
 
   await mapLimit([...byVault.values()], CFG.keeperConcurrency, async (vaultRows) => {
-    for (const r of vaultRows) await checkAndClose(r, now);
+    const closeIds = await fetchCloseRequests(vaultRows[0]!.vault);
+    for (const r of vaultRows) await checkAndClose(r, now, closeIds.has(r.id));
   });
 }
 

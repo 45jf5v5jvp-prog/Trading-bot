@@ -1,4 +1,5 @@
 import { numberFieldProps } from "../lib/numberField";
+import DurationField from "./DurationField";
 
 /**
  * Editor for one trading rule. Pure/controlled - all state lives in the
@@ -35,8 +36,8 @@ export default function RuleEditor({ rule, onChange, onRemove }) {
       <div className="field-inline">
         <label>Threshold %</label>
         <input {...num("thresholdPct")} min="0" style={{ width: 80 }} />
-        <label>over hours</label>
-        <input {...num("lookbackHours")} min="0" style={{ width: 80 }} />
+        <label>over</label>
+        <DurationField hours={rule.lookbackHours ?? 0} onChange={(h) => onChange({ ...rule, lookbackHours: h })} />
       </div>
 
       <div className="field-inline">
@@ -45,8 +46,8 @@ export default function RuleEditor({ rule, onChange, onRemove }) {
       </div>
 
       <div className="field-inline">
-        <label>Cooldown hours</label>
-        <input {...num("cooldownHours")} min="0" style={{ width: 80 }} />
+        <label>Cooldown</label>
+        <DurationField hours={rule.cooldownHours ?? 0} onChange={(h) => onChange({ ...rule, cooldownHours: h })} />
         <label>Max fires/day</label>
         <input {...num("maxFires")} min="0" style={{ width: 80 }} />
       </div>

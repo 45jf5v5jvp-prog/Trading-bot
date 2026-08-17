@@ -15,6 +15,12 @@ function getDb() {
       config     TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS close_requests (
+      vault        TEXT NOT NULL,
+      position_id  INTEGER NOT NULL,
+      requested_at INTEGER NOT NULL,
+      PRIMARY KEY (vault, position_id)
+    );
   `);
   return db;
 }
@@ -38,8 +44,31 @@ function setConfig(vault, config, nowMs) {
     .run(vault.toLowerCase(), JSON.stringify(config), nowMs);
 }
 
+/**
+ * Records that the owner wants this position closed. The keeper (not this
+ * site) actually executes the sell - it polls pendingCloseIds on its own
+ * schedule and forces an exit, the same mechanism take-profit/stop-loss
+ * already use, since only the keeper's key can call the vault's onlyExecutor
+ * executeSwap. INSERT OR IGNORE so clicking the button twice before the
+ * keeper's next pass is a harmless no-op, not a duplicate request.
+ */
+function requestClose(vault, positionId, nowMs) {
+  getDb()
+    .prepare(`INSERT OR IGNORE INTO close_requests (vault, position_id, requested_at) VALUES (?, ?, ?)`)
+    .run(vault.toLowerCase(), positionId, nowMs);
+}
+
+/** Every position ID this vault owner has asked to close, handled or not -
+ * the keeper is responsible for only acting on ones still actually open. */
+function pendingCloseIds(vault) {
+  return getDb()
+    .prepare(`SELECT position_id FROM close_requests WHERE vault = ?`)
+    .all(vault.toLowerCase())
+    .map((r) => r.position_id);
+}
+
 function resetForTests() {
   db = undefined;
 }
 
-module.exports = { getConfig, setConfig, resetForTests, DB_PATH };
+module.exports = { getConfig, setConfig, requestClose, pendingCloseIds, resetForTests, DB_PATH };

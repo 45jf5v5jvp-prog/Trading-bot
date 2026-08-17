@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
+import { closePosition } from "../lib/closePosition";
 import { numberFieldProps } from "../lib/numberField";
 import RulesList from "../components/RulesList";
 import LaunchSettings from "../components/LaunchSettings";
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
   const [txBusy, setTxBusy] = useState(false);
+  const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
 
   /** Every edit to config goes through here so "unsaved changes" stays accurate -
    * nothing takes effect for the keeper until Save All Settings actually signs
@@ -134,6 +136,20 @@ export default function Dashboard() {
     }
   }
 
+  /** Signs and submits a close request for one open position. Doesn't sell
+   * anything itself - the keeper does that on its next pass, see
+   * lib/closePosition.js. */
+  async function handleClosePosition(positionId) {
+    setCloseStates((s) => ({ ...s, [positionId]: "pending" }));
+    try {
+      await closePosition(getProvider, vaultAddress, positionId);
+      setCloseStates((s) => ({ ...s, [positionId]: "requested" }));
+    } catch (e) {
+      setCloseStates((s) => ({ ...s, [positionId]: "error" }));
+      setStatus(`Close request failed: ${e.message}`);
+    }
+  }
+
   return (
     <div className="page">
       <div className="container">
@@ -218,7 +234,7 @@ export default function Dashboard() {
             </div>
 
             <div className="panel">
-              <HistoryPanel history={history} />
+              <HistoryPanel history={history} onClosePosition={handleClosePosition} closeStates={closeStates} />
             </div>
 
             {config && (

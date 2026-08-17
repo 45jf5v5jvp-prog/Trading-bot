@@ -24,7 +24,8 @@ function fmtPnl(pct) {
 /** One currently-held token: what the bot bought, what it's worth right now
  * (a live PulseX quote, not a cached price), and whether that's up or down
  * since entry. This is the "should I close this?" view. */
-function HoldingCard({ p }) {
+function HoldingCard({ p, onClose, closeState }) {
+  const requested = closeState === "requested" || closeState === "pending";
   return (
     <div className="holding-card">
       <div className="holding-card-top">
@@ -40,6 +41,22 @@ function HoldingCard({ p }) {
           ? ` · worth ${Math.round(p.valueNowPls).toLocaleString()} PLS now`
           : ""}
       </div>
+      <div className="row" style={{ marginTop: 10 }}>
+        <button
+          type="button"
+          className="btn btn-small btn-danger"
+          onClick={() => onClose(p.id)}
+          disabled={requested}
+        >
+          {closeState === "pending" ? "Requesting..." : requested ? "Close Requested" : "Close Position"}
+        </button>
+      </div>
+      {requested && (
+        <p className="hint" style={{ marginTop: 6 }}>
+          The bot will sell this the next time it checks positions (usually within a minute)
+          - closing isn't instant, since only the keeper can actually place the trade.
+        </p>
+      )}
     </div>
   );
 }
@@ -48,7 +65,7 @@ function HoldingCard({ p }) {
  * "is it working?" without needing to SSH into the server and read logs.
  * Open positions are the main event: live value and P/L, refreshed on every
  * poll (see index.js), so this is the "should I close this?" screen. */
-export default function HistoryPanel({ history }) {
+export default function HistoryPanel({ history, onClosePosition, closeStates }) {
   if (!history) return null;
   const { positions, fires } = history;
   const noHistoryYet = positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0;
@@ -60,7 +77,9 @@ export default function HistoryPanel({ history }) {
       {!noHistoryYet && positions.open.length === 0 && (
         <p className="hint">Nothing open right now. The bot isn't holding any tokens.</p>
       )}
-      {positions.open.map((p) => <HoldingCard key={p.id} p={p} />)}
+      {positions.open.map((p) => (
+        <HoldingCard key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
+      ))}
 
       {positions.closed.length > 0 && (
         <>

@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet } = require("ethers");
-const { authorizeConfigWrite, buildMessage } = require("../lib/auth");
+const { authorizeConfigWrite, authorizeClose, buildMessage, buildCloseMessage } = require("../lib/auth");
 
 const VAULT = "0x" + "e".repeat(40);
 const wallet = Wallet.createRandom();
@@ -99,4 +99,35 @@ test("surfaces a readable error if the chain read itself fails (e.g. RPC down)",
     authorizeConfigWrite({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
     /could not read vault owner on chain/,
   );
+});
+
+test("authorizeClose accepts a correctly-signed close request from the real owner", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildCloseMessage(VAULT, 5, ts));
+  const readOwner = fakeReader(wallet.address);
+  const result = await authorizeClose({ vaultAddress: VAULT, positionId: 5, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+});
+
+test("authorizeClose rejects a signature made for a DIFFERENT position id", async () => {
+  const ts = Date.now();
+  // Signed to close position 5, submitted trying to close position 6 - a
+  // signature for one action must never authorize a different one.
+  const signature = await wallet.signMessage(buildCloseMessage(VAULT, 5, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeClose({ vaultAddress: VAULT, positionId: 6, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
+});
+
+test("authorizeClose rejects an expired timestamp without ever calling the chain reader", async () => {
+  const staleTs = Date.now() - 10 * 60 * 1000;
+  const signature = await wallet.signMessage(buildCloseMessage(VAULT, 5, staleTs));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeClose({ vaultAddress: VAULT, positionId: 5, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    /expired/,
+  );
+  assert.equal(readOwner.calls.length, 0);
 });

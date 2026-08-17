@@ -1,7 +1,7 @@
 import { Contract, formatEther, parseEther } from "ethers";
 import { CFG } from "./config.js";
 import { keeper, provider, routerRead, txQueue, tradeRateLimiter, gasOk, type Dyn } from "./chain.js";
-import { VAULT_ABI } from "./abis.js";
+import { VAULT_ABI, MULTI_VENUE_VAULT_ABI, V3_QUOTER_ABI } from "./abis.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
 
@@ -155,6 +155,163 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
         .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now,
              Number(formatEther(req.amountIn)), fee, tx.hash);
       log("info", "exec", `${req.bot} filled ${req.tokenLabel} tx=${tx.hash} block=${rc?.blockNumber}`);
+      return { ok: true, amountOut: quoted, txHash: tx.hash };
+    } catch (e) {
+      log("error", "exec", `Swap failed on ${req.vault}: ${(e as Error).message.slice(0, 160)}`);
+      return { ok: false, amountOut: 0n, reason: (e as Error).message.slice(0, 160) };
+    }
+  });
+}
+
+// ============================================================================
+// Multi-venue execution (MultiVenueVault only - see registry.ts's VaultRecord
+// .kind). executeSwap() above is untouched and keeps handling every existing
+// V2-only BotVault exactly as it already does - this is new, separate code
+// for the new vault type, deliberately not a refactor of the working path.
+// ============================================================================
+
+export type TradeVenue =
+  | { kind: "v2"; path: string[] }
+  | { kind: "v3"; tokenIn: string; tokenOut: string; fee: number };
+
+export interface MultiVenueSwapRequest {
+  vault: string;
+  bot: "launch" | "trading";
+  venue: TradeVenue;
+  amountIn: bigint;
+  tokenLabel: string;
+  slippageBps?: number;
+}
+
+async function quoteVenue(venue: TradeVenue, amountIn: bigint): Promise<bigint | null> {
+  if (venue.kind === "v2") {
+    try {
+      const amounts: bigint[] = await routerRead.getAmountsOut(amountIn, venue.path);
+      return amounts[amounts.length - 1]!;
+    } catch { return null; }
+  }
+  if (!CFG.quoterV3) return null;
+  const quoter = new Contract(CFG.quoterV3, V3_QUOTER_ABI, provider) as Dyn;
+  try {
+    const result = await quoter.quoteExactInputSingle.staticCall(
+      venue.tokenIn, venue.tokenOut, venue.fee, amountIn, 0,
+    );
+    return result[0] as bigint;
+  } catch { return null; }
+}
+
+export async function executeSwapMultiVenue(req: MultiVenueSwapRequest): Promise<SwapResult> {
+  if (CFG.globalKill) return { ok: false, amountOut: 0n, reason: "global kill switch on" };
+  if (!keeper) return { ok: false, amountOut: 0n, reason: "no keeper key loaded" };
+
+  // VAULT_ABI covers the fields common to both vault kinds (owner/executor/
+  // paused/maxTradeSize/maxGasFee/maxGasFeeBps/minInterval/lastTradeAt);
+  // MULTI_VENUE_VAULT_ABI adds the two swap entry points this kind has that
+  // the plain VAULT_ABI doesn't.
+  const vault = new Contract(req.vault, [...VAULT_ABI, ...MULTI_VENUE_VAULT_ABI], keeper) as Dyn;
+
+  const [paused, maxSize, minInterval, lastAt] = await Promise.all([
+    vault.paused(), vault.maxTradeSize(), vault.minInterval(), vault.lastTradeAt(),
+  ]);
+  if (paused) return { ok: false, amountOut: 0n, reason: "vault paused by owner" };
+  if (req.amountIn > BigInt(maxSize))
+    return { ok: false, amountOut: 0n, reason: "above owner's max trade size" };
+  const now = Math.floor(Date.now() / 1000);
+  if (now < Number(lastAt) + Number(minInterval))
+    return { ok: false, amountOut: 0n, reason: "vault cooldown active" };
+
+  if (!CFG.dryRun && !tradeRateLimiter.tryTake()) {
+    log("warn", "exec", `Global trade rate limit hit (${CFG.maxTradesPerMinute}/min). ` +
+      `Skipping ${req.tokenLabel} for ${req.vault}. If this is legitimate, raise MAX_TRADES_PER_MINUTE.`);
+    return { ok: false, amountOut: 0n, reason: "global trade rate limit reached, skipped for safety" };
+  }
+
+  const afterFee = (req.amountIn * BigInt(10_000 - CFG.feeBps)) / 10_000n;
+  const quoted = await quoteVenue(req.venue, afterFee);
+  if (quoted === null) return { ok: false, amountOut: 0n, reason: "quote failed" };
+  if (quoted === 0n) return { ok: false, amountOut: 0n, reason: "quote returned zero" };
+
+  const tokenIn = req.venue.kind === "v2" ? req.venue.path[0]! : req.venue.tokenIn;
+  const tokenOut = req.venue.kind === "v2" ? req.venue.path[req.venue.path.length - 1]! : req.venue.tokenOut;
+
+  // Tax discount only exists for V2 (screen() measures it via SwapProbe's
+  // quoted-vs-actual comparison). V3 has no equivalent yet - see
+  // SwapProbeV3.sol and screener.ts's screenV3 for why - so this is 0 for a
+  // V3 trade and the roundTripLossBps pass/fail gate in screenV3 is the only
+  // protection against a taxed/thin V3 pool, not a quote discount here.
+  const taxRow = req.venue.kind === "v2" ? db.prepare(
+    "SELECT buy_tax_bps, sell_tax_bps FROM screened WHERE token IN (?, ?)"
+  ).get(tokenOut.toLowerCase(), tokenIn.toLowerCase()) as { buy_tax_bps: number; sell_tax_bps: number } | undefined : undefined;
+  const isSell = tokenIn.toLowerCase() !== CFG.weth.toLowerCase();
+  const taxBps = taxRow ? (isSell ? taxRow.sell_tax_bps : taxRow.buy_tax_bps) : 0;
+  if (taxBps > 0)
+    log("debug", "exec", `Discounting quote by measured ${taxBps} bps tax on ${req.tokenLabel}`);
+
+  const afterTax = (quoted * BigInt(10_000 - Math.min(taxBps, 5000))) / 10_000n;
+  const slip = req.slippageBps ?? CFG.maxSlippageBps;
+  const minOut = (afterTax * BigInt(10_000 - slip)) / 10_000n;
+  if (minOut === 0n) return { ok: false, amountOut: 0n, reason: "computed floor is zero" };
+
+  const gasFee = await estimateGasFee(400_000n, req.bot === "launch");
+
+  const [ceiling, shareBps] = await Promise.all([vault.maxGasFee(), vault.maxGasFeeBps()]);
+  if (gasFee > BigInt(ceiling))
+    return { ok: false, amountOut: 0n,
+      reason: `gas is ${formatEther(gasFee)} ETH, above their ceiling. Skipped rather than overpaid.` };
+
+  const isBuy = tokenIn.toLowerCase() === CFG.weth.toLowerCase();
+  const ethSide = isBuy ? req.amountIn : quoted;
+  if (gasFee > (ethSide * BigInt(shareBps)) / 10_000n)
+    return { ok: false, amountOut: 0n,
+      reason: `gas is ${formatEther(gasFee)} ETH, over their share-of-trade limit for a ${formatEther(ethSide)} ETH trade. Skipped.` };
+
+  // Explicit per-venue branches rather than dynamic vault[methodName] lookup
+  // on purpose - a dynamically-resolved contract method is easy to get
+  // subtly wrong (e.g. calling it before reaching for .staticCall instead of
+  // on it), and this is exactly the code path that sends real transactions.
+  // Naming both calls out directly, mirroring executeSwap() above, keeps
+  // that mistake impossible to make by construction.
+  try {
+    if (req.venue.kind === "v2") {
+      await vault.executeSwapV2.staticCall(req.venue.path, req.amountIn, minOut, gasFee);
+    } else {
+      await vault.executeSwapV3.staticCall(
+        req.venue.tokenIn, req.venue.tokenOut, req.venue.fee, req.amountIn, minOut, gasFee,
+      );
+    }
+  } catch (e) {
+    return { ok: false, amountOut: 0n, reason: `would revert: ${(e as Error).message.slice(0, 140)}` };
+  }
+
+  if (CFG.dryRun) {
+    log("info", "exec", `DRY RUN ${req.bot} ${req.tokenLabel} via ${req.venue.kind} in=${formatEther(req.amountIn)} ETH ` +
+      `minOut=${minOut} gasFee=${formatEther(gasFee)} ETH`);
+    return { ok: true, amountOut: quoted };
+  }
+  if (!(await gasOk())) return { ok: false, amountOut: 0n, reason: "gas price above cap" };
+
+  return txQueue.run(`${req.bot}:${req.vault}`, async () => {
+    try {
+      let tx: { hash: string; wait: () => Promise<{ blockNumber: number } | null> };
+      if (req.venue.kind === "v2") {
+        const v2 = req.venue;
+        const est: bigint = await vault.executeSwapV2.estimateGas(v2.path, req.amountIn, minOut, gasFee);
+        tx = await vault.executeSwapV2(v2.path, req.amountIn, minOut, gasFee, { gasLimit: (est * 130n) / 100n });
+      } else {
+        const v3 = req.venue;
+        const est: bigint = await vault.executeSwapV3.estimateGas(
+          v3.tokenIn, v3.tokenOut, v3.fee, req.amountIn, minOut, gasFee,
+        );
+        tx = await vault.executeSwapV3(v3.tokenIn, v3.tokenOut, v3.fee, req.amountIn, minOut, gasFee, {
+          gasLimit: (est * 130n) / 100n,
+        });
+      }
+      const rc = await tx.wait();
+      const fee = Number(formatEther(req.amountIn)) * (CFG.feeBps / 10_000);
+      db.prepare(`INSERT INTO fires(vault,bot,token,ts,amount,fee,tx_hash) VALUES(?,?,?,?,?,?,?)`)
+        .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now,
+             Number(formatEther(req.amountIn)), fee, tx.hash);
+      log("info", "exec", `${req.bot} filled ${req.tokenLabel} via ${req.venue.kind} tx=${tx.hash} block=${rc?.blockNumber}`);
       return { ok: true, amountOut: quoted, txHash: tx.hash };
     } catch (e) {
       log("error", "exec", `Swap failed on ${req.vault}: ${(e as Error).message.slice(0, 160)}`);

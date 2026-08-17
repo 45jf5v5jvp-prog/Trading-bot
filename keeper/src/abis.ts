@@ -47,3 +47,32 @@ export const VAULT_FACTORY_ABI = [
   "function vaultOf(address) view returns (address)",
   "event VaultCreated(address indexed user, address vault)",
 ];
+
+/// MultiVenueVault (contracts/MultiVenueVault.sol) shares owner/executor/
+/// paused/maxTradeSize/maxGasFee/maxGasFeeBps/minInterval/lastTradeAt with
+/// BotVault under identical names, so VAULT_ABI above already covers reading
+/// those. This is just the two swap entry points that differ.
+export const MULTI_VENUE_VAULT_ABI = [
+  "function executeSwapV2(address[] path, uint256 amountIn, uint256 amountOutMin, uint256 gasFee) returns (uint256)",
+  "function executeSwapV3(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint256 amountOutMin, uint256 gasFee) returns (uint256)",
+];
+
+export const V3_FACTORY_ABI = [
+  "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
+  "event PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)",
+];
+
+export const V3_POOL_ABI = [
+  "function liquidity() view returns (uint128)",
+  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  "function token0() view returns (address)",
+  "function token1() view returns (address)",
+  "function fee() view returns (uint24)",
+];
+
+/// QuoterV2's common shape - verify this matches whatever Quoter is actually
+/// deployed on Robinhood Chain before trusting it (same caution as
+/// MultiVenueVault.sol's open question #2 on the router shape).
+export const V3_QUOTER_ABI = [
+  "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
+];

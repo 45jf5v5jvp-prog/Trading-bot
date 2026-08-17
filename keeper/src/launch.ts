@@ -1,10 +1,11 @@
 import { Contract, formatEther, parseEther } from "ethers";
 import { CFG } from "./config.js";
 import { provider, factory, type Dyn } from "./chain.js";
-import { FACTORY_ABI, ERC20_ABI } from "./abis.js";
+import { FACTORY_ABI, ERC20_ABI, V3_FACTORY_ABI } from "./abis.js";
 import { registry, type VaultRecord } from "./registry.js";
-import { screen, recordScreen } from "./screener.js";
-import { executeSwap } from "./executor.js";
+import { screen, screenV3, recordScreen, type Screen, type ScreenLimits } from "./screener.js";
+import { executeSwap, executeSwapMultiVenue } from "./executor.js";
+import { findBestVenue, type Venue } from "./venues.js";
 import { openPosition, positionsValuePls } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
 import { ensureWatched } from "./prices.js";
@@ -43,34 +44,52 @@ async function deployerOf(txHash: string): Promise<string | null> {
   } catch { return null; }
 }
 
-async function handleNewPair(token: string, pair: string, txHash: string, blockNumber: number): Promise<void> {
+/** Every candidate vault's own launch settings folded into one strict-enough
+ * shared screen, plus a representative trade size for venue selection. One
+ * simulation covers every subscriber, not N. */
+function strictestOf(candidates: VaultRecord[]): ScreenLimits & { representativeTradeEth: number } {
+  return {
+    maxBuyTaxBps: Math.max(...candidates.map((c) => c.launch.maxBuyTaxBps)),
+    maxSellTaxBps: Math.max(...candidates.map((c) => c.launch.maxSellTaxBps)),
+    requireLpLock: candidates.every((c) => c.launch.requireLpLock),
+    maxDeployerPct: Math.max(...candidates.map((c) => c.launch.maxDeployerPct)),
+    minLiquidityPls: Math.min(...candidates.map((c) => c.launch.minLiquidityPls)),
+    // The trade most likely to reveal a venue that can't actually absorb the
+    // size someone wants to buy - screening against the biggest ask is the
+    // conservative choice, not the average.
+    representativeTradeEth: Math.max(...candidates.map((c) => c.launch.perLaunchPls)),
+  };
+}
+
+async function handleNewToken(token: string, txHash: string, discoveryBlock: number): Promise<void> {
   if (seen.has(token.toLowerCase())) return;
   seen.add(token.toLowerCase());
 
   const candidates = registry.active().filter((v) => v.launch.enabled && v.launch.perLaunchPls > 0);
   if (candidates.length === 0) return;
 
-  log("info", "launch", `New pair ${pair} for token ${token}`);
   const deployer = await deployerOf(txHash);
+  const { representativeTradeEth, ...limits } = strictestOf(candidates);
 
-  // Screen once with the strictest limits any subscriber uses, then let each
-  // vault apply its own thresholds to the result. One simulation, not N.
-  const strictest = {
-    maxBuyTaxBps: Math.max(...candidates.map((c) => c.launch.maxBuyTaxBps)),
-    maxSellTaxBps: Math.max(...candidates.map((c) => c.launch.maxSellTaxBps)),
-    requireLpLock: candidates.every((c) => c.launch.requireLpLock),
-    maxDeployerPct: Math.max(...candidates.map((c) => c.launch.maxDeployerPct)),
-    minLiquidityPls: Math.min(...candidates.map((c) => c.launch.minLiquidityPls)),
-  };
+  // Checks every venue that currently exists for this token (V2 and, if
+  // configured, every V3 fee tier) and picks whichever prices best at the
+  // size someone actually wants to trade - see venues.ts for why that beats
+  // comparing raw liquidity numbers across fundamentally different AMM models.
+  const venue = await findBestVenue(token, representativeTradeEth);
+  if (!venue) return; // no real pool anywhere for this token yet
 
-  const s = await screen(token, deployer, strictest, blockNumber);
+  log("info", "launch", `New token ${token}, best venue: ${venue.kind}${venue.kind === "v3" ? ` fee=${venue.fee}` : ""}`);
+
+  const s: Screen = venue.kind === "v2"
+    ? await screen(token, deployer, limits, discoveryBlock)
+    : await screenV3(token, deployer, limits, venue.fee, discoveryBlock);
   recordScreen(s);
 
   if (!s.sellable) {
     log("info", "launch", `Rejected ${token}: ${s.reason}`);
     return;
   }
-  log("info", "launch", `Screened ${token}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
+  log("info", "launch", `Screened ${token} via ${venue.kind}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
     `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} ETH`);
 
   await ensureWatched(token);
@@ -81,6 +100,9 @@ async function handleNewPair(token: string, pair: string, txHash: string, blockN
   // many subscribers should not queue up behind a slow RPC round trip per vault.
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const L = v.launch;
+    // A plain V2-only vault (BotVault) has no way to execute a V3 trade -
+    // it simply doesn't have that function on chain. Skip, don't error.
+    if (venue.kind === "v3" && v.kind !== "multiVenue") return;
     if (firesToday(v.address) >= L.maxPerDay) return;
     if (s.buyTaxBps > L.maxBuyTaxBps) return;
     if (s.sellTaxBps > L.maxSellTaxBps) return;
@@ -99,13 +121,25 @@ async function handleNewPair(token: string, pair: string, txHash: string, blockN
     }
 
     const amountIn = parseEther(String(L.perLaunchPls));
-    const res = await executeSwap({
-      vault: v.address, bot: "launch", path: [CFG.weth, token],
-      amountIn, tokenLabel: token,
-      // New pairs move violently in the first blocks. Tighter than the default
-      // means more skipped fills and fewer terrible ones.
-      slippageBps: Math.min(CFG.maxSlippageBps, 300),
-    });
+    // New pairs move violently in the first blocks. Tighter than the default
+    // means more skipped fills and fewer terrible ones.
+    const slippageBps = Math.min(CFG.maxSlippageBps, 300);
+
+    const res = venue.kind === "v2"
+      ? (v.kind === "multiVenue"
+          ? await executeSwapMultiVenue({
+              vault: v.address, bot: "launch", venue: { kind: "v2", path: [CFG.weth, token] },
+              amountIn, tokenLabel: token, slippageBps,
+            })
+          : await executeSwap({
+              vault: v.address, bot: "launch", path: [CFG.weth, token],
+              amountIn, tokenLabel: token, slippageBps,
+            }))
+      : await executeSwapMultiVenue({
+          vault: v.address, bot: "launch",
+          venue: { kind: "v3", tokenIn: CFG.weth, tokenOut: token, fee: venue.fee },
+          amountIn, tokenLabel: token, slippageBps,
+        });
 
     if (res.ok) {
       openPosition({
@@ -113,7 +147,7 @@ async function handleNewPair(token: string, pair: string, txHash: string, blockN
         spentPls: L.perLaunchPls, tokensOut: res.amountOut,
         tpPct: L.takeProfitPct, slPct: L.stopLossPct, timeExitMin: L.timeExitMin,
       });
-      log("info", "launch", `Opened ${L.perLaunchPls} ETH in ${token} for ${v.address}`);
+      log("info", "launch", `Opened ${L.perLaunchPls} ETH in ${token} for ${v.address} via ${venue.kind}`);
     } else {
       log("warn", "launch", `${v.address} skipped ${token}: ${res.reason}`);
     }
@@ -125,44 +159,80 @@ async function handleNewPair(token: string, pair: string, txHash: string, blockN
 // small windows instead of one big range, or every single scan fails.
 const LOG_CHUNK_BLOCKS = 10;
 
-export async function scan(): Promise<void> {
+/**
+ * Shared chunked-scan walk, used by both the V2 and V3 watchers below. Each
+ * keeps its own checkpoint (`checkpointKey`) so one falling behind (or one
+ * not configured at all) never affects the other.
+ */
+async function scanFactory(
+  factoryAddr: string,
+  factoryAbi: string[],
+  checkpointKey: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getFilter: (f: Dyn) => any,
+  onEvent: (ev: { args?: unknown; transactionHash: string; blockNumber: number }) => Promise<void>,
+): Promise<void> {
   const head = await provider.getBlockNumber();
-  const last = Number(meta.get("last_pair_block", String(head - 200)));
+  const last = Number(meta.get(checkpointKey, String(head - 200)));
   if (head <= last) return;
 
   const from = Math.max(last + 1, head - 4000); // cap catch-up per pass
-  const f = new Contract(CFG.factory, FACTORY_ABI, provider) as Dyn;
-  const filter = f.filters.PairCreated;
-  if (!filter) { log("error", "launch", "PairCreated filter unavailable on factory ABI"); return; }
+  const f = new Contract(factoryAddr, factoryAbi, provider) as Dyn;
 
   let totalNew = 0;
   let chunkStart = from;
   while (chunkStart <= head) {
     const chunkEnd = Math.min(chunkStart + LOG_CHUNK_BLOCKS - 1, head);
     try {
-      const logs = await f.queryFilter(filter(), chunkStart, chunkEnd);
-      for (const ev of logs) {
-        const a = (ev as any).args;
-        if (!a) continue;
-        const [t0, t1, pair] = [a[0] as string, a[1] as string, a[2] as string];
-        const token = t0.toLowerCase() === CFG.weth.toLowerCase() ? t1
-                    : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
-                    : null;
-        if (!token) continue; // only WETH-quoted pairs are snipeable
-        await handleNewPair(token, pair, ev.transactionHash, ev.blockNumber);
-      }
+      const logs = await f.queryFilter(getFilter(f), chunkStart, chunkEnd);
+      for (const ev of logs) await onEvent(ev as { args?: unknown; transactionHash: string; blockNumber: number });
       totalNew += logs.length;
       // Checkpoint after every successful chunk, not just at the end - a
       // failure partway through a big catch-up shouldn't lose the progress
       // already made, or every retry re-scans from the very start again.
-      meta.set("last_pair_block", String(chunkEnd));
+      meta.set(checkpointKey, String(chunkEnd));
       chunkStart = chunkEnd + 1;
     } catch (e) {
-      log("error", "launch", `Scan ${chunkStart}-${chunkEnd} failed: ${(e as Error).message}`);
+      log("error", "launch", `Scan ${chunkStart}-${chunkEnd} (${checkpointKey}) failed: ${(e as Error).message}`);
       return;
     }
   }
-  if (totalNew) log("debug", "launch", `Scanned ${from}-${head}, ${totalNew} new pairs`);
+  if (totalNew) log("debug", "launch", `Scanned ${checkpointKey} ${from}-${head}, ${totalNew} new`);
+}
+
+/** V2 PairCreated - each pair is exactly one token/WETH combination. */
+export async function scan(): Promise<void> {
+  await scanFactory(CFG.factory, FACTORY_ABI, "last_pair_block", (f) => f.filters.PairCreated!(), async (ev) => {
+    const a = ev.args as [string, string, string, bigint] | undefined;
+    if (!a) return;
+    const [t0, t1] = a;
+    const token = t0.toLowerCase() === CFG.weth.toLowerCase() ? t1
+                : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
+                : null;
+    if (!token) return; // only WETH-quoted pairs are snipeable
+    await handleNewToken(token, ev.transactionHash, ev.blockNumber);
+  });
+}
+
+/**
+ * V3 PoolCreated - unlike V2, a token can have several of these (one per fee
+ * tier). handleNewToken() dedupes by TOKEN, not by pool, and findBestVenue()
+ * re-checks every venue that exists by the time it runs, so this doesn't
+ * need to track which specific fee tier triggered it - noticing the token
+ * exists is all this scanner's job is.
+ */
+export async function scanV3(): Promise<void> {
+  if (!CFG.factoryV3) return; // not configured - V3 scanning simply disabled
+  await scanFactory(CFG.factoryV3, V3_FACTORY_ABI, "last_pool_block_v3", (f) => f.filters.PoolCreated!(), async (ev) => {
+    const a = ev.args as [string, string, number, number, string] | undefined;
+    if (!a) return;
+    const [t0, t1] = a;
+    const token = t0.toLowerCase() === CFG.weth.toLowerCase() ? t1
+                : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
+                : null;
+    if (!token) return;
+    await handleNewToken(token, ev.transactionHash, ev.blockNumber);
+  });
 }
 
 export { formatEther };

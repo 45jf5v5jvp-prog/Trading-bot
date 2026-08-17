@@ -1,7 +1,7 @@
 import { Contract, Interface, formatEther, parseEther, toBeHex } from "ethers";
 import { CFG, BURN_ADDRESSES, KNOWN_LOCKERS } from "./config.js";
 import { provider, routerRead, factory, type Dyn } from "./chain.js";
-import { ERC20_ABI, PAIR_ABI } from "./abis.js";
+import { ERC20_ABI, PAIR_ABI, V3_FACTORY_ABI, V3_QUOTER_ABI } from "./abis.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
 
@@ -9,6 +9,11 @@ const PROBE_ABI = [
   "function probe(address token) payable returns (tuple(bool buyOk,bool sellOk,uint256 quotedOut,uint256 actualOut,uint256 plsReturned,uint256 buyTaxBps,uint256 sellTaxBps,uint256 roundTripLossBps))",
 ];
 const probeIface = new Interface(PROBE_ABI);
+
+const PROBE_V3_ABI = [
+  "function probe(address token, uint24 fee) payable returns (tuple(bool buyOk,bool sellOk,uint256 actualOut,uint256 ethReturned,uint256 roundTripLossBps))",
+];
+const probeV3Iface = new Interface(PROBE_V3_ABI);
 
 export interface Screen {
   token: string;
@@ -63,6 +68,63 @@ async function simulate(token: string): Promise<{
     };
   } catch (e) {
     log("warn", "screen", `Simulation failed for ${token}: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** V3 equivalent of simulate() above - same reasoning, uses SwapProbeV3
+ * against the specific fee-tier pool instead of SwapProbe against the V2 pair.
+ * No buyTaxBps/sellTaxBps here - see SwapProbeV3.sol's top comment for why. */
+async function simulateV3(token: string, fee: number): Promise<{
+  sellable: boolean; roundTripLossBps: number;
+} | null> {
+  const probeAddr = CFG.probeAddressV3;
+  if (!probeAddr) return null;
+
+  const value = parseEther(String(CFG.simAmountEth));
+  const data = probeV3Iface.encodeFunctionData("probe", [token, fee]);
+
+  try {
+    const raw: string = await provider.send("eth_call", [
+      { from: CFG.simAddress, to: probeAddr, value: toBeHex(value), data },
+      "latest",
+      { [CFG.simAddress]: { balance: toBeHex(value * 2n) } },
+    ]);
+    const [r] = probeV3Iface.decodeFunctionResult("probe", raw);
+    return {
+      sellable: Boolean(r.buyOk) && Boolean(r.sellOk) && r.ethReturned > 0n,
+      roundTripLossBps: Number(r.roundTripLossBps),
+    };
+  } catch (e) {
+    log("warn", "screen", `V3 simulation failed for ${token} fee=${fee}: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Stopgap liquidity signal for a V3 pool - see config.ts's v3MaxPriceImpactBps
+ * comment for why this exists instead of a reserves-based floor. Compares the
+ * per-ETH rate at a negligible trade size against the per-ETH rate at the
+ * real trade size; a big gap means the pool is thin relative to this trade.
+ */
+async function v3PriceImpactBps(token: string, fee: number, tradeSizeEth: number): Promise<number | null> {
+  if (!CFG.quoterV3) return null;
+  const quoter = new Contract(CFG.quoterV3, V3_QUOTER_ABI, provider) as Dyn;
+  const tiny = parseEther("0.0001");
+  const real = parseEther(String(Math.max(tradeSizeEth, 0.0001)));
+  try {
+    const tinyResult = await quoter.quoteExactInputSingle.staticCall(CFG.weth, token, fee, tiny, 0);
+    const realResult = await quoter.quoteExactInputSingle.staticCall(CFG.weth, token, fee, real, 0);
+    const tinyOut: bigint = tinyResult[0];
+    const realOut: bigint = realResult[0];
+    if (tinyOut === 0n) return null;
+    const tinyRate = Number(tinyOut) / Number(tiny);
+    const realRate = Number(realOut) / Number(real);
+    if (tinyRate === 0) return null;
+    const impact = (tinyRate - realRate) / tinyRate;
+    return Math.max(0, Math.round(impact * 10_000));
+  } catch (e) {
+    log("debug", "screen", `V3 price-impact check failed for ${token} fee=${fee}: ${(e as Error).message}`);
     return null;
   }
 }
@@ -171,6 +233,70 @@ export async function screen(
   out.lpLockedPct = await lpLockedPct(pair);
   if (limits.requireLpLock && out.lpLockedPct < 95)
     return { ...out, reason: `only ${out.lpLockedPct.toFixed(1)}% of LP is locked or burned` };
+
+  out.deployerPct = await deployerPct(token, deployer);
+  if (out.deployerPct > limits.maxDeployerPct)
+    return { ...out, reason: `deployer holds ${out.deployerPct.toFixed(1)}% of supply` };
+
+  out.verdict = "pass";
+  out.reason = "clear";
+  return out;
+}
+
+/**
+ * V3 equivalent of screen() above. Same limits shape, same overall flow
+ * (liquidity floor -> token age -> honeypot sim -> tax/loss checks ->
+ * LP lock -> deployer share), with two real differences from the V2 path:
+ *
+ *   - Liquidity is a price-impact check (see v3PriceImpactBps), not a
+ *     reserves floor - there's no reserves number on V3 to floor against.
+ *   - LP lock can never pass. V3 liquidity positions are NFTs (via
+ *     PositionManager), not the simple fungible LP-token balance V2's
+ *     lpLockedPct checks. That detection isn't built yet, and silently
+ *     treating "unverifiable" as "unlocked" (reject) is the safe direction
+ *     to be wrong in - the alternative is silently treating it as "locked,"
+ *     which would be a real, invisible regression from what V2 screening
+ *     actually guarantees today.
+ */
+export async function screenV3(
+  token: string,
+  deployer: string | null,
+  limits: ScreenLimits,
+  fee: number,
+  poolBlockNumber: number,
+): Promise<Screen> {
+  const out: Screen = {
+    token, sellable: false, buyTaxBps: 0, sellTaxBps: 0, roundTripLossBps: 0,
+    lpLockedPct: 0, deployerPct: 100, liqPls: 0, verdict: "fail", reason: "",
+  };
+
+  if (!CFG.factoryV3 || !CFG.routerV3) return { ...out, reason: "V3 not configured" };
+
+  const v3Factory = new Contract(CFG.factoryV3, V3_FACTORY_ABI, provider) as Dyn;
+  const pool: string = await v3Factory.getPool(token, CFG.weth, fee);
+  if (/^0x0{40}$/i.test(pool)) return { ...out, reason: "no V3 pool at this fee tier" };
+
+  const impactBps = await v3PriceImpactBps(token, fee, CFG.simAmountEth);
+  if (impactBps === null) return { ...out, reason: "could not price this pool, refusing to guess" };
+  if (impactBps > CFG.v3MaxPriceImpactBps)
+    return { ...out, reason: `price impact ${impactBps}bps above floor ${CFG.v3MaxPriceImpactBps}bps - pool too thin` };
+
+  const deployBlock = await findDeployBlock(token, poolBlockNumber);
+  const ageBlocks = poolBlockNumber - deployBlock;
+  if (ageBlocks > CFG.maxTokenAgeBlocks)
+    return { ...out, reason: `token contract is ${ageBlocks} blocks old - existed before this pool, not a fresh launch` };
+
+  const sim = await simulateV3(token, fee);
+  if (!sim) return { ...out, reason: "V3 simulation unavailable, refusing to guess" };
+  out.sellable = sim.sellable;
+  out.roundTripLossBps = sim.roundTripLossBps;
+
+  if (!sim.sellable) return { ...out, reason: "cannot sell after buying" };
+  if (sim.roundTripLossBps > CFG.honeypotMaxLossBps)
+    return { ...out, reason: `round trip loses ${sim.roundTripLossBps} bps` };
+
+  if (limits.requireLpLock)
+    return { ...out, reason: "LP lock cannot be verified for V3 pools yet - rejecting rather than assume it's fine" };
 
   out.deployerPct = await deployerPct(token, deployer);
   if (out.deployerPct > limits.maxDeployerPct)

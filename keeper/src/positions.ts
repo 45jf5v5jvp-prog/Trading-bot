@@ -1,8 +1,10 @@
 import { Contract, formatEther, formatUnits } from "ethers";
 import { CFG } from "./config.js";
-import { provider, routerRead, type Dyn } from "./chain.js";
+import { provider, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
-import { executeSwap } from "./executor.js";
+import { executeSwap, executeSwapMultiVenue } from "./executor.js";
+import { findBestSellVenue, type Venue } from "./venues.js";
+import { registry } from "./registry.js";
 import { sellSignal } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
 import { db } from "./db.js";
@@ -45,12 +47,16 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
   const byToken = new Map<string, number>();
   let total = 0;
   // Read-only quotes, safe to run concurrently regardless of vault grouping.
+  // Checks every venue (see findBestSellVenue) rather than assuming V2 - a
+  // V3-only holding priced at 0 here would silently understate the vault's
+  // real value and let the holding cap under-protect.
   const values = await mapLimit(rows, CFG.keeperConcurrency, async (r) => {
     try {
       const held = BigInt(r.tokens_held);
       if (held === 0n) return null;
-      const amounts: bigint[] = await routerRead.getAmountsOut(held, [r.token, CFG.weth]);
-      return { token: r.token.toLowerCase(), value: Number(formatEther(amounts[amounts.length - 1]!)) };
+      const venue = await findBestSellVenue(r.token, held);
+      if (!venue) return null;
+      return { token: r.token.toLowerCase(), value: Number(formatEther(venue.amountOut)) };
     } catch { return null; } // unpriceable right now, skip
   });
   for (const v of values) {
@@ -65,14 +71,19 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
  * Marks a position against a live quote for the size actually held, not a mid
  * price. On a thin new pair those differ enormously, and exiting on mid price
  * means the stop fires far later than the user thinks it will.
+ *
+ * Checks every venue (see findBestSellVenue), not just V2 - a position
+ * bought via V3 has no V2 pool to fall back to at all, and hardcoding V2
+ * here would just silently never be able to mark (or exit) it.
  */
-async function markToMarket(r: Row): Promise<{ value: number; held: bigint } | null> {
+async function markToMarket(r: Row): Promise<{ value: number; held: bigint; venue: Venue } | null> {
   try {
     const erc = new Contract(r.token, ERC20_ABI, provider) as Dyn;
     const held: bigint = await erc.balanceOf(r.vault);
     if (held === 0n) return null;
-    const amounts: bigint[] = await routerRead.getAmountsOut(held, [r.token, CFG.weth]);
-    return { value: Number(formatEther(amounts[amounts.length - 1]!)), held };
+    const venue = await findBestSellVenue(r.token, held);
+    if (!venue) return null;
+    return { value: Number(formatEther(venue.amountOut)), held, venue };
   } catch {
     return null;
   }
@@ -101,7 +112,7 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
   }
 }
 
-async function checkAndClose(r: Row, now: number, manualClose: boolean): Promise<void> {
+async function checkAndClose(r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue"): Promise<void> {
   const m = await markToMarket(r);
   if (!m) return;
 
@@ -123,13 +134,26 @@ async function checkAndClose(r: Row, now: number, manualClose: boolean): Promise
   );
   if (!reason) return;
 
-  log("info", "positions", `Closing ${r.token} for ${r.vault}: ${reason}`);
-  const res = await executeSwap({
-    vault: r.vault, bot: "launch", path: [r.token, CFG.weth],
-    amountIn: m.held, tokenLabel: r.token,
-    // On the way out, take the fill. A stop that will not execute is not a stop.
-    slippageBps: Math.max(CFG.maxSlippageBps, 500),
-  });
+  log("info", "positions", `Closing ${r.token} for ${r.vault} via ${m.venue.kind}: ${reason}`);
+  // A plain V2-only vault (BotVault) can only ever have acquired a V2
+  // position in the first place (see launch.ts's venue gating), so
+  // m.venue.kind is always "v2" here whenever vaultKind is "v2" - this
+  // dispatch is really just "which contract function does this vault have."
+  const res = vaultKind === "multiVenue"
+    ? await executeSwapMultiVenue({
+        vault: r.vault, bot: "launch",
+        venue: m.venue.kind === "v2"
+          ? { kind: "v2", path: [r.token, CFG.weth] }
+          : { kind: "v3", tokenIn: r.token, tokenOut: CFG.weth, fee: m.venue.fee },
+        amountIn: m.held, tokenLabel: r.token,
+        // On the way out, take the fill. A stop that will not execute is not a stop.
+        slippageBps: Math.max(CFG.maxSlippageBps, 500),
+      })
+    : await executeSwap({
+        vault: r.vault, bot: "launch", path: [r.token, CFG.weth],
+        amountIn: m.held, tokenLabel: r.token,
+        slippageBps: Math.max(CFG.maxSlippageBps, 500),
+      });
 
   if (res.ok) {
     db.prepare(`UPDATE positions SET status='closed',closed_at=?,proceeds_pls=?,close_reason=? WHERE id=?`)
@@ -162,8 +186,10 @@ export async function tick(): Promise<void> {
   }
 
   await mapLimit([...byVault.values()], CFG.keeperConcurrency, async (vaultRows) => {
-    const closeIds = await fetchCloseRequests(vaultRows[0]!.vault);
-    for (const r of vaultRows) await checkAndClose(r, now, closeIds.has(r.id));
+    const vaultAddr = vaultRows[0]!.vault;
+    const closeIds = await fetchCloseRequests(vaultAddr);
+    const vaultKind = registry.get(vaultAddr)?.kind ?? "v2";
+    for (const r of vaultRows) await checkAndClose(r, now, closeIds.has(r.id), vaultKind);
   });
 }
 

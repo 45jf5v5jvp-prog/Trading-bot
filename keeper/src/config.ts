@@ -32,6 +32,30 @@ export const CFG = {
   factory: addr("FACTORY", "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f"),
   weth: addr("WETH", "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73"),
 
+  // ---- V3 (all optional, no fabricated defaults - unverified until you
+  // confirm the real addresses against developers.uniswap.org's Robinhood
+  // Chain deployments page and set them explicitly). Leaving FACTORY_V3
+  // unset disables V3 scanning/trading entirely; the keeper falls back to
+  // V2-only, same as before this existed.
+  factoryV3: opt("FACTORY_V3", ""),
+  routerV3: opt("ROUTER_V3", ""),       // SwapRouter02
+  quoterV3: opt("QUOTER_V3", ""),       // QuoterV2 - see abis.ts's caution
+  multiVenueVaultFactory: opt("MULTI_VENUE_VAULT_FACTORY", ""),
+  probeAddressV3: opt("PROBE_ADDRESS_V3", ""),
+  // Standard Uniswap V3 fee tiers, in bps-of-a-percent (500 = 0.05%). A token
+  // can have a pool at more than one of these simultaneously; the keeper
+  // checks all configured tiers and uses whichever actually has liquidity.
+  v3FeeTiers: opt("V3_FEE_TIERS", "500,3000,10000").split(",").map(Number),
+  // V3 has no single "reserves" number the way V2 does, so there's no direct
+  // equivalent of a vault's per-vault minLiquidityPls floor yet (that would
+  // need a site/schema change - not built). Stopgap: reject if quoting the
+  // real trade size prices meaningfully worse than quoting a negligible
+  // amount on the same pool - a cheap, self-contained signal that the pool
+  // is too thin for this trade, independent of any absolute liquidity figure.
+  // Global for now, not per-vault-configurable. Unmeasured placeholder, same
+  // caveat as MAX_GAS_PRICE_GWEI - tighten once real V3 launches are observed.
+  v3MaxPriceImpactBps: num("V3_MAX_PRICE_IMPACT_BPS", "2000"),
+
   feeBps: num("FEE_BPS", "25"),
 
   dryRun: bool("DRY_RUN", "true"),

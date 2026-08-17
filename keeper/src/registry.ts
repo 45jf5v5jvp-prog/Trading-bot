@@ -53,6 +53,12 @@ export interface VaultRecord {
   // important safety setting: without it a dip-buying rule tips the whole vault
   // into one falling token. 0 disables (not recommended).
   maxHoldingPct: number;
+  // "v2": BotVault, only ever trades through the V2 router (executeSwap).
+  // "multiVenue": MultiVenueVault, can trade V2 or V3 (executeSwapV2/V3) -
+  // see contracts/MultiVenueVault.sol. Existing vaults are permanently one
+  // kind or the other; a clone can never change which implementation it
+  // points at. executor.ts dispatches on this field.
+  kind: "v2" | "multiVenue";
 }
 
 /** Default holding cap when a config does not specify one. */
@@ -125,31 +131,43 @@ async function loadConfig(vault: string): Promise<LoadedConfig> {
   }
 }
 
-/**
- * Fetches and refreshes every vault's on-chain state and config. Runs a bounded
- * number of vaults concurrently (KEEPER_CONCURRENCY) rather than one at a time,
- * so this pass stays well within its own polling interval as the vault count
- * grows - with a handful of vaults a sequential loop is plenty fast, but at
- * dozens or hundreds each waiting on its own RPC round trip in turn adds up.
- */
-export async function refresh(): Promise<VaultRecord[]> {
-  const f = new Contract(CFG.vaultFactory, VAULT_FACTORY_ABI, provider) as Dyn;
+/** Every vault address a factory has ever created, via its allVaults/vaultCount getters. */
+async function vaultsOf(factoryAddress: string): Promise<string[]> {
+  const f = new Contract(factoryAddress, VAULT_FACTORY_ABI, provider) as Dyn;
   const count = Number(await f.vaultCount());
-
   const indices = Array.from({ length: count }, (_, i) => i);
   const addrResults = await mapLimit(indices, CFG.keeperConcurrency, async (i) => {
     try { return await f.allVaults(i) as string; } catch { return null; }
   });
-  const addrs = addrResults.filter((a): a is string => a !== null);
+  return addrResults.filter((a): a is string => a !== null);
+}
 
-  const recs = await mapLimit(addrs, CFG.keeperConcurrency, async (addr) => {
+/**
+ * Fetches and refreshes every vault's on-chain state and config, from both
+ * the V2-only VaultFactory and (if configured) the MultiVenueVaultFactory.
+ * Runs a bounded number of vaults concurrently (KEEPER_CONCURRENCY) rather
+ * than one at a time, so this pass stays well within its own polling
+ * interval as the vault count grows.
+ */
+export async function refresh(): Promise<VaultRecord[]> {
+  const v2Addrs = await vaultsOf(CFG.vaultFactory);
+  // Multi-venue support is opt-in - an unset factory address just means
+  // "no multi-venue vaults exist yet," not an error.
+  const multiVenueAddrs = CFG.multiVenueVaultFactory ? await vaultsOf(CFG.multiVenueVaultFactory) : [];
+
+  const tagged: { addr: string; kind: "v2" | "multiVenue" }[] = [
+    ...v2Addrs.map((addr) => ({ addr, kind: "v2" as const })),
+    ...multiVenueAddrs.map((addr) => ({ addr, kind: "multiVenue" as const })),
+  ];
+
+  const recs = await mapLimit(tagged, CFG.keeperConcurrency, async ({ addr, kind }) => {
     const v = new Contract(addr, VAULT_ABI, provider) as Dyn;
     try {
       const [owner, executor, paused] = await Promise.all([v.owner(), v.executor(), v.paused()]);
       const executorOk =
         String(executor).toLowerCase() === (process.env.KEEPER_ADDRESS || "").toLowerCase();
       const { launch, rules, maxHoldingPct } = await loadConfig(addr);
-      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, maxHoldingPct };
+      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, maxHoldingPct, kind };
       cache.set(addr.toLowerCase(), rec);
       return rec;
     } catch (e) {

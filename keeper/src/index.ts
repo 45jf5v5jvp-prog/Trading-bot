@@ -50,6 +50,12 @@ async function main(): Promise<void> {
     log("error", "main", "VAULT_FACTORY is unset. No vaults will be found.");
   if (!process.env.PROBE_ADDRESS)
     log("error", "main", "PROBE_ADDRESS is unset. Launch Bot will refuse every token rather than buy unscreened.");
+  if (CFG.factoryV3)
+    log("info", "main", "V3 support configured - watching both V2 and V3 for new launches.");
+  else
+    log("info", "main", "FACTORY_V3 is unset. V3 launches will not be seen - V2 only.");
+  if (CFG.factoryV3 && !CFG.probeAddressV3)
+    log("error", "main", "FACTORY_V3 is set but PROBE_ADDRESS_V3 is not. V3 Launch Bot will refuse every token rather than buy unscreened.");
   if (CFG.dryRun)
     log("warn", "main", "DRY_RUN is on. Everything is evaluated and simulated, nothing is broadcast.");
   if (CFG.globalKill)
@@ -60,6 +66,7 @@ async function main(): Promise<void> {
   loop("registry", CFG.registryRefreshSec, async () => { await refresh(); });
   loop("prices", CFG.pricePollSec, pollAll);
   loop("launch", CFG.pairScanSec, launch.scan);
+  if (CFG.factoryV3) loop("launchV3", CFG.pairScanSec, launch.scanV3);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

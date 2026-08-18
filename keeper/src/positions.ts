@@ -35,6 +35,36 @@ interface Row {
   id: number; vault: string; token: string; opened_at: number; entry_price: number;
   spent_pls: number; tokens_held: string; high_water: number;
   tp_pct: number | null; sl_pct: number | null; trail_pct: number | null; time_exit_min: number | null;
+  fail_count: number | null;
+}
+
+/**
+ * How many STRUCTURAL exit failures a position gets before it is retired as
+ * stuck. Structural means the failure cannot succeed on a later retry unless
+ * the position's economics change - e.g. the proceeds are such dust that the
+ * gas reimbursement can never fit the owner's share-of-trade cap. Retrying
+ * those every 20s forever is exactly the storm that consumed the global
+ * trade rate limit and crowded out real exits. Transient failures (rate
+ * limit hit, RPC hiccups, gas price spikes) never count toward this.
+ */
+const MAX_STRUCTURAL_EXIT_FAILURES = 5;
+
+/**
+ * Consecutive ticks a position may be unpriceable (balance or quote calls
+ * failing) before being retired - but ONLY counted on ticks where at least
+ * one other position priced fine, which proves the RPC itself is healthy
+ * and the problem is this token's contract (a rug that reverts balanceOf /
+ * transfers is the classic case). An RPC outage therefore never retires
+ * anything: no position prices during an outage, so nothing is counted.
+ * With only one open position this check conservatively never fires.
+ * 90 ticks at the 20s position cadence is roughly 30 minutes.
+ */
+const UNPRICEABLE_STREAK_LIMIT = 90;
+const unpriceableStreak = new Map<number, number>();
+
+function retirePosition(id: number, token: string, reason: string): void {
+  db.prepare(`UPDATE positions SET status='stuck', close_reason=? WHERE id=?`).run(reason, id);
+  log("error", "positions", `${token}: ${reason}`);
 }
 
 /**
@@ -131,7 +161,9 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
   }
 }
 
-async function checkAndClose(r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue"): Promise<void> {
+async function checkAndClose(
+  r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue",
+): Promise<"priced" | "unpriceable" | "retired"> {
   const m = await markToMarket(r);
   if (!m.ok) {
     if (m.reason === "vanished") {
@@ -141,10 +173,10 @@ async function checkAndClose(r: Row, now: number, manualClose: boolean, vaultKin
         `malicious token). Marking stuck so this doesn't sit silently invisible.`);
       db.prepare(`UPDATE positions SET status='stuck', close_reason=? WHERE id=?`)
         .run("balance vanished: real on-chain balance is 0, not sold by this bot", r.id);
-    } else {
-      log("warn", "positions", `${r.token} in ${r.vault}: could not get a live quote this tick, will retry`);
+      return "retired";
     }
-    return;
+    log("warn", "positions", `${r.token} in ${r.vault}: could not get a live quote this tick, will retry`);
+    return "unpriceable";
   }
 
   // ratio is current value / cost. 1.10 means up 10%. high_water is the peak
@@ -163,7 +195,7 @@ async function checkAndClose(r: Row, now: number, manualClose: boolean, vaultKin
       openedAt: r.opened_at, highWater },
     ratio, now,
   );
-  if (!reason) return;
+  if (!reason) return "priced";
 
   log("info", "positions", `Closing ${r.token} for ${r.vault} via ${m.venue.kind}: ${reason}`);
   // A plain V2-only vault (BotVault) can only ever have acquired a V2
@@ -189,14 +221,32 @@ async function checkAndClose(r: Row, now: number, manualClose: boolean, vaultKin
   if (res.ok) {
     db.prepare(`UPDATE positions SET status='closed',closed_at=?,proceeds_pls=?,close_reason=? WHERE id=?`)
       .run(now, Number(formatEther(res.amountOut)), reason, r.id);
-  } else {
-    log("error", "positions", `Exit failed for ${r.token}: ${res.reason}`);
-    if ((res.reason || "").includes("would revert")) {
-      db.prepare(`UPDATE positions SET status='stuck',close_reason=? WHERE id=?`)
-        .run(`cannot sell: ${res.reason}`, r.id);
-      log("error", "positions", `${r.token} appears unsellable. Marked stuck, will stop retrying.`);
-    }
+    return "priced";
   }
+
+  const why = res.reason || "";
+  log("error", "positions", `Exit failed for ${r.token}: ${why}`);
+  if (why.includes("would revert")) {
+    retirePosition(r.id, r.token,
+      `cannot sell: ${why}. Tokens remain in the vault - the dashboard's emergency withdraw can still pull them.`);
+    return "retired";
+  }
+  // Structural failures: retrying cannot help unless the position's
+  // economics change (see MAX_STRUCTURAL_EXIT_FAILURES). Count persistently;
+  // everything else (rate limit, gas spikes, RPC errors) is transient and
+  // deliberately never counted.
+  const structural = why.includes("over their share-of-trade limit") || why.includes("quote returned zero");
+  if (structural) {
+    const fails = (r.fail_count ?? 0) + 1;
+    if (fails >= MAX_STRUCTURAL_EXIT_FAILURES) {
+      retirePosition(r.id, r.token,
+        `retired after ${fails} exit attempts that can never succeed (${why.slice(0, 100)}). ` +
+        `Tokens remain in the vault - the dashboard's emergency withdraw can still pull them.`);
+      return "retired";
+    }
+    db.prepare(`UPDATE positions SET fail_count=? WHERE id=?`).run(fails, r.id);
+  }
+  return "priced";
 }
 
 /**
@@ -216,12 +266,38 @@ export async function tick(): Promise<void> {
     if (list) list.push(r); else byVault.set(key, [r]);
   }
 
+  const outcomes: { id: number; token: string; outcome: "priced" | "unpriceable" | "retired" }[] = [];
   await mapLimit([...byVault.values()], CFG.keeperConcurrency, async (vaultRows) => {
     const vaultAddr = vaultRows[0]!.vault;
     const closeIds = await fetchCloseRequests(vaultAddr);
     const vaultKind = registry.get(vaultAddr)?.kind ?? "v2";
-    for (const r of vaultRows) await checkAndClose(r, now, closeIds.has(r.id), vaultKind);
+    for (const r of vaultRows) {
+      const outcome = await checkAndClose(r, now, closeIds.has(r.id), vaultKind);
+      outcomes.push({ id: r.id, token: r.token, outcome });
+    }
   });
+
+  // Peer-checked unpriceable-streak accounting (see UNPRICEABLE_STREAK_LIMIT).
+  // Only ticks where at least one position priced fine count - that's the
+  // proof the RPC is healthy and a persistent failure is the token's own
+  // contract misbehaving, not the network.
+  const anyPriced = outcomes.some((o) => o.outcome === "priced");
+  for (const o of outcomes) {
+    if (o.outcome === "priced" || o.outcome === "retired") {
+      unpriceableStreak.delete(o.id);
+      continue;
+    }
+    if (!anyPriced) continue; // possible RPC-wide problem - don't count this tick
+    const n = (unpriceableStreak.get(o.id) ?? 0) + 1;
+    if (n >= UNPRICEABLE_STREAK_LIMIT) {
+      retirePosition(o.id, o.token,
+        `unpriceable for ${n} consecutive checks while other positions priced fine - the token's ` +
+        `contract likely reverts balance or quote calls (rug behavior). Tokens remain in the vault.`);
+      unpriceableStreak.delete(o.id);
+    } else {
+      unpriceableStreak.set(o.id, n);
+    }
+  }
 }
 
 export { formatUnits };

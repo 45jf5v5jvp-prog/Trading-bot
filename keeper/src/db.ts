@@ -72,6 +72,15 @@ CREATE INDEX IF NOT EXISTS fires_vault_ts ON fires(vault, ts DESC);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 `);
 
+// Additive migration: databases created before the retry-storm fix predate
+// this column. SQLite has no ALTER TABLE IF NOT EXISTS, so probe first.
+{
+  const cols = db.prepare("PRAGMA table_info(positions)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "fail_count")) {
+    db.exec("ALTER TABLE positions ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
 export const meta = {
   get(k: string, d = ""): string {
     const r = db.prepare("SELECT v FROM meta WHERE k=?").get(k) as { v: string } | undefined;

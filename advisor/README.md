@@ -132,6 +132,37 @@ editable in the Memory panel, and stored as plain JSON in `data/me.json` — ope
 read it. Next conversation, that record is in the system prompt, which is what makes the
 second session feel like a continuation instead of a cold start.
 
+## Owning the avatar
+
+The honest split: **the corpus is the proprietary part, and the renderer is not.**
+
+`/studio` is a recording booth that runs entirely on your own machine. Camera and
+microphone go to your own server; nothing touches a third party. It gives you:
+
+- **Scripts that cover the ground a voice model needs** — phonetic coverage (public-domain
+  sentences), your actual vocabulary (a model that has never heard you say "required minimum
+  distribution" will mangle it), and the range of *how* you say things. That last group is the
+  one people skip and the one that decides whether your clone can deliver bad news.
+- **Quality checks per take** — clipping, level, silence ratio, and for video the brightness,
+  lighting drift and movement. A take that can't be trained on is caught in the booth rather than
+  three weeks later.
+- **A consent record** — dated, naming you, stating what the recordings are for. Costs nothing
+  and is the first thing a buyer's diligence asks for.
+- **`npm`-free export** to `data/dataset/` in LJSpeech layout (`wavs/` + `metadata.csv`), which
+  is what nearly every open-source voice trainer reads directly. With ffmpeg installed it
+  transcodes to 22.05kHz mono wav; without it the export says so instead of leaving you to find
+  out during training.
+
+**Voice output is behind one interface** (`server/voice.js`). `VOICE_PROVIDER=local` points at a
+speech server you run yourself; the hosted option exists so you can hear whether the product works
+before standing up GPUs. Flipping between them changes one environment variable and nothing else
+in the codebase — that swap is the difference between renting a voice and owning one, and it
+should never require touching the product.
+
+**Before training on any open model, read its licence.** Several of the best open-source voice and
+talking-head models are released for research use only, which makes them unusable in something you
+intend to sell. That constraint decides which model you pick, so check it first, not last.
+
 ## Voice
 
 - **Talking to it** — the mic button uses the browser's built-in speech recognition.

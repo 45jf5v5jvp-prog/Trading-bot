@@ -5,6 +5,7 @@ import Login from './components/Login.jsx'
 import Chat from './components/Chat.jsx'
 import Rail from './components/Rail.jsx'
 import LengthPicker from './components/LengthPicker.jsx'
+import Studio from './components/Studio.jsx'
 
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(getToken()))
@@ -19,6 +20,7 @@ export default function App() {
   const [notice, setNotice] = useState(null)
   const [clock, setClock] = useState(null)
   const [choosingLength, setChoosingLength] = useState(false)
+  const [view, setView] = useState('review')
   const [error, setError] = useState(null)
   const speakerRef = useRef(null)
 
@@ -170,6 +172,8 @@ export default function App() {
     return <Login onSuccess={(token) => { setToken(token); setAuthed(true) }} />
   }
 
+  if (view === 'studio') return <Studio onBack={() => setView('review')} />
+
   return (
     <div className="app">
       <header className="topbar">
@@ -204,6 +208,7 @@ export default function App() {
           {conversation && messages.length > 1 && (
             <button className="primary" onClick={endReview}>End &amp; remember</button>
           )}
+          <button className="ghost quiet" onClick={() => setView('studio')}>Studio</button>
           <button className="ghost quiet" onClick={signOut}>Sign out</button>
         </div>
       </header>

@@ -10,6 +10,8 @@ import { buildSystemBlocks, buildReferenceBlock, buildPressureReminder } from '.
 import { detectPressure } from './pressure.js'
 import { dueCheckpoint, buildTimeNote, elapsedMinutes, plannedMinutes, MEETING_LENGTHS, DEFAULT_MINUTES } from './meeting.js'
 import { TOOLS, runTool } from './tools.js'
+import { studioState, saveTake, deleteTake, recordConsent, exportDataset } from './studio.js'
+import { speak, activeProvider } from './voice.js'
 import { streamReply, extractMemory, MODEL } from './claude.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -65,7 +67,7 @@ app.get('/api/me', auth, (req, res) => {
     accounts: doc.accounts,
     documents: doc.documents,
     lastProjection: doc.lastProjection,
-    voice: { cloned: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID) },
+    voice: { provider: activeProvider(), cloned: Boolean(activeProvider()) },
     model: MODEL,
   })
 })
@@ -332,38 +334,55 @@ app.post('/api/conversations/:id/close', auth, async (req, res) => {
   })
 })
 
+// ---------------------------------------------------------------- studio
+// Recording your own voice and likeness. Takes are written to this machine's
+// disk and nowhere else.
+app.get('/api/studio', auth, (req, res) => res.json(studioState()))
+
+app.post('/api/studio/consent', auth, (req, res) => {
+  const { name, statement } = req.body ?? {}
+  if (!name?.trim()) return res.status(400).json({ error: 'A name is required.' })
+  res.json({ consent: recordConsent({ name: name.trim(), statement }) })
+})
+
+app.post('/api/studio/take',
+  express.raw({ type: ['video/webm', 'audio/webm', 'application/octet-stream'], limit: '250mb' }),
+  (req, res, next) => auth(req, res, next),
+  (req, res) => {
+    const meta = {
+      kind: req.query.kind === 'video' ? 'video' : 'voice',
+      scriptId: String(req.query.scriptId ?? 'unknown'),
+      lineIndex: Number(req.query.lineIndex ?? 0),
+      text: String(req.query.text ?? ''),
+      direction: req.query.direction ? String(req.query.direction) : null,
+      durationMs: Number(req.query.durationMs ?? 0),
+      quality: req.query.quality ? JSON.parse(String(req.query.quality)) : {},
+    }
+    if (!req.body?.length) return res.status(400).json({ error: 'Empty recording.' })
+    res.json({ take: saveTake({ buffer: req.body, meta }) })
+  })
+
+app.delete('/api/studio/take/:id', auth, (req, res) => {
+  const result = deleteTake(req.params.id)
+  res.status(result.error ? 404 : 200).json(result)
+})
+
+app.post('/api/studio/export', auth, (req, res) => {
+  const result = exportDataset()
+  res.status(result.error ? 400 : 200).json(result)
+})
+
 // ---------------------------------------------------------------- voice
 // Optional. With an ElevenLabs key the reply comes back in a cloned voice; without
 // one the browser falls back to its built-in speech synthesis.
 app.post('/api/tts', auth, async (req, res) => {
   const { text } = req.body ?? {}
-  const key = process.env.ELEVENLABS_API_KEY
-  const voice = process.env.ELEVENLABS_VOICE_ID
-  if (!key || !voice) return res.status(503).json({ error: 'No cloned voice configured.' })
+  if (!text?.trim()) return res.status(400).json({ error: 'Nothing to say.' })
 
-  try {
-    const upstream = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream?output_format=mp3_44100_128`,
-      {
-        method: 'POST',
-        headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_flash_v2_5', // lowest-latency model; quality models add ~1s
-          voice_settings: { stability: 0.5, similarity_boost: 0.8 },
-        }),
-      },
-    )
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: await upstream.text() })
-    }
-    res.setHeader('Content-Type', 'audio/mpeg')
-    const buffer = Buffer.from(await upstream.arrayBuffer())
-    res.end(buffer)
-  } catch (err) {
-    console.error('[tts]', err)
-    res.status(502).json({ error: err.message })
-  }
+  const result = await speak(text)
+  if (result.error) return res.status(503).json({ error: result.error })
+  res.setHeader('Content-Type', result.contentType)
+  res.end(result.audio)
 })
 
 // ---------------------------------------------------------------- serve

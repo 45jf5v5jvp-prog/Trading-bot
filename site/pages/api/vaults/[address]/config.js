@@ -3,7 +3,8 @@ const { getConfig, setConfig } = require("../../../../lib/store");
 const { authorizeConfigWrite } = require("../../../../lib/auth");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.pulsechain.com";
+const { CHAIN } = require("../../../../lib/chain");
+const RPC_URL = CHAIN.rpcUrl;
 
 /**
  * GET  /api/vaults/:address/config  - public read. This is the exact endpoint

@@ -2,7 +2,8 @@ const { authorizeClose } = require("../../../../../../lib/auth");
 const { requestClose } = require("../../../../../../lib/store");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.pulsechain.com";
+const { CHAIN } = require("../../../../../../lib/chain");
+const RPC_URL = CHAIN.rpcUrl;
 
 /**
  * POST /api/vaults/:address/positions/:id/close - requests a manual close of

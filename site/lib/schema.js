@@ -5,10 +5,16 @@
  * keeper can't read, or shows fields it doesn't respect.
  */
 
+const { CHAIN } = require("./chain");
+
+// minLiquidityPls is denominated in the chain's base unit (PLS or ETH) - the
+// field name is kept for shape-compatibility with the keeper. The sensible
+// default differs by orders of magnitude between chains, so it comes from the
+// chain preset: 2,000,000 PLS-scale vs single-digit ETH-scale.
 const DEFAULT_LAUNCH = {
   enabled: false, perLaunchPls: 0, maxPerDay: 4, takeProfitPct: 50, stopLossPct: 35,
   timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true,
-  maxDeployerPct: 15, minLiquidityPls: 2_000_000, requireOwnerRenounced: false,
+  maxDeployerPct: 15, minLiquidityPls: CHAIN.minLiquidityDefault, requireOwnerRenounced: false,
 };
 
 const DEFAULT_MAX_HOLDING_PCT = 40;

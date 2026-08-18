@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CHAIN, EXPLORER_URL } from "../lib/contracts";
 
 function fmtTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -8,6 +9,14 @@ function fmtTs(unixSeconds) {
 function short(addr) {
   if (!addr) return "-";
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+/** Amounts in the chain's base unit (PLS / ETH). PLS amounts are huge and
+ * fractional dust is noise; ETH amounts are tiny and the fraction IS the
+ * money - the per-chain decimal budget comes from the chain preset. */
+function fmtAmount(v) {
+  if (v === null || v === undefined) return "-";
+  return Number(v).toLocaleString(undefined, { maximumFractionDigits: CHAIN.valueMaxDecimals });
 }
 
 function pnlClass(pct) {
@@ -47,7 +56,7 @@ function CopyAddressButton({ address }) {
   );
 }
 
-/** A position PulseX currently can't price at any real size - either
+/** A position the DEX currently can't price at any real size - either
  * getAmountsOut reverts outright (livePrice.js leaves pnlPct/valueNowPls
  * null - typically because the LP was pulled entirely) or it still quotes
  * but for effectively nothing (rugged, not delisted). Either way there's
@@ -74,7 +83,7 @@ function NoLiquidityPositionRow({ p, onClose, closeState }) {
       <div className="row" style={{ gap: 10 }}>
         <span className="holding-token" style={{ fontSize: 12.5 }}>{short(p.token)}</span>
         <CopyAddressButton address={p.token} />
-        <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {p.spent_pls.toLocaleString()} PLS · {label}</span>
+        <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {fmtAmount(p.spent_pls)} {CHAIN.nativeSymbol} · {label}</span>
       </div>
       <button
         type="button"
@@ -89,10 +98,11 @@ function NoLiquidityPositionRow({ p, onClose, closeState }) {
 }
 
 /** One currently-held token: what the bot bought, what it's worth right now
- * (a live PulseX quote, not a cached price), and whether that's up or down
+ * (a live DEX quote, not a cached price), and whether that's up or down
  * since entry. This is the "should I close this?" view. */
 function HoldingCard({ p, onClose, closeState }) {
   const requested = closeState === "requested" || closeState === "pending";
+  const unit = CHAIN.nativeSymbol;
   return (
     <div className="holding-card">
       <div className="holding-card-top">
@@ -106,9 +116,9 @@ function HoldingCard({ p, onClose, closeState }) {
         <div className={`num holding-pnl ${pnlClass(p.pnlPct)}`}>{fmtPnl(p.pnlPct)}</div>
       </div>
       <div className="holding-meta">
-        Spent {p.spent_pls.toLocaleString()} PLS
+        Spent {fmtAmount(p.spent_pls)} {unit}
         {p.valueNowPls !== null && p.valueNowPls !== undefined
-          ? ` · worth ${Math.round(p.valueNowPls).toLocaleString()} PLS now`
+          ? ` · worth ${fmtAmount(p.valueNowPls)} ${unit} now`
           : ""}
       </div>
       <div className="row" style={{ marginTop: 10 }}>
@@ -139,6 +149,7 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
   if (!history) return null;
   const { positions, fires } = history;
+  const unit = CHAIN.nativeSymbol;
   const noHistoryYet = positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0;
   const priced = positions.open.filter((p) => !hasNoLiquidity(p));
   const noLiquidity = positions.open.filter(hasNoLiquidity);
@@ -146,7 +157,7 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
   return (
     <div>
       <div className="section-label">Current Holdings</div>
-      {noHistoryYet && <p className="hint">No trades yet. This is normal for a new vault, or while DRY_RUN is on.</p>}
+      {noHistoryYet && <p className="hint">No trades yet. This is normal for a brand-new vault - the bot buys on its own schedule once its settings are saved and it finds a launch that passes screening.</p>}
       {!noHistoryYet && positions.open.length === 0 && (
         <p className="hint">Nothing open right now. The bot isn't holding any tokens.</p>
       )}
@@ -177,12 +188,12 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
           <div className="sub-label">Closed Positions</div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Bot</th><th>Token</th><th>Closed</th><th>Proceeds (PLS)</th><th>Reason</th></tr></thead>
+              <thead><tr><th>Bot</th><th>Token</th><th>Closed</th><th>Proceeds ({unit})</th><th>Reason</th></tr></thead>
               <tbody>
                 {positions.closed.map((p) => (
                   <tr key={p.id}>
                     <td>{p.bot}</td><td>{short(p.token)}</td><td>{fmtTs(p.closed_at)}</td>
-                    <td>{p.proceeds_pls}</td><td>{p.close_reason}</td>
+                    <td>{fmtAmount(p.proceeds_pls)}</td><td>{p.close_reason}</td>
                   </tr>
                 ))}
               </tbody>
@@ -196,13 +207,17 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
           <div className="sub-label">Recent Trades</div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount (PLS)</th><th>Tx</th></tr></thead>
+              <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount ({unit})</th><th>Tx</th></tr></thead>
               <tbody>
                 {fires.map((f) => (
                   <tr key={f.id}>
                     <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTs(f.ts)}</td>
-                    <td>{f.amount}</td>
-                    <td>{f.tx_hash ? <a href={`https://scan.pulsechain.com/tx/${f.tx_hash}`} target="_blank" rel="noreferrer">{short(f.tx_hash)}</a> : "-"}</td>
+                    <td>{fmtAmount(f.amount)}</td>
+                    <td>{f.tx_hash
+                      ? (EXPLORER_URL
+                        ? <a href={`${EXPLORER_URL}/tx/${f.tx_hash}`} target="_blank" rel="noreferrer">{short(f.tx_hash)}</a>
+                        : short(f.tx_hash))
+                      : "-"}</td>
                   </tr>
                 ))}
               </tbody>

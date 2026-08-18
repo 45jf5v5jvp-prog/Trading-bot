@@ -1,12 +1,19 @@
-// Real deployed PulseChain addresses for this project. No simulated data here -
-// every read in the dashboard goes through these against the actual chain.
-export const CHAIN_ID = 369;
-export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.pulsechain.com";
-export const VAULT_FACTORY = process.env.NEXT_PUBLIC_VAULT_FACTORY || "0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295";
-export const WPLS = process.env.NEXT_PUBLIC_WPLS || "0xA1077a294dDE1B09bB078844df40758a5D0f9a27";
-// Same PulseX V2 router the keeper itself trades through (keeper/.env ROUTER) -
-// used here read-only, just to price open positions live.
-export const ROUTER = process.env.NEXT_PUBLIC_ROUTER || "0x165C3410fC91EF562C50559f7d2289fEbed552d9";
+// Chain-independent contract surface. All addresses and chain identity come
+// from lib/chain.js (one preset per deployment); the ABIs below are identical
+// on every chain because both deployments run the same contract family.
+import chain from "./chain";
+
+export const CHAIN = chain.CHAIN;
+export const CHAIN_ID = CHAIN.chainId;
+export const RPC_URL = CHAIN.rpcUrl;
+export const VAULT_FACTORY = CHAIN.vaultFactory;
+// V2+V3 capable vaults (MultiVenueVault). Blank on chains where that factory
+// is not deployed - the site then stays on V2-only vaults exactly as before.
+export const MULTI_VENUE_VAULT_FACTORY = CHAIN.multiVenueVaultFactory;
+// The wrapped native token (WPLS on PulseChain, WETH on Robinhood Chain).
+export const WRAPPED = CHAIN.wrapped;
+export const ROUTER = CHAIN.router;
+export const EXPLORER_URL = CHAIN.explorerUrl;
 
 export const VAULT_FACTORY_ABI = [
   "function vaultOf(address) view returns (address)",
@@ -23,6 +30,7 @@ export const VAULT_ABI = [
   "function feeBps() view returns (uint16)",
   "function deposit(address token, uint256 amount)",
   "function withdraw(address token, uint256 amount)",
+  "function withdrawAll(address[] tokens)",
   "function setPaused(bool p)",
 ];
 

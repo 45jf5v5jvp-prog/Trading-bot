@@ -4,21 +4,25 @@ import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { closePosition } from "../lib/closePosition";
 import { numberFieldProps } from "../lib/numberField";
+import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
 import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
-function fmtBalance(wpls) {
-  const n = Number(wpls);
-  if (!Number.isFinite(n)) return wpls;
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Balance in the chain's wrapped base token. The per-chain decimal budget
+ * comes from the chain preset: WPLS balances are millions where fractional
+ * dust is noise; ETH-scale balances are tiny and the fraction is the money. */
+function fmtBalance(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return v;
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: CHAIN.balanceMaxDecimals });
 }
 
 export default function Dashboard() {
   const {
-    account, vaultAddress, vaultInfo, connecting, initializing, error,
-    connectInjected, connectWalletConnect, createVault, depositWpls, withdrawWpls, setPaused, refreshVaultInfo, getProvider,
+    account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
+    connectInjected, connectWalletConnect, createVault, depositBase, withdrawBase, withdrawToken, setPaused, refreshVaultInfo, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -29,6 +33,8 @@ export default function Dashboard() {
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
+  const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
+  const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
 
   /** Every edit to config goes through here so "unsaved changes" stays accurate -
    * nothing takes effect for the keeper until Save All Settings actually signs
@@ -65,9 +71,9 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
-  // Same idea for the vault's WPLS balance/paused state - previously this
-  // only updated right after a deposit/withdraw/pause, so the balance would
-  // sit stale until the user did something. Silent failures here (e.g. the
+  // Same idea for the vault's balance/paused state - previously this only
+  // updated right after a deposit/withdraw/pause, so the balance would sit
+  // stale until the user did something. Silent failures here (e.g. the
   // wallet was disconnected in the background) just skip a tick rather than
   // surfacing an error every 20 seconds.
   useEffect(() => {
@@ -125,8 +131,8 @@ export default function Dashboard() {
     setTxBusy(true);
     setStatus("");
     try {
-      await depositWpls(amount, setStatus);
-      setStatus(`Deposited ${amount} WPLS.`);
+      await depositBase(amount, setStatus);
+      setStatus(`Deposited ${amount} ${CHAIN.baseSymbol}.`);
       setAmount("");
     } catch (e) {
       setStatus(`Deposit failed: ${e.message}`);
@@ -140,8 +146,8 @@ export default function Dashboard() {
     setTxBusy(true);
     setStatus("");
     try {
-      await withdrawWpls(amount, setStatus);
-      setStatus(`Withdrew ${amount} WPLS.`);
+      await withdrawBase(amount, setStatus);
+      setStatus(`Withdrew ${amount} ${CHAIN.baseSymbol}.`);
       setAmount("");
     } catch (e) {
       setStatus(`Withdraw failed: ${e.message}`);
@@ -161,6 +167,26 @@ export default function Dashboard() {
       setStatus(`Pause/resume failed: ${e.message}`);
     } finally {
       setTxBusy(false);
+    }
+  }
+
+  /** Pulls the vault's entire balance of one token directly to the owner's
+   * wallet. The escape hatch for a position the keeper isn't exiting on its
+   * own - doesn't sell anything, just gets it out of the vault so it can be
+   * sold manually. Separate from Close Position, which asks the keeper to
+   * sell; this bypasses the keeper entirely. */
+  async function handleWithdrawToken() {
+    if (!tokenWithdrawAddr) return;
+    setTokenWithdrawBusy(true);
+    setStatus("");
+    try {
+      await withdrawToken(tokenWithdrawAddr, setStatus);
+      setStatus(`Withdrew all of ${tokenWithdrawAddr} to your wallet.`);
+      setTokenWithdrawAddr("");
+    } catch (e) {
+      setStatus(`Token withdraw failed: ${e.message}`);
+    } finally {
+      setTokenWithdrawBusy(false);
     }
   }
 
@@ -229,12 +255,15 @@ export default function Dashboard() {
             <div className="panel">
               <p className="mono-addr" style={{ marginBottom: 4 }}>Connected: {account}</p>
               <div className="section-label" style={{ marginTop: 18 }}>Your Vault</div>
-              <p className="mono-addr" style={{ marginBottom: 14 }}>{vaultAddress}</p>
+              <p className="mono-addr" style={{ marginBottom: 4 }}>{vaultAddress}</p>
+              <p className="hint" style={{ marginBottom: 14 }}>
+                {vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
+              </p>
 
               <div className="row-between">
                 <div>
-                  <span className="num" style={{ fontSize: 28 }}>{fmtBalance(vaultInfo.wplsBalance)}</span>
-                  <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>WPLS</span>
+                  <span className="num" style={{ fontSize: 28 }}>{fmtBalance(vaultInfo.baseBalance)}</span>
+                  <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>{CHAIN.baseSymbol}</span>
                 </div>
                 <div className="row">
                   <span className={vaultInfo.paused ? "badge badge-paused" : "badge badge-active"}>
@@ -259,7 +288,7 @@ export default function Dashboard() {
             <div className="panel">
               <div className="section-label">Deposit / Withdraw</div>
               <div className="field-inline">
-                <label>Amount (WPLS)</label>
+                <label>Amount ({CHAIN.baseSymbol})</label>
                 <input type="number" onFocus={(e) => e.target.select()} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
               </div>
               <div className="row">
@@ -270,6 +299,23 @@ export default function Dashboard() {
                   {txBusy ? "Working..." : "Withdraw"}
                 </button>
               </div>
+            </div>
+
+            <div className="panel">
+              <div className="section-label">Emergency: Withdraw a Token Directly</div>
+              <p className="hint" style={{ marginBottom: 14 }}>
+                If a position won't close through the normal Close Position button, this pulls the
+                vault's entire balance of that token straight to your own wallet - it doesn't sell it,
+                just gets it out so you can sell it yourself.
+              </p>
+              <div className="field-inline">
+                <label>Token address</label>
+                <input type="text" placeholder="0x..." value={tokenWithdrawAddr}
+                  onChange={(e) => setTokenWithdrawAddr(e.target.value)} style={{ width: 340 }} />
+              </div>
+              <button className="btn btn-danger" onClick={handleWithdrawToken} disabled={tokenWithdrawBusy || !tokenWithdrawAddr}>
+                {tokenWithdrawBusy ? "Working..." : "Withdraw This Token"}
+              </button>
             </div>
 
             <div className="panel">

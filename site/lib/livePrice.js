@@ -1,14 +1,14 @@
 const { JsonRpcProvider, Contract, formatEther } = require("ethers");
+const { CHAIN } = require("./chain");
 
-// Same NEXT_PUBLIC_RPC_URL as lib/contracts.js (see its comment) - one value
-// for the whole site, so it must stay safe to expose in the browser bundle
-// even though this particular file only ever runs server-side.
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
-const WETH = process.env.NEXT_PUBLIC_WETH || "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
-const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "4663");
-// Same router the keeper trades through (keeper/.env ROUTER) - used here
-// read-only, just to price open positions live.
-const ROUTER = process.env.NEXT_PUBLIC_ROUTER || "0x89e5db8b5aa49aa85ac63f691524311aeb649eba";
+// Server-side only, but the values are the same NEXT_PUBLIC_ chain config the
+// browser uses - one source of truth in lib/chain.js.
+const RPC_URL = CHAIN.rpcUrl;
+const WRAPPED = CHAIN.wrapped;
+const CHAIN_ID = CHAIN.chainId;
+// Same V2 router the keeper itself trades through (keeper/.env ROUTER) - used
+// here read-only, just to price open positions live.
+const ROUTER = CHAIN.router;
 const ROUTER_ABI = ["function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] memory)"];
 
 let providerSingleton;
@@ -36,27 +36,27 @@ function withTimeout(promise, ms) {
 }
 
 /**
- * Live ETH value of a held token amount, quoted straight off the router - not
- * a cached/lagging price. Quoted at the size actually held, same reasoning as
- * the keeper's own positions.ts:markToMarket - a thin pair prices worse at
- * size than at a small probe amount, and the dashboard should show what the
- * position would actually sell for right now, not a misleadingly good mid
- * price.
+ * Live value of a held token amount in the chain's base units (PLS or ETH),
+ * quoted straight off the DEX - not a cached/lagging price. Quoted at the
+ * size actually held, same reasoning as the keeper's own
+ * positions.ts:markToMarket - a thin pair prices worse at size than at a
+ * small probe amount, and the dashboard should show what the position would
+ * actually sell for right now, not a misleadingly good mid price.
  */
 async function quotePlsValue(token, tokensHeldRaw) {
   const held = BigInt(tokensHeldRaw);
   if (held === 0n) return 0;
   const router = new Contract(ROUTER, ROUTER_ABI, getProvider());
-  const amounts = await withTimeout(router.getAmountsOut(held, [token, WETH]), 8000);
+  const amounts = await withTimeout(router.getAmountsOut(held, [token, WRAPPED]), 8000);
   return Number(formatEther(amounts[amounts.length - 1]));
 }
 
 /**
  * Adds live valueNowPls/pnlPct to each open position (field names kept as-is
- * for shape-compatibility with the keeper's own history API - values are ETH).
- * A quote failure (e.g. a pair that has lost all liquidity) leaves those
- * fields null rather than throwing - one unpriceable token shouldn't blank
- * out the whole dashboard.
+ * for shape-compatibility with the keeper's history schema - the values are
+ * in whichever base unit this chain uses). A quote failure (e.g. a pair that
+ * has lost all liquidity) leaves those fields null rather than throwing -
+ * one unpriceable token shouldn't blank out the whole dashboard.
  */
 async function priceOpenPositions(openPositions) {
   return Promise.all(openPositions.map(async (p) => {

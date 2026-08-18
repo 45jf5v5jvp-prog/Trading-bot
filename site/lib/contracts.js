@@ -1,26 +1,19 @@
-// Real deployed Robinhood Chain addresses for this project. No simulated data
-// here - every read in the dashboard goes through these against the actual chain.
-export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "4663");
-// No safe public default exists for this chain (unlike PulseChain's
-// rpc.pulsechain.com) - this is bundled into the browser JS, so it must NOT be
-// a URL with a private API key embedded (that would leak the key to every
-// visitor). Use a separate, domain-restricted RPC key for this specifically.
-export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
-export const VAULT_FACTORY = process.env.NEXT_PUBLIC_VAULT_FACTORY || "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54";
-// V2+V3 capable vaults (contracts/MultiVenueVault.sol). Blank until deployed
-// and verified - see CLAUDE.md. When set, new vaults are created here
-// instead of the V2-only factory above; existing V2-only vaults are
-// unaffected and keep working exactly as they do today.
-export const MULTI_VENUE_VAULT_FACTORY = process.env.NEXT_PUBLIC_MULTI_VENUE_VAULT_FACTORY || "";
-export const WETH = process.env.NEXT_PUBLIC_WETH || "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
-// Same router the keeper itself trades through (keeper/.env ROUTER) - used
-// here read-only, just to price open positions live.
-export const ROUTER = process.env.NEXT_PUBLIC_ROUTER || "0x89e5db8b5aa49aa85ac63f691524311aeb649eba";
-// Optional: a verified Robinhood Chain block explorer, for linking tx hashes.
-// Left blank until one is independently confirmed (see keeper/src/config.ts's
-// note on hoodexplorer.org being unconfirmed) - tx hashes display as plain
-// text with no link until this is set.
-export const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL || "";
+// Chain-independent contract surface. All addresses and chain identity come
+// from lib/chain.js (one preset per deployment); the ABIs below are identical
+// on every chain because both deployments run the same contract family.
+import chain from "./chain";
+
+export const CHAIN = chain.CHAIN;
+export const CHAIN_ID = CHAIN.chainId;
+export const RPC_URL = CHAIN.rpcUrl;
+export const VAULT_FACTORY = CHAIN.vaultFactory;
+// V2+V3 capable vaults (MultiVenueVault). Blank on chains where that factory
+// is not deployed - the site then stays on V2-only vaults exactly as before.
+export const MULTI_VENUE_VAULT_FACTORY = CHAIN.multiVenueVaultFactory;
+// The wrapped native token (WPLS on PulseChain, WETH on Robinhood Chain).
+export const WRAPPED = CHAIN.wrapped;
+export const ROUTER = CHAIN.router;
+export const EXPLORER_URL = CHAIN.explorerUrl;
 
 export const VAULT_FACTORY_ABI = [
   "function vaultOf(address) view returns (address)",

@@ -1,4 +1,4 @@
-import { CHAIN_ID } from "./contracts";
+import { CHAIN, CHAIN_ID } from "./contracts";
 
 /**
  * WalletConnect lets a normal mobile browser (Safari, Chrome) connect to any
@@ -35,8 +35,8 @@ export async function getWalletConnectProvider() {
         showQrModal: true,
         metadata: {
           name: "Icaria Bots",
-          description: "Automated trading bots on Robinhood Chain",
-          url: typeof window !== "undefined" ? window.location.origin : "",
+          description: `Automated trading bots on ${CHAIN.chainName}`,
+          url: typeof window !== "undefined" ? window.location.origin : CHAIN.walletConnectFallbackUrl,
           icons: [],
         },
       }),

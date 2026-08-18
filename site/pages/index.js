@@ -4,24 +4,25 @@ import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { closePosition } from "../lib/closePosition";
 import { numberFieldProps } from "../lib/numberField";
+import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
 import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
-// ETH-scale balances are much smaller than PulseChain's PLS ones (a trade
-// might be 0.02 ETH) - 2 decimal places would round that down to nothing, so
-// this keeps more precision than the PulseChain site's equivalent formatter.
-function fmtBalance(weth) {
-  const n = Number(weth);
-  if (!Number.isFinite(n)) return weth;
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+/** Balance in the chain's wrapped base token. The per-chain decimal budget
+ * comes from the chain preset: WPLS balances are millions where fractional
+ * dust is noise; ETH-scale balances are tiny and the fraction is the money. */
+function fmtBalance(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return v;
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: CHAIN.balanceMaxDecimals });
 }
 
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
-    connectInjected, connectWalletConnect, createVault, depositWeth, withdrawWeth, withdrawToken, setPaused, refreshVaultInfo, getProvider,
+    connectInjected, connectWalletConnect, createVault, depositBase, withdrawBase, withdrawToken, setPaused, refreshVaultInfo, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -70,9 +71,9 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
-  // Same idea for the vault's WETH balance/paused state - previously this
-  // only updated right after a deposit/withdraw/pause, so the balance would
-  // sit stale until the user did something. Silent failures here (e.g. the
+  // Same idea for the vault's balance/paused state - previously this only
+  // updated right after a deposit/withdraw/pause, so the balance would sit
+  // stale until the user did something. Silent failures here (e.g. the
   // wallet was disconnected in the background) just skip a tick rather than
   // surfacing an error every 20 seconds.
   useEffect(() => {
@@ -130,8 +131,8 @@ export default function Dashboard() {
     setTxBusy(true);
     setStatus("");
     try {
-      await depositWeth(amount, setStatus);
-      setStatus(`Deposited ${amount} WETH.`);
+      await depositBase(amount, setStatus);
+      setStatus(`Deposited ${amount} ${CHAIN.baseSymbol}.`);
       setAmount("");
     } catch (e) {
       setStatus(`Deposit failed: ${e.message}`);
@@ -145,8 +146,8 @@ export default function Dashboard() {
     setTxBusy(true);
     setStatus("");
     try {
-      await withdrawWeth(amount, setStatus);
-      setStatus(`Withdrew ${amount} WETH.`);
+      await withdrawBase(amount, setStatus);
+      setStatus(`Withdrew ${amount} ${CHAIN.baseSymbol}.`);
       setAmount("");
     } catch (e) {
       setStatus(`Withdraw failed: ${e.message}`);
@@ -261,8 +262,8 @@ export default function Dashboard() {
 
               <div className="row-between">
                 <div>
-                  <span className="num" style={{ fontSize: 28 }}>{fmtBalance(vaultInfo.wethBalance)}</span>
-                  <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>WETH</span>
+                  <span className="num" style={{ fontSize: 28 }}>{fmtBalance(vaultInfo.baseBalance)}</span>
+                  <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>{CHAIN.baseSymbol}</span>
                 </div>
                 <div className="row">
                   <span className={vaultInfo.paused ? "badge badge-paused" : "badge badge-active"}>
@@ -287,7 +288,7 @@ export default function Dashboard() {
             <div className="panel">
               <div className="section-label">Deposit / Withdraw</div>
               <div className="field-inline">
-                <label>Amount (WETH)</label>
+                <label>Amount ({CHAIN.baseSymbol})</label>
                 <input type="number" onFocus={(e) => e.target.select()} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
               </div>
               <div className="row">

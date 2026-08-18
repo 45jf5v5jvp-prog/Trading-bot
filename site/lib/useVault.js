@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserProvider, Contract, JsonRpcProvider, formatEther, parseEther, ZeroAddress } from "ethers";
-import { CHAIN_ID, VAULT_FACTORY, MULTI_VENUE_VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WETH, ERC20_ABI, RPC_URL } from "./contracts";
+import { CHAIN, CHAIN_ID, VAULT_FACTORY, MULTI_VENUE_VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WRAPPED, ERC20_ABI, RPC_URL } from "./contracts";
 import { getWalletConnectProvider, walletConnectConfigured } from "./walletConnect";
 
 /**
@@ -24,7 +24,7 @@ async function waitForReceipt(txHash, { timeoutMs = 120_000, intervalMs = 3000 }
   }
   throw new Error(
     "Transaction was sent, but confirmation is taking longer than expected. " +
-    `Check a Robinhood Chain block explorer for ${txHash} before retrying - it may still land.`,
+    `Check a ${CHAIN.chainName} block explorer for ${txHash} before retrying - it may still land.`,
   );
 }
 
@@ -46,7 +46,7 @@ export function useVault() {
   // "multiVenue" (trades V2 + V3) or "v2" (V2 only) - which factory the
   // connected vault was actually found through, not a guess.
   const [vaultKind, setVaultKind] = useState(null);
-  const [vaultInfo, setVaultInfo] = useState(null); // { owner, executor, paused, wethBalance }
+  const [vaultInfo, setVaultInfo] = useState(null); // { owner, executor, paused, baseBalance }
   const [connecting, setConnecting] = useState(false);
   // True only during the very first silent-reconnect attempt after a page
   // load - lets index.js hold off showing "Connect Wallet" for the split
@@ -66,11 +66,11 @@ export function useVault() {
   const refreshVaultInfo = useCallback(async (addr) => {
     const provider = getProvider();
     const vault = new Contract(addr, VAULT_ABI, provider);
-    const weth = new Contract(WETH, ERC20_ABI, provider);
-    const [owner, executor, paused, wethBalance] = await Promise.all([
-      vault.owner(), vault.executor(), vault.paused(), weth.balanceOf(addr),
+    const wrapped = new Contract(WRAPPED, ERC20_ABI, provider);
+    const [owner, executor, paused, baseBalance] = await Promise.all([
+      vault.owner(), vault.executor(), vault.paused(), wrapped.balanceOf(addr),
     ]);
-    setVaultInfo({ owner, executor, paused, wethBalance: formatEther(wethBalance) });
+    setVaultInfo({ owner, executor, paused, baseBalance: formatEther(baseBalance) });
   }, [getProvider]);
 
   /** Shared finish-up once ANY connection method has produced accounts on a raw provider. */
@@ -80,7 +80,7 @@ export function useVault() {
     const provider = new BrowserProvider(rawProvider);
     const network = await provider.getNetwork();
     if (Number(network.chainId) !== CHAIN_ID) {
-      throw new Error(`Wrong network. Please switch your wallet to Robinhood Chain (chain ID ${CHAIN_ID}).`);
+      throw new Error(`Wrong network. Please switch your wallet to ${CHAIN.chainName} (chain ID ${CHAIN_ID}).`);
     }
     setAccount(accounts[0]);
 
@@ -198,10 +198,10 @@ export function useVault() {
     setVaultInfo(null);
   }, []);
 
-  /** New vaults go to the multi-venue factory (V2 + V3) once it's deployed
-   * and configured; falls back to the V2-only factory until then. Either
-   * way this only ever runs for someone who doesn't have a vault yet - see
-   * the on-chain "vault exists" check in both factory contracts. */
+  /** New vaults go to the multi-venue factory (V2 + V3) on chains where it's
+   * deployed and configured; falls back to the V2-only factory otherwise.
+   * Either way this only ever runs for someone who doesn't have a vault yet -
+   * see the on-chain "vault exists" check in both factory contracts. */
   const createVault = useCallback(async (onProgress) => {
     setError(null);
     try {
@@ -226,23 +226,23 @@ export function useVault() {
   }, [account, getProvider, refreshVaultInfo]);
 
   /**
-   * Deposit WETH into the connected vault. Two transactions: approve the
-   * vault to pull the tokens, then the deposit itself.
+   * Deposit the wrapped base token (WPLS / WETH) into the connected vault.
+   * Two transactions: approve the vault to pull the tokens, then the deposit.
    */
-  const depositWeth = useCallback(async (amountEth, onProgress) => {
+  const depositBase = useCallback(async (amount_, onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
-      const amount = parseEther(String(amountEth));
-      const weth = new Contract(WETH, ERC20_ABI, signer);
+      const amount = parseEther(String(amount_));
+      const wrapped = new Contract(WRAPPED, ERC20_ABI, signer);
       onProgress?.("Step 1 of 2: confirm the approval in your wallet...");
-      const approveTx = await weth.approve(vaultAddress, amount);
+      const approveTx = await wrapped.approve(vaultAddress, amount);
       onProgress?.("Waiting for the approval to confirm on-chain...");
       await waitForReceipt(approveTx.hash);
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
       onProgress?.("Step 2 of 2: confirm the deposit in your wallet...");
-      const depositTx = await vault.deposit(WETH, amount);
+      const depositTx = await vault.deposit(WRAPPED, amount);
       onProgress?.("Waiting for the deposit to confirm on-chain...");
       await waitForReceipt(depositTx.hash);
       await refreshVaultInfo(vaultAddress);
@@ -253,18 +253,19 @@ export function useVault() {
   }, [vaultAddress, getProvider, refreshVaultInfo]);
 
   /**
-   * Withdraw WETH from the connected vault back to the owner's wallet.
-   * Owner-only on chain - the escape hatch, available directly from the UI.
+   * Withdraw the wrapped base token from the connected vault back to the
+   * owner's wallet. Owner-only on chain - the escape hatch, available
+   * directly from the UI.
    */
-  const withdrawWeth = useCallback(async (amountEth, onProgress) => {
+  const withdrawBase = useCallback(async (amount_, onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
-      const amount = parseEther(String(amountEth));
+      const amount = parseEther(String(amount_));
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
       onProgress?.("Confirm the withdrawal in your wallet...");
-      const tx = await vault.withdraw(WETH, amount);
+      const tx = await vault.withdraw(WRAPPED, amount);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);
@@ -277,7 +278,7 @@ export function useVault() {
   /**
    * Withdraws the vault's entire balance of one arbitrary token straight to
    * the owner's wallet - the manual escape hatch for a position the keeper
-   * isn't exiting on its own for whatever reason (see BotVault.sol's
+   * isn't exiting on its own for whatever reason (see the vault contract's
    * withdrawAll: owner-only, reads the vault's real live balance itself so
    * there's no amount to get wrong). This is a real trade-execution
    * workaround, not a UI nicety - it exists because the automated exit path
@@ -328,6 +329,6 @@ export function useVault() {
   return {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
     connectInjected, connectWalletConnect, disconnect,
-    createVault, depositWeth, withdrawWeth, withdrawToken, setPaused, refreshVaultInfo, getProvider,
+    createVault, depositBase, withdrawBase, withdrawToken, setPaused, refreshVaultInfo, getProvider,
   };
 }

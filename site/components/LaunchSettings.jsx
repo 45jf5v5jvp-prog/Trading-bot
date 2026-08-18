@@ -1,4 +1,5 @@
 import { numberFieldProps } from "../lib/numberField";
+import { CHAIN } from "../lib/contracts";
 
 /** Plain-language description of what a given "max deployer holding %"
  * setting actually does, since the raw number alone ("75%") doesn't convey
@@ -21,7 +22,7 @@ export default function LaunchSettings({ launch, onChange }) {
   return (
     <div>
       <div className="section-label">Launch Bot</div>
-      <p className="hint" style={{ marginBottom: 14 }}>Buys brand-new pairs on Robinhood Chain the moment they open.</p>
+      <p className="hint" style={{ marginBottom: 14 }}>Buys brand-new {CHAIN.dexName} pairs on {CHAIN.chainName} the moment they open.</p>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
         <input type="checkbox" checked={launch.enabled} onChange={(e) => onChange({ ...launch, enabled: e.target.checked })} />
@@ -29,7 +30,7 @@ export default function LaunchSettings({ launch, onChange }) {
       </label>
 
       <div className="field-inline">
-        <label>ETH per launch</label>
+        <label>{CHAIN.nativeSymbol} per launch</label>
         <input {...num("perLaunchPls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
         <input {...num("maxPerDay")} min="0" style={{ width: 80 }} />
@@ -68,7 +69,7 @@ export default function LaunchSettings({ launch, onChange }) {
       </p>
 
       <div className="field-inline">
-        <label>Min liquidity (ETH)</label>
+        <label>Min liquidity ({CHAIN.nativeSymbol})</label>
         <input {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
       </div>
 

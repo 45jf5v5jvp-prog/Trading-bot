@@ -8,7 +8,7 @@ import { load, save, update, newId } from './store.js'
 import { getPersona, findSimilarAnswers } from './persona.js'
 import { buildSystemBlocks, buildReferenceBlock, buildPressureReminder } from './prompt.js'
 import { detectPressure } from './pressure.js'
-import { timeCheckDue, buildTimeCheckNote, elapsedMinutes } from './meeting.js'
+import { dueCheckpoint, buildTimeNote, elapsedMinutes, plannedMinutes, MEETING_LENGTHS, DEFAULT_MINUTES } from './meeting.js'
 import { TOOLS, runTool } from './tools.js'
 import { streamReply, extractMemory, MODEL } from './claude.js'
 
@@ -101,16 +101,38 @@ app.patch('/api/agenda/:index', auth, (req, res) => {
 })
 
 app.post('/api/conversations', auth, (req, res) => {
+  const requested = Number(req.body?.plannedMinutes)
   const conversation = {
     id: newId('conv'),
     title: 'New review',
     createdAt: new Date().toISOString(),
     closedAt: null,
     summary: '',
+    // The client says how long they have. The advisor works to it.
+    plannedMinutes: MEETING_LENGTHS.includes(requested) ? requested : DEFAULT_MINUTES,
+    checkpoints: {},
+    recap: null,
     messages: [],
   }
   update(req.userId, (d) => { d.conversations.push(conversation); return d })
   res.json({ conversation })
+})
+
+// They can always buy themselves more time; the point of the clock is that the
+// decision is theirs and gets made out loud.
+app.post('/api/conversations/:id/extend', auth, (req, res) => {
+  const minutes = Math.min(120, Math.max(5, Number(req.body?.minutes) || 15))
+  const doc = update(req.userId, (d) => {
+    const conv = d.conversations.find((c) => c.id === req.params.id)
+    if (conv) {
+      conv.plannedMinutes = plannedMinutes(conv) + minutes
+      // A fresh runway means the wrap and overtime notes get to fire again.
+      conv.checkpoints = { ...conv.checkpoints, wrap: null, overtime: null }
+    }
+    return d
+  })
+  const conv = doc.conversations.find((c) => c.id === req.params.id)
+  res.json({ plannedMinutes: conv?.plannedMinutes })
 })
 
 app.get('/api/conversations/:id', auth, (req, res) => {
@@ -147,9 +169,9 @@ app.post('/api/chat', auth, async (req, res) => {
     turns.push({ role: 'system', content: buildPressureReminder(pressure.signals) })
   }
 
-  const dueForTimeCheck = timeCheckDue(conversation)
-  if (dueForTimeCheck) {
-    turns.push({ role: 'system', content: buildTimeCheckNote(conversation, doc.agenda) })
+  const checkpoint = dueCheckpoint(conversation)
+  if (checkpoint) {
+    turns.push({ role: 'system', content: buildTimeNote(checkpoint, conversation, doc.agenda) })
   }
 
   res.writeHead(200, {
@@ -164,8 +186,9 @@ app.post('/api/chat', auth, async (req, res) => {
     type: 'sources',
     sources: hits.map((h) => ({ question: h.entry.question, score: +h.score.toFixed(2) })),
     pressure: pressure.signals,
-    timeCheck: dueForTimeCheck,
+    checkpoint,
     minutes: Math.round(elapsedMinutes(conversation)),
+    plannedMinutes: plannedMinutes(conversation),
   })
 
   let reply = ''
@@ -182,6 +205,7 @@ app.post('/api/chat', auth, async (req, res) => {
           positions: persona.positions,
           meetingFlow: persona.meetingFlow,
           doc,
+          conversation,
         }),
         messages,
         tools: TOOLS,
@@ -236,7 +260,7 @@ app.post('/api/chat', auth, async (req, res) => {
       const now = new Date().toISOString()
       conv.messages.push({ role: 'user', content: message, ts: now })
       conv.messages.push({ role: 'assistant', content: reply, ts: now, tools: usedTools.map((t) => t.name) })
-      if (dueForTimeCheck) conv.timeCheckedAt = now
+      if (checkpoint) conv.checkpoints = { ...(conv.checkpoints ?? {}), [checkpoint]: now }
       return d
     })
   }
@@ -269,6 +293,12 @@ app.post('/api/conversations/:id/close', auth, async (req, res) => {
     conv.summary = extracted.summary ?? ''
     conv.title = extracted.title || conv.title
     conv.closedAt = now
+    conv.recap = {
+      highlights: extracted.highlights ?? [],
+      advisorActions: extracted.advisorActions ?? [],
+      clientHomework: extracted.clientHomework ?? [],
+      minutes: Math.round(elapsedMinutes(conv)),
+    }
 
     const known = new Set(d.facts.map((f) => f.text.toLowerCase()))
     for (const text of extracted.newFacts ?? []) {
@@ -292,8 +322,10 @@ app.post('/api/conversations/:id/close', auth, async (req, res) => {
     return d
   })
 
+  const closed = updated.conversations.find((c) => c.id === req.params.id)
   res.json({
-    summary: updated.conversations.find((c) => c.id === req.params.id).summary,
+    summary: closed.summary,
+    recap: closed.recap,
     facts: updated.facts,
     actionItems: updated.actionItems,
     profile: updated.profile,

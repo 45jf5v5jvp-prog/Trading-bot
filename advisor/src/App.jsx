@@ -4,6 +4,7 @@ import { createSpeaker } from './lib/voice.js'
 import Login from './components/Login.jsx'
 import Chat from './components/Chat.jsx'
 import Rail from './components/Rail.jsx'
+import LengthPicker from './components/LengthPicker.jsx'
 
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(getToken()))
@@ -16,6 +17,8 @@ export default function App() {
   const [speakReplies, setSpeakReplies] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [notice, setNotice] = useState(null)
+  const [clock, setClock] = useState(null)
+  const [choosingLength, setChoosingLength] = useState(false)
   const [error, setError] = useState(null)
   const speakerRef = useRef(null)
 
@@ -30,12 +33,20 @@ export default function App() {
 
   useEffect(() => { if (authed) refresh() }, [authed, refresh])
 
-  async function startConversation() {
-    const { conversation: conv } = await api.newConversation()
+  async function startConversation(plannedMinutes) {
+    const { conversation: conv } = await api.newConversation(plannedMinutes)
     setConversation(conv)
     setMessages([])
     setSources([])
     setNotice(null)
+    setChoosingLength(false)
+    setClock({ minutes: 0, planned: conv.plannedMinutes, checkpoint: null })
+  }
+
+  async function extend(minutes) {
+    const { plannedMinutes } = await api.extendConversation(conversation.id, minutes)
+    setClock((c) => ({ ...c, planned: plannedMinutes, checkpoint: null }))
+    setNotice(`Meeting extended to ${plannedMinutes} minutes.`)
   }
 
   async function openConversation(id) {
@@ -53,6 +64,7 @@ export default function App() {
       const created = await api.newConversation()
       conv = created.conversation
       setConversation(conv)
+      setClock({ minutes: 0, planned: conv.plannedMinutes, checkpoint: null })
     }
 
     setDraft('')
@@ -96,7 +108,11 @@ export default function App() {
             })
           } else if (event.type === 'sources') {
             setSources(event.sources)
-            if (event.timeCheck) setNotice(`${event.minutes} minutes in — checking on time.`)
+            setClock({
+              minutes: event.minutes,
+              planned: event.plannedMinutes,
+              checkpoint: event.checkpoint,
+            })
           } else if (event.type === 'error') {
             setError(event.error)
           }
@@ -117,10 +133,20 @@ export default function App() {
     setNotice('Saving what we discussed…')
     try {
       const result = await api.closeConversation(conversation.id)
-      setNotice(result.skipped ? result.skipped : `Saved: ${result.summary}`)
+      if (result.skipped) {
+        setNotice(result.skipped)
+      } else {
+        setNotice(null)
+        setMessages((prev) => [...prev, {
+          role: 'recap',
+          recap: result.recap,
+          summary: result.summary,
+          title: conversation.title,
+        }])
+      }
       await refresh()
       setConversation(null)
-      setMessages([])
+      setClock(null)
     } catch (err) {
       setNotice(null)
       setError(err.message)
@@ -166,7 +192,15 @@ export default function App() {
             {me?.voice?.cloned ? 'Cloned voice' : 'Speak replies'}
           </label>
           {speaking && <button className="ghost" onClick={stopSpeaking}>Stop</button>}
-          <button className="ghost" onClick={startConversation}>New review</button>
+          {clock && (
+            <span className={`clock ${clock.checkpoint ?? ''}`}>
+              {clock.minutes} / {clock.planned} min
+            </span>
+          )}
+          {clock && (clock.checkpoint === 'wrap' || clock.checkpoint === 'overtime') && (
+            <button className="ghost" onClick={() => extend(15)}>+15 min</button>
+          )}
+          <button className="ghost" onClick={() => setChoosingLength(true)}>New review</button>
           {conversation && messages.length > 1 && (
             <button className="primary" onClick={endReview}>End &amp; remember</button>
           )}
@@ -178,6 +212,10 @@ export default function App() {
         <div className={`banner ${error ? 'bad' : ''}`} onClick={() => { setNotice(null); setError(null) }}>
           {error || notice}
         </div>
+      )}
+
+      {choosingLength && (
+        <LengthPicker onPick={startConversation} onCancel={() => setChoosingLength(false)} />
       )}
 
       <main className="layout">

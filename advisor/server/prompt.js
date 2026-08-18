@@ -3,7 +3,7 @@
 // system block behind a cache breakpoint; anything that changes per client or per turn
 // goes after it.
 
-import { renderAgenda, renderAdvisorExperience } from './meeting.js'
+import { renderAgenda, renderAdvisorExperience, renderClock } from './meeting.js'
 
 const OPERATING_RULES = `You are the AI version of a financial advisor. Everything below the line
 titled STYLE GUIDE describes the real person you are standing in for: how they think, how they talk,
@@ -69,7 +69,7 @@ advice, and it will not happen gradually enough for you to notice yourself doing
 This is a private prototype and every user is the advisor themselves testing it. Do not add
 compliance boilerplate or disclaimers to your replies unless the style guide asks for them.`
 
-export function buildSystemBlocks({ styleGuide, positions, meetingFlow, doc }) {
+export function buildSystemBlocks({ styleGuide, positions, meetingFlow, doc, conversation }) {
   const rule = '='.repeat(60)
   const section = (title, body) => (body?.trim()
     ? `${rule}\n${title}\n${rule}\n\n${body.trim()}`
@@ -86,12 +86,15 @@ export function buildSystemBlocks({ styleGuide, positions, meetingFlow, doc }) {
     // Stable across every turn and every client → cached.
     { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
     // Per-client, changes as memory accumulates → after the breakpoint.
-    { type: 'text', text: renderDossier(doc) },
+    { type: 'text', text: renderDossier(doc, conversation) },
   ]
 }
 
-function renderDossier(doc) {
+function renderDossier(doc, conversation) {
   const lines = ['CLIENT DOSSIER', '']
+
+  const clock = renderClock(conversation)
+  if (clock) lines.push(clock, '')
 
   const agenda = renderAgenda(doc.agenda)
   if (agenda) lines.push(agenda, '')
@@ -184,11 +187,19 @@ Return ONLY a JSON object, no prose and no code fence, in this exact shape:
 {
   "summary": "One or two sentences: what this conversation was about and what was decided.",
   "title": "A four-word-or-less label for this conversation",
+  "highlights": ["3-6 short bullets on how the meeting actually went — what was covered, what was decided, where you disagreed"],
+  "advisorActions": ["what the ADVISOR said they would do, in the advisor's voice: 'I'll pull...' "],
+  "clientHomework": ["what the CLIENT agreed to do or needs to compile before next time"],
   "newFacts": ["durable facts learned about the client that were not already known"],
   "profileUpdates": { "fieldName": "value" },
   "newActionItems": ["things the client said they would do, or that were recommended to them"],
   "completedActionItems": ["existing open items the conversation shows are now done"]
 }
+
+The three lists are the recap the client receives, so write them to be read by them, not by you.
+Bullets are short, concrete, and free of jargon. Never invent an action nobody committed to — an
+empty list is the right answer when nothing was agreed. Keep advisor actions and client homework
+strictly separate; who owes what is the part people get wrong.
 
 Rules: only record what was actually stated — never infer or embellish. Facts must be durable
 (a goal, a constraint, a preference, a life event), not passing chit-chat. Profile fields should use

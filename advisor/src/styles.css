@@ -284,3 +284,41 @@ input, textarea { font: inherit; color: inherit; }
 }
 .remove:hover { color: var(--bad); border-color: var(--bad); }
 .items li.done label { color: var(--ink-soft); text-decoration: line-through; }
+
+/* ---------------------------------------------------------------- clock */
+.clock {
+  font-size: .82rem; font-variant-numeric: tabular-nums; color: var(--ink-soft);
+  border: 1px solid var(--line); border-radius: 999px; padding: .45rem .8rem;
+}
+.clock.mid { border-color: var(--accent); color: var(--accent); }
+.clock.wrap { border-color: #c9922f; color: #8a5a12; background: #fdf6e9; }
+.clock.overtime { border-color: var(--bad); color: var(--bad); background: #fdf1f1; }
+
+/* ---------------------------------------------------------------- sheet */
+.sheet {
+  position: fixed; inset: 0; z-index: 30; background: rgba(22, 32, 28, .35);
+  display: grid; place-items: center; padding: 1.5rem;
+}
+.sheet-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 2rem; width: min(30rem, 100%); text-align: center;
+}
+.sheet-card h2 { margin: 0 0 .4rem; font-size: 1.3rem; letter-spacing: -.02em; }
+.sheet-card p { margin: 0 auto 1.4rem; max-width: 26rem; }
+.lengths { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.1rem; }
+.length {
+  display: grid; gap: .05rem; padding: .7rem 1rem; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--bg); min-width: 4.2rem;
+}
+.length:hover { border-color: var(--accent); background: var(--accent-soft); }
+.length b { font-size: 1.25rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.length span { font-size: .72rem; color: var(--ink-soft); }
+
+/* ---------------------------------------------------------------- recap */
+.recap { border-left: 3px solid var(--accent); }
+.recap-summary { margin: .5rem 0 .2rem; font-size: 1rem; }
+.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: .3rem; }
+.checklist.homework li::marker { color: var(--accent); }
+@media (max-width: 640px) {
+  .two-up { grid-template-columns: 1fr; }
+}

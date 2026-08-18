@@ -29,7 +29,10 @@ export const api = {
   saveAccounts: (accounts) => request('/accounts', { method: 'PUT', body: { accounts } }),
   setAgendaCovered: (index, covered) =>
     request(`/agenda/${index}`, { method: 'PATCH', body: { covered } }),
-  newConversation: () => request('/conversations', { method: 'POST' }),
+  newConversation: (plannedMinutes) =>
+    request('/conversations', { method: 'POST', body: { plannedMinutes } }),
+  extendConversation: (id, minutes) =>
+    request(`/conversations/${id}/extend`, { method: 'POST', body: { minutes } }),
   getConversation: (id) => request(`/conversations/${id}`),
   closeConversation: (id) => request(`/conversations/${id}/close`, { method: 'POST' }),
   setActionItem: (id, status) => request(`/action-items/${id}`, { method: 'PATCH', body: { status } }),

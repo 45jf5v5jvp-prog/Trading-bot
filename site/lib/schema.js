@@ -8,7 +8,7 @@
 const DEFAULT_LAUNCH = {
   enabled: false, perLaunchPls: 0, maxPerDay: 4, takeProfitPct: 50, stopLossPct: 35,
   timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true,
-  maxDeployerPct: 15, minLiquidityPls: 2_000_000,
+  maxDeployerPct: 15, minLiquidityPls: 2_000_000, requireOwnerRenounced: false,
 };
 
 const DEFAULT_MAX_HOLDING_PCT = 40;
@@ -70,6 +70,7 @@ function normalizeLaunch(l) {
     requireLpLock: Boolean(merged.requireLpLock),
     maxDeployerPct: merged.maxDeployerPct,
     minLiquidityPls: merged.minLiquidityPls,
+    requireOwnerRenounced: Boolean(merged.requireOwnerRenounced),
   };
 }
 

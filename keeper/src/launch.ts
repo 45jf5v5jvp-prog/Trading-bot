@@ -54,6 +54,7 @@ function strictestOf(candidates: VaultRecord[]): ScreenLimits & { representative
     requireLpLock: candidates.every((c) => c.launch.requireLpLock),
     maxDeployerPct: Math.max(...candidates.map((c) => c.launch.maxDeployerPct)),
     minLiquidityPls: Math.min(...candidates.map((c) => c.launch.minLiquidityPls)),
+    requireOwnerRenounced: candidates.every((c) => c.launch.requireOwnerRenounced),
     // The trade most likely to reveal a venue that can't actually absorb the
     // size someone wants to buy - screening against the biggest ask is the
     // conservative choice, not the average.
@@ -109,6 +110,7 @@ async function handleNewToken(token: string, txHash: string, discoveryBlock: num
     if (L.requireLpLock && s.lpLockedPct < 95) return;
     if (s.deployerPct > L.maxDeployerPct) return;
     if (s.liqPls < L.minLiquidityPls) return;
+    if (L.requireOwnerRenounced && !s.ownerRenounced) return;
 
     // Holding cap, same guard the rule bot uses. A fresh launch token has no
     // position yet, so its current value is whatever the vault already bought.

@@ -58,6 +58,15 @@ export default function LaunchSettings({ launch, onChange }) {
         Require LP locked/burned
       </label>
 
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
+        <input type="checkbox" checked={launch.requireOwnerRenounced} onChange={(e) => onChange({ ...launch, requireOwnerRenounced: e.target.checked })} />
+        Require ownership renounced
+      </label>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
+        Blocks tokens where the creator can still call admin-only functions - a common way a token
+        keeps a backdoor to blacklist or drain a holder after it's already been bought.
+      </p>
+
       <div className="field-inline">
         <label>Min liquidity (ETH)</label>
         <input {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />

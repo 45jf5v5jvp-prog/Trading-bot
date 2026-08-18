@@ -24,6 +24,7 @@ export interface Screen {
   lpLockedPct: number;
   deployerPct: number;
   liqPls: number;
+  ownerRenounced: boolean;
   verdict: "pass" | "fail";
   reason: string;
 }
@@ -34,6 +35,7 @@ export interface ScreenLimits {
   requireLpLock: boolean;
   maxDeployerPct: number;
   minLiquidityPls: number;
+  requireOwnerRenounced: boolean;
 }
 
 /**
@@ -179,6 +181,27 @@ async function findDeployBlock(token: string, atOrBeforeBlock: number): Promise<
   return lo;
 }
 
+/**
+ * True if the token has renounced ownership (owner() returns the zero
+ * address) - meaning whatever privileged/admin functions the contract has
+ * can no longer be called by anyone. A retained, unrenounced owner is the
+ * single most common way a token keeps a backdoor to blacklist or drain a
+ * holder's balance well after a normal buy/sell simulation already passed -
+ * exactly the failure mode this project hit for real. Not every safe token
+ * uses the Ownable pattern at all, so a call that reverts (no owner()
+ * function) is treated as permissive/unknown rather than blocked - this
+ * check only bites tokens that DO have an owner and have not given it up.
+ */
+async function checkOwnerRenounced(token: string): Promise<boolean> {
+  try {
+    const t = new Contract(token, ERC20_ABI, provider) as Dyn;
+    const owner: string = await t.owner();
+    return /^0x0{40}$/i.test(owner);
+  } catch {
+    return true;
+  }
+}
+
 /** PLS-side depth of the token's WETH pair. */
 async function liquidityPls(token: string): Promise<{ liq: number; pair: string }> {
   const pair: string = await factory.getPair(token, CFG.weth);
@@ -198,7 +221,7 @@ export async function screen(
 ): Promise<Screen> {
   const out: Screen = {
     token, sellable: false, buyTaxBps: 0, sellTaxBps: 0, roundTripLossBps: 0,
-    lpLockedPct: 0, deployerPct: 100, liqPls: 0, verdict: "fail", reason: "",
+    lpLockedPct: 0, deployerPct: 100, liqPls: 0, ownerRenounced: true, verdict: "fail", reason: "",
   };
 
   const { liq, pair } = await liquidityPls(token);
@@ -238,6 +261,10 @@ export async function screen(
   if (out.deployerPct > limits.maxDeployerPct)
     return { ...out, reason: `deployer holds ${out.deployerPct.toFixed(1)}% of supply` };
 
+  out.ownerRenounced = await checkOwnerRenounced(token);
+  if (limits.requireOwnerRenounced && !out.ownerRenounced)
+    return { ...out, reason: "owner has not renounced control of the contract" };
+
   out.verdict = "pass";
   out.reason = "clear";
   return out;
@@ -267,7 +294,7 @@ export async function screenV3(
 ): Promise<Screen> {
   const out: Screen = {
     token, sellable: false, buyTaxBps: 0, sellTaxBps: 0, roundTripLossBps: 0,
-    lpLockedPct: 0, deployerPct: 100, liqPls: 0, verdict: "fail", reason: "",
+    lpLockedPct: 0, deployerPct: 100, liqPls: 0, ownerRenounced: true, verdict: "fail", reason: "",
   };
 
   if (!CFG.factoryV3 || !CFG.routerV3) return { ...out, reason: "V3 not configured" };
@@ -301,6 +328,10 @@ export async function screenV3(
   out.deployerPct = await deployerPct(token, deployer);
   if (out.deployerPct > limits.maxDeployerPct)
     return { ...out, reason: `deployer holds ${out.deployerPct.toFixed(1)}% of supply` };
+
+  out.ownerRenounced = await checkOwnerRenounced(token);
+  if (limits.requireOwnerRenounced && !out.ownerRenounced)
+    return { ...out, reason: "owner has not renounced control of the contract" };
 
   out.verdict = "pass";
   out.reason = "clear";

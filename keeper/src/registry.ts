@@ -23,6 +23,12 @@ export interface LaunchConfig {
   requireLpLock: boolean;
   maxDeployerPct: number;
   minLiquidityPls: number;
+  // Off by default so this never silently changes behavior for an existing
+  // saved config - a user has to opt in. See screener.ts's checkOwnerRenounced
+  // for why this exists: an unrenounced owner is the most common way a token
+  // keeps a backdoor to drain a holder after a normal buy/sell probe already
+  // passed.
+  requireOwnerRenounced: boolean;
 }
 
 export interface TradingRule {
@@ -67,7 +73,7 @@ export const DEFAULT_MAX_HOLDING_PCT = 40;
 const DEFAULT_LAUNCH: LaunchConfig = {
   enabled: false, perLaunchPls: 0, maxPerDay: 4, takeProfitPct: 50, stopLossPct: 35,
   timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true,
-  maxDeployerPct: 15, minLiquidityPls: 2_000_000,
+  maxDeployerPct: 15, minLiquidityPls: 2_000_000, requireOwnerRenounced: false,
 };
 
 const cache = new Map<string, VaultRecord>();

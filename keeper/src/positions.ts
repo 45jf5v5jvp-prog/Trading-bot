@@ -67,6 +67,20 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
   return { total, byToken };
 }
 
+type MarkResult =
+  | { ok: true; value: number; held: bigint; venue: Venue }
+  // "vanished": the vault's real on-chain balance for this token is 0 even
+  // though the position is still recorded open - the tokens left some way
+  // other than a sell this bot ever called (most likely a malicious token
+  // with a backdoor/blacklist mechanism triggered after the buy). This is
+  // never a normal transient state for an open position: the row only
+  // exists because the buy already verified a nonzero balance increase on
+  // chain, so a later read of exactly 0 is a real signal, not noise.
+  // "unpriceable": balance is still there but no venue can quote it right
+  // now (RPC hiccup, or genuinely no liquidity anywhere) - may resolve on
+  // its own next tick, unlike "vanished."
+  | { ok: false; reason: "vanished" | "unpriceable" };
+
 /**
  * Marks a position against a live quote for the size actually held, not a mid
  * price. On a thin new pair those differ enormously, and exiting on mid price
@@ -76,16 +90,21 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
  * bought via V3 has no V2 pool to fall back to at all, and hardcoding V2
  * here would just silently never be able to mark (or exit) it.
  */
-async function markToMarket(r: Row): Promise<{ value: number; held: bigint; venue: Venue } | null> {
+async function markToMarket(r: Row): Promise<MarkResult> {
+  let held: bigint;
   try {
     const erc = new Contract(r.token, ERC20_ABI, provider) as Dyn;
-    const held: bigint = await erc.balanceOf(r.vault);
-    if (held === 0n) return null;
-    const venue = await findBestSellVenue(r.token, held);
-    if (!venue) return null;
-    return { value: Number(formatEther(venue.amountOut)), held, venue };
+    held = await erc.balanceOf(r.vault);
   } catch {
-    return null;
+    return { ok: false, reason: "unpriceable" };
+  }
+  if (held === 0n) return { ok: false, reason: "vanished" };
+  try {
+    const venue = await findBestSellVenue(r.token, held);
+    if (!venue) return { ok: false, reason: "unpriceable" };
+    return { ok: true, value: Number(formatEther(venue.amountOut)), held, venue };
+  } catch {
+    return { ok: false, reason: "unpriceable" };
   }
 }
 
@@ -114,7 +133,19 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
 
 async function checkAndClose(r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue"): Promise<void> {
   const m = await markToMarket(r);
-  if (!m) return;
+  if (!m.ok) {
+    if (m.reason === "vanished") {
+      log("error", "positions",
+        `${r.token} in ${r.vault}: real on-chain balance is 0 but the position is still recorded ` +
+        `open - the tokens left the vault without this bot ever selling them (most likely a ` +
+        `malicious token). Marking stuck so this doesn't sit silently invisible.`);
+      db.prepare(`UPDATE positions SET status='stuck', close_reason=? WHERE id=?`)
+        .run("balance vanished: real on-chain balance is 0, not sold by this bot", r.id);
+    } else {
+      log("warn", "positions", `${r.token} in ${r.vault}: could not get a live quote this tick, will retry`);
+    }
+    return;
+  }
 
   // ratio is current value / cost. 1.10 means up 10%. high_water is the peak
   // ratio ever seen, which the trailing stop measures the drawdown from.

@@ -10,12 +10,13 @@ const client = new Anthropic()
 // are testing how good the advice actually is.
 const CHAT_EFFORT = process.env.ADVISOR_EFFORT || 'low'
 
-export function streamReply({ system, messages }) {
+export function streamReply({ system, messages, tools }) {
   return client.messages.stream({
     model: MODEL,
     max_tokens: 4000, // a spoken answer, not an essay
     system,
     messages,
+    tools,
     thinking: { type: 'adaptive' },
     output_config: { effort: CHAT_EFFORT },
   })

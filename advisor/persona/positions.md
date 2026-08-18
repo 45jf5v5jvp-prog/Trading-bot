@@ -58,3 +58,23 @@ we both agree on, over a timeline that doesn't wreck you on taxes.
 (Replace all of the above with your own. Five to fifteen real positions is plenty — and
 the ones where you've actually lost a client by holding the line are the most valuable
 ones to write down.)
+
+---
+
+POSITION: There is no "best" bucket, and I won't play that game. What matters is having money
+in more than one of them.
+WHEN THEY PUSH: Look at it this way. If everything you have is in whole life and it's enough
+to retire on, you're going to be fine — tax-free withdrawals, not much market volatility. If
+everything you have is in a pre-tax 401(k), you're also going to be fine — you'll just pay tax
+on every withdrawal and have an RMD to manage whether you want the money or not. If everything
+is in a regular brokerage account, fine again — you pay on the gains as they come out.
+
+All three of those people retire. That's the part nobody says out loud.
+
+The reason I want you in more than one isn't that one of them is secretly better. It's that
+each bucket has a different tax treatment, a different amount of market risk, and different
+liquidity — and when you have all three, I get to choose which one we pull from in a given
+year. That choice is worth more over thirty years than picking the "right" one ever was.
+WHAT WOULD CHANGE MY MIND: Nothing about which product is best. A specific tax situation, a
+specific timeline, or a specific liquidity need changes which bucket we fund *next* — that's a
+different conversation and I'm always up for it.

@@ -26,6 +26,9 @@ export const api = {
   login: (passcode) => request('/login', { method: 'POST', body: { passcode } }),
   me: () => request('/me'),
   saveProfile: (profile) => request('/profile', { method: 'PUT', body: profile }),
+  saveAccounts: (accounts) => request('/accounts', { method: 'PUT', body: { accounts } }),
+  setAgendaCovered: (index, covered) =>
+    request(`/agenda/${index}`, { method: 'PATCH', body: { covered } }),
   newConversation: () => request('/conversations', { method: 'POST' }),
   getConversation: (id) => request(`/conversations/${id}`),
   closeConversation: (id) => request(`/conversations/${id}/close`, { method: 'POST' }),

@@ -72,6 +72,57 @@ rate. Anything under 100% is real — the fix is to add the position it folded o
 
 `npm test` runs the detector's unit tests and needs no API key.
 
+## The first meeting
+
+`persona/meeting-flow.md` holds the running order of a fact-finder, in the advisor's words —
+open with their agenda ("what do you want to make sure we talk about"), then their history with
+advisors and the A-to-F grade, then discovery. Two parts of a meeting can't live in a prompt,
+so they're wired into the server:
+
+- **The agenda is a promise.** What they say matters gets recorded in their own words and sits
+  in the dossier every turn, marked covered or not, so nothing quietly slides off the table.
+- **The twenty-minute check.** At `TIME_CHECK_MINUTES`, an operator note fires once: ask whether
+  they're still okay on time or whether it's better to book another block. It carries what's been
+  covered and what's still on their list, so the question can be asked with something behind it.
+
+The grade gap — what would make their current advisor an A — is stored as the brief for the whole
+relationship and rendered into every conversation after it.
+
+## What it can actually do
+
+Numbers never come from the model's head. It gathers inputs in conversation and calls a tool:
+
+| Tool | What it does |
+|---|---|
+| `record_agenda` | Their list for today, in their words, marked covered as you go |
+| `record_advisor_experience` | Status, the A-F grade, and what would make it an A |
+| `save_accounts` | Everything in one place - balance, contributions, match, per bucket |
+| `run_retirement_projection` | The real projection, plus any stress tests asked for |
+| `draft_document` | A full draft with the attorney's checklist attached |
+
+**The projection** (`server/retirement.js`) is a deterministic engine - year-by-year accumulation,
+then a withdrawal phase that sequences taxable to pre-tax to tax-free, forces RMDs from 73 off the
+IRS Uniform Lifetime Table, grosses up withdrawals for tax, and reports whether the money lasts,
+what the first year costs in tax, and the mix across tax buckets at retirement. It runs live in
+the meeting rather than becoming a deliverable emailed next week. Stress tests ride along: retire
+at 62, markets 2% worse, spend less - each one a separate run, not a hand-wave.
+
+Its assumptions are printed on the card and it says plainly what it doesn't model (no sequence
+risk, no state tax, simplified federal treatment). The tests in `evals/retirement.test.mjs` cover
+the withdrawal ordering, the RMD spill into taxable, and the case that makes the advisor's point:
+same money all-Roth vs all-pre-tax pays wildly different lifetime tax, and *both* clients still
+retire fine.
+
+**Documents** (`server/documents.js`) - the model writes the language, the code enforces what
+can't be left to judgment: the not-executed notice on every draft, a per-type checklist of what
+the attorney has to verify, and a flag on every bracketed blank left in the text. Nothing leaves
+looking executable.
+
+**Aggregation** is manual entry today - the Money tab, or the advisor recording accounts as the
+client describes them. Live aggregation (Plaid or similar) drops into the same store and the same
+shape; it is a real integration with real security obligations, so it isn't stubbed out
+pretending to work.
+
 ## The memory
 
 Hit **End & remember** when a conversation is done. The transcript goes through an
@@ -115,13 +166,21 @@ server/
   claude.js     model calls (chat + memory extraction)
   prompt.js     prompt assembly — operating rules, style guide, positions, dossier
   pressure.js   detects push-back so the reply doesn't soften under it
+  meeting.js    the agenda promise and the twenty-minute time check
+  tools.js      what the advisor can do, as opposed to talk about
+  retirement.js the projection engine - deterministic, tested, never the model's arithmetic
+  documents.js  drafts, each one carrying its attorney checklist
   persona.js    loads and hot-reloads style-guide.md, positions.md, qa/*.md
   retrieval.js  BM25 search over your recorded answers
   store.js      flat-file JSON store, one file per client
 evals/
   pushback.mjs  scripted pressure conversations, graded for capitulation
-  pressure.test.mjs  unit tests for the detector (no API key needed)
+  pressure.test.mjs    unit tests for the detector (no API key needed)
+  retirement.test.mjs  projection math
+  meeting.test.mjs     the clock and the agenda
 persona/        your voice — the only files you need to edit
+preview.html    dev harness: the tool cards rendered with real engine output and
+src/preview.jsx   no API calls (npm run dev:web, then open /preview.html)
 src/            React frontend
 data/           runtime storage (gitignored)
 ```

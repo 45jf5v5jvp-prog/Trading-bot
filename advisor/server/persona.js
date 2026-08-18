@@ -1,6 +1,7 @@
 // Loads the two things that make the AI sound like you:
 //   persona/style-guide.md  — how you talk, what you believe, what you refuse to do
 //   persona/positions.md    — where you don't move, and what you say when pushed
+//   persona/meeting-flow.md — the running order of a first meeting
 //   persona/qa/*.md         — transcripts of you actually answering questions
 // Both are re-read when they change on disk, so you can edit and reload without
 // restarting the server.
@@ -36,7 +37,8 @@ function parseQaFile(text, file) {
 }
 
 function fingerprint() {
-  const files = [path.join(PERSONA_DIR, 'style-guide.md'), path.join(PERSONA_DIR, 'positions.md')]
+  const files = ['style-guide.md', 'positions.md', 'meeting-flow.md']
+    .map((name) => path.join(PERSONA_DIR, name))
   if (fs.existsSync(QA_DIR)) {
     for (const name of fs.readdirSync(QA_DIR)) {
       if (name.endsWith('.md')) files.push(path.join(QA_DIR, name))
@@ -58,6 +60,7 @@ export function getPersona() {
   }
   const styleGuide = read('style-guide.md')
   const positions = read('positions.md')
+  const meetingFlow = read('meeting-flow.md')
 
   const entries = []
   if (fs.existsSync(QA_DIR)) {
@@ -67,9 +70,10 @@ export function getPersona() {
     }
   }
 
-  cache = { stamp, styleGuide, positions, entries, index: buildIndex(entries) }
+  cache = { stamp, styleGuide, positions, meetingFlow, entries, index: buildIndex(entries) }
   console.log(`[persona] loaded ${entries.length} recorded answers, `
-    + `${styleGuide.length} chars of style guide, ${positions.length} chars of positions`)
+    + `${styleGuide.length} chars of style guide, ${positions.length} of positions, `
+    + `${meetingFlow.length} of meeting flow`)
   return cache
 }
 

@@ -8,6 +8,8 @@ import { load, save, update, newId } from './store.js'
 import { getPersona, findSimilarAnswers } from './persona.js'
 import { buildSystemBlocks, buildReferenceBlock, buildPressureReminder } from './prompt.js'
 import { detectPressure } from './pressure.js'
+import { timeCheckDue, buildTimeCheckNote, elapsedMinutes } from './meeting.js'
+import { TOOLS, runTool } from './tools.js'
 import { streamReply, extractMemory, MODEL } from './claude.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -58,6 +60,11 @@ app.get('/api/me', auth, (req, res) => {
       styleGuideChars: persona.styleGuide.length,
       positionsChars: persona.positions.length,
     },
+    agenda: doc.agenda,
+    advisorExperience: doc.advisorExperience,
+    accounts: doc.accounts,
+    documents: doc.documents,
+    lastProjection: doc.lastProjection,
     voice: { cloned: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID) },
     model: MODEL,
   })
@@ -75,6 +82,22 @@ app.patch('/api/action-items/:id', auth, (req, res) => {
     return d
   })
   res.json({ actionItems: doc.actionItems })
+})
+
+// Manual entry, for anything the client would rather type than say out loud.
+// Live aggregation (Plaid and friends) plugs in here — same shape, same store.
+app.put('/api/accounts', auth, (req, res) => {
+  const doc = update(req.userId, (d) => ({ ...d, accounts: req.body.accounts ?? [] }))
+  res.json({ accounts: doc.accounts })
+})
+
+app.patch('/api/agenda/:index', auth, (req, res) => {
+  const doc = update(req.userId, (d) => {
+    const item = d.agenda[Number(req.params.index)]
+    if (item) item.covered = Boolean(req.body.covered)
+    return d
+  })
+  res.json({ agenda: doc.agenda })
 })
 
 app.post('/api/conversations', auth, (req, res) => {
@@ -101,7 +124,7 @@ app.post('/api/chat', auth, async (req, res) => {
   const { conversationId, message } = req.body ?? {}
   if (!message?.trim()) return res.status(400).json({ error: 'Empty message.' })
 
-  const doc = load(req.userId)
+  let doc = load(req.userId)
   const conversation = doc.conversations.find((c) => c.id === conversationId)
   if (!conversation) return res.status(404).json({ error: 'No such conversation.' })
 
@@ -114,13 +137,19 @@ app.post('/api/chat', auth, async (req, res) => {
     ? [{ type: 'text', text: reference }, { type: 'text', text: message }]
     : message
 
-  // When the client is leaning on a previous answer rather than adding to it,
-  // the reminder goes in as a mid-conversation system message — last thing read
-  // before the reply is written, and it leaves the cached prefix intact.
-  const pressure = detectPressure({ message, history })
   const turns = [...history, { role: 'user', content: userContent }]
+
+  // Two kinds of operator note, both delivered as mid-conversation system
+  // messages: they sit after the client's message, so they're the last thing read
+  // before the reply is written, and they leave the cached prefix intact.
+  const pressure = detectPressure({ message, history })
   if (pressure.pressured) {
     turns.push({ role: 'system', content: buildPressureReminder(pressure.signals) })
+  }
+
+  const dueForTimeCheck = timeCheckDue(conversation)
+  if (dueForTimeCheck) {
+    turns.push({ role: 'system', content: buildTimeCheckNote(conversation, doc.agenda) })
   }
 
   res.writeHead(200, {
@@ -135,31 +164,67 @@ app.post('/api/chat', auth, async (req, res) => {
     type: 'sources',
     sources: hits.map((h) => ({ question: h.entry.question, score: +h.score.toFixed(2) })),
     pressure: pressure.signals,
+    timeCheck: dueForTimeCheck,
+    minutes: Math.round(elapsedMinutes(conversation)),
   })
 
   let reply = ''
+  const usedTools = []
+
   try {
-    const stream = streamReply({
-      system: buildSystemBlocks({ styleGuide: persona.styleGuide, positions: persona.positions, doc }),
-      messages: turns,
-    })
+    const messages = [...turns]
+    // Each pass is one model turn; a tool call sends us round again with the
+    // result. Bounded so a confused loop can't run up a bill.
+    for (let pass = 0; pass < 6; pass += 1) {
+      const stream = streamReply({
+        system: buildSystemBlocks({
+          styleGuide: persona.styleGuide,
+          positions: persona.positions,
+          meetingFlow: persona.meetingFlow,
+          doc,
+        }),
+        messages,
+        tools: TOOLS,
+      })
 
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        reply += event.delta.text
-        send({ type: 'text', text: event.delta.text })
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          reply += event.delta.text
+          send({ type: 'text', text: event.delta.text })
+        }
       }
-    }
 
-    const final = await stream.finalMessage()
-    if (final.stop_reason === 'refusal') {
-      send({ type: 'error', error: 'The model declined to answer that one.' })
+      const final = await stream.finalMessage()
+      send({ type: 'usage', usage: {
+        input: final.usage.input_tokens,
+        output: final.usage.output_tokens,
+        cacheRead: final.usage.cache_read_input_tokens ?? 0,
+      } })
+
+      if (final.stop_reason === 'refusal') {
+        send({ type: 'error', error: 'The model declined to answer that one.' })
+        break
+      }
+      if (final.stop_reason !== 'tool_use') break
+
+      messages.push({ role: 'assistant', content: final.content })
+
+      const results = []
+      for (const block of final.content.filter((b) => b.type === 'tool_use')) {
+        send({ type: 'tool_start', name: block.name })
+        const result = runTool({ name: block.name, input: block.input, doc })
+        doc = save(doc) // tools mutate the client record; persist before continuing
+        usedTools.push({ name: block.name, result })
+        send({ type: 'tool', name: block.name, input: block.input, result })
+        results.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: JSON.stringify(result),
+          is_error: Boolean(result?.error),
+        })
+      }
+      messages.push({ role: 'user', content: results })
     }
-    send({ type: 'usage', usage: {
-      input: final.usage.input_tokens,
-      output: final.usage.output_tokens,
-      cacheRead: final.usage.cache_read_input_tokens ?? 0,
-    } })
   } catch (err) {
     console.error('[chat]', err)
     send({ type: 'error', error: err.message })
@@ -170,7 +235,8 @@ app.post('/api/chat', auth, async (req, res) => {
       const conv = d.conversations.find((c) => c.id === conversationId)
       const now = new Date().toISOString()
       conv.messages.push({ role: 'user', content: message, ts: now })
-      conv.messages.push({ role: 'assistant', content: reply, ts: now })
+      conv.messages.push({ role: 'assistant', content: reply, ts: now, tools: usedTools.map((t) => t.name) })
+      if (dueForTimeCheck) conv.timeCheckedAt = now
       return d
     })
   }

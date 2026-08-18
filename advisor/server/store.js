@@ -16,6 +16,11 @@ const blank = (id) => ({
   profile: {},
   facts: [],          // durable things learned about the client
   actionItems: [],    // { id, text, status: 'open' | 'done', createdAt }
+  agenda: [],         // what they said mattered today — { text, covered }
+  advisorExperience: null,
+  accounts: [],       // everything in one place — { label, bucket, balance, ... }
+  documents: [],      // drafts, each carrying its attorney checklist
+  lastProjection: null,
   conversations: [],  // { id, title, createdAt, closedAt, summary, messages[] }
 })
 

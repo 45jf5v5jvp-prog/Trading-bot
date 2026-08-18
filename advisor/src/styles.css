@@ -169,3 +169,118 @@ input, textarea { font: inherit; color: inherit; }
   .layout { grid-template-columns: 1fr; }
   .panel { max-height: 45vh; }
 }
+
+/* ---------------------------------------------------------------- tools */
+.tool-note {
+  align-self: flex-start; font-size: .82rem; color: var(--ink-soft);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
+  padding: .25rem .8rem;
+}
+
+.tool-card {
+  align-self: flex-start; width: min(100%, 34rem);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
+}
+.tool-card.bad { border-color: #e7c3c3; background: #fdf4f4; }
+.tool-card h4 {
+  font-size: .74rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-soft); margin: 1rem 0 .4rem;
+}
+
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.kicker {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-soft); font-weight: 700;
+}
+.verdict { font-size: .78rem; font-weight: 600; padding: .15rem .6rem; border-radius: 999px; }
+.verdict.good { background: #e3efe6; color: #1d5c34; }
+.verdict.warn { background: #fbeedd; color: #8a5a12; }
+
+.hero { display: flex; align-items: baseline; gap: .6rem; margin: .6rem 0 .8rem; flex-wrap: wrap; }
+.hero b { font-size: 1.9rem; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.hero span { color: var(--ink-soft); font-size: .88rem; }
+.hero.small b { font-size: 1.4rem; }
+.hero .doc-title { font-size: 1.1rem; }
+
+/* Stacked mix. The 2px surface gap between segments is what keeps adjacent
+   fills separable for a colourblind reader, so it is structural, not styling. */
+.mix { display: flex; gap: 2px; height: 30px; margin-bottom: .55rem; }
+.mix .seg {
+  display: grid; place-items: center; min-width: 3px;
+  border-radius: 3px; overflow: hidden;
+}
+.mix .seg span { color: #fff; font-size: .72rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.legend {
+  list-style: none; margin: 0 0 .9rem; padding: 0;
+  display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .82rem; color: var(--ink-soft);
+}
+.legend li { display: flex; align-items: center; gap: .35rem; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.legend b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.figures { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem 1rem; margin: 0 0 .3rem; }
+.figures div { display: flex; flex-direction: column; }
+.figures dt { font-size: .74rem; color: var(--ink-soft); }
+.figures dd {
+  margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; font-size: .95rem;
+}
+
+.whatifs { width: 100%; border-collapse: collapse; margin: .9rem 0 .3rem; font-size: .85rem; }
+.whatifs caption {
+  text-align: left; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-soft); padding-bottom: .35rem;
+}
+.whatifs th { text-align: left; font-weight: 500; padding: .3rem 0; border-top: 1px solid var(--line); }
+.whatifs td { text-align: right; padding: .3rem 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.whatifs td.good { color: #1d5c34; }
+.whatifs td.warn { color: #8a5a12; }
+
+.assumptions { margin-top: .7rem; font-size: .82rem; color: var(--ink-soft); }
+.assumptions table { width: 100%; border-collapse: collapse; margin-bottom: .6rem; }
+.assumptions th { text-align: left; font-weight: 500; padding: .22rem 0; }
+.assumptions td { text-align: right; font-variant-numeric: tabular-nums; padding: .22rem 0; }
+.assumptions p { margin: .3rem 0; }
+.assumptions .caveat { font-style: italic; }
+
+.gaps, .checklist { margin: .4rem 0; padding-left: 1.1rem; font-size: .86rem; }
+.gaps { color: #8a5a12; }
+.checklist { color: var(--ink-soft); }
+.gaps li, .checklist li { margin-bottom: .25rem; }
+.small { font-size: .8rem; }
+.doc {
+  margin-top: .6rem; padding: .8rem; background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; font-size: .8rem; line-height: 1.55; white-space: pre-wrap;
+  max-height: 22rem; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---------------------------------------------------------------- rail bits */
+.grade-block { display: flex; flex-direction: column; gap: .6rem; }
+.grade { display: flex; align-items: baseline; gap: .6rem; }
+.grade b {
+  font-size: 2rem; line-height: 1; color: var(--accent); letter-spacing: -.02em;
+}
+.grade span { color: var(--ink-soft); font-size: .85rem; }
+.brief {
+  margin: 0; font-size: .88rem; background: var(--bg); border-left: 3px solid var(--accent);
+  padding: .5rem .7rem; border-radius: 0 8px 8px 0;
+}
+.brief span {
+  display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-soft); margin-bottom: .15rem;
+}
+
+.accounts { display: grid; gap: .6rem; margin-top: .8rem; }
+.account { display: grid; gap: .3rem; }
+.account input, .account select {
+  padding: .4rem .55rem; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; font-size: .85rem; min-width: 0;
+}
+.account-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: .3rem; }
+.account-row input { text-align: right; font-variant-numeric: tabular-nums; }
+.remove {
+  width: 28px; border: 1px solid var(--line); background: var(--card);
+  color: var(--ink-soft); border-radius: 8px; line-height: 1;
+}
+.remove:hover { color: var(--bad); border-color: var(--bad); }
+.items li.done label { color: var(--ink-soft); text-decoration: line-through; }

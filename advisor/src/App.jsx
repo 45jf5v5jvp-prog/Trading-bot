@@ -3,7 +3,7 @@ import { api, getToken, setToken, clearToken, streamChat } from './lib/api.js'
 import { createSpeaker } from './lib/voice.js'
 import Login from './components/Login.jsx'
 import Chat from './components/Chat.jsx'
-import Memory from './components/Memory.jsx'
+import Rail from './components/Rail.jsx'
 
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(getToken()))
@@ -58,6 +58,7 @@ export default function App() {
     setDraft('')
     setError(null)
     setMessages((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '' }])
+    let ranTool = false
     setStreaming(true)
 
     const speaker = speakReplies
@@ -74,14 +75,28 @@ export default function App() {
             speaker?.push(event.text)
             setMessages((prev) => {
               const next = [...prev]
-              next[next.length - 1] = {
-                ...next[next.length - 1],
-                content: next[next.length - 1].content + event.text,
+              const last = next[next.length - 1]
+              // A tool card can land mid-reply; the text after it starts a new bubble.
+              if (!last || last.role !== 'assistant') {
+                next.push({ role: 'assistant', content: event.text })
+              } else {
+                next[next.length - 1] = { ...last, content: last.content + event.text }
               }
+              return next
+            })
+          } else if (event.type === 'tool') {
+            ranTool = true
+            setMessages((prev) => {
+              const next = [...prev]
+              // Drop the empty bubble the tool call interrupted.
+              if (next.length && next[next.length - 1].role === 'assistant'
+                && !next[next.length - 1].content) next.pop()
+              next.push({ role: 'tool', name: event.name, result: event.result })
               return next
             })
           } else if (event.type === 'sources') {
             setSources(event.sources)
+            if (event.timeCheck) setNotice(`${event.minutes} minutes in — checking on time.`)
           } else if (event.type === 'error') {
             setError(event.error)
           }
@@ -92,6 +107,8 @@ export default function App() {
       setError(err.message)
     } finally {
       setStreaming(false)
+      // Tools write to the client record; pull the rail back into sync.
+      if (ranTool) refresh()
     }
   }
 
@@ -172,7 +189,7 @@ export default function App() {
           streaming={streaming}
           sources={sources}
         />
-        <Memory me={me} onOpenConversation={openConversation} onRefresh={refresh} />
+        <Rail me={me} onOpenConversation={openConversation} onRefresh={refresh} />
       </main>
     </div>
   )

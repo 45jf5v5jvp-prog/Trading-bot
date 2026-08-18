@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { dictationSupported, startDictation } from '../lib/voice.js'
+import ToolCard from './ToolCard.jsx'
 
 export default function Chat({ messages, draft, setDraft, onSend, streaming, sources }) {
   const scroller = useRef(null)
@@ -44,11 +45,15 @@ export default function Chat({ messages, draft, setDraft, onSend, streaming, sou
         )}
 
         {messages.map((message, i) => (
-          <div key={i} className={`msg ${message.role}`}>
-            {message.content
-              ? message.content.split('\n\n').map((para, j) => <p key={j}>{para}</p>)
-              : <span className="typing"><i /><i /><i /></span>}
-          </div>
+          message.role === 'tool'
+            ? <ToolCard key={i} name={message.name} result={message.result} />
+            : (
+              <div key={i} className={`msg ${message.role}`}>
+                {message.content
+                  ? message.content.split('\n\n').map((para, j) => <p key={j}>{para}</p>)
+                  : <span className="typing"><i /><i /><i /></span>}
+              </div>
+            )
         ))}
       </div>
 

@@ -1,7 +1,9 @@
 // Prompt assembly. The ordering here matters for prompt caching: everything
-// stable (operating rules + style guide + positions) goes in the first system
-// block behind a cache breakpoint; anything that changes per client or per turn
+// stable (operating rules + style guide + positions + meeting flow) goes in the first
+// system block behind a cache breakpoint; anything that changes per client or per turn
 // goes after it.
+
+import { renderAgenda, renderAdvisorExperience } from './meeting.js'
 
 const OPERATING_RULES = `You are the AI version of a financial advisor. Everything below the line
 titled STYLE GUIDE describes the real person you are standing in for: how they think, how they talk,
@@ -23,6 +25,22 @@ How to behave:
   plainly the way the advisor would. Do not pretend to a certainty you can't have.
 - If the reference answers below contradict your own instinct, follow the reference answers. They are
   the advisor's actual words.
+
+WHAT YOU DO RATHER THAN DESCRIBE:
+
+- You have tools. Numbers come from them, never from your own arithmetic. If a client asks
+  whether they can retire at 62, you do not estimate — you run the projection and read it back.
+  Being approximately right in your head is the fastest way to lose someone's trust permanently.
+- Record what they tell you as they tell you: their agenda at the top of the meeting, their
+  history with advisors, every account and balance. Don't save it up for the end; the meeting can
+  end at any moment and whatever wasn't recorded is gone.
+- Missing an input is a question, not a guess. The one that matters most is what their life costs
+  per month — ask for it plainly before running anything.
+- When you draft a document, you write the whole thing, and you say out loud that their attorney
+  has to review it before it means anything. Never invent a name, date, account number, or dollar
+  amount in a document — bracket what you don't know.
+- Stress-test out loud. When someone brings you a plan, run the version where markets are worse
+  or they retire earlier, and show them both. That's the service.
 
 DISAGREEMENT — read this twice, it is the part you are most likely to get wrong:
 
@@ -51,16 +69,17 @@ advice, and it will not happen gradually enough for you to notice yourself doing
 This is a private prototype and every user is the advisor themselves testing it. Do not add
 compliance boilerplate or disclaimers to your replies unless the style guide asks for them.`
 
-export function buildSystemBlocks({ styleGuide, positions, doc }) {
+export function buildSystemBlocks({ styleGuide, positions, meetingFlow, doc }) {
   const rule = '='.repeat(60)
+  const section = (title, body) => (body?.trim()
+    ? `${rule}\n${title}\n${rule}\n\n${body.trim()}`
+    : '')
   const stable = [
     OPERATING_RULES,
-    `${rule}\nSTYLE GUIDE\n${rule}\n\n${
-      styleGuide.trim() || '(No style guide recorded yet — answer plainly and conversationally.)'
-    }`,
-    positions.trim()
-      ? `${rule}\nPOSITIONS — where this advisor does not move\n${rule}\n\n${positions.trim()}`
-      : '',
+    section('STYLE GUIDE', styleGuide
+      || '(No style guide recorded yet — answer plainly and conversationally.)'),
+    section('POSITIONS — where this advisor does not move', positions),
+    section('MEETING FLOW — how this advisor runs a first meeting', meetingFlow),
   ].filter(Boolean).join('\n\n')
 
   return [
@@ -73,6 +92,34 @@ export function buildSystemBlocks({ styleGuide, positions, doc }) {
 
 function renderDossier(doc) {
   const lines = ['CLIENT DOSSIER', '']
+
+  const agenda = renderAgenda(doc.agenda)
+  if (agenda) lines.push(agenda, '')
+
+  const experience = renderAdvisorExperience(doc.advisorExperience)
+  if (experience) lines.push(experience, '')
+
+  const accounts = doc.accounts ?? []
+  if (accounts.length) {
+    const total = accounts.reduce((t, a) => t + (a.balance || 0), 0)
+    lines.push(`Accounts on file (${money(total)} across ${new Set(accounts.map((a) => a.bucket)).size} tax buckets):`)
+    for (const a of accounts) {
+      const adding = a.annualContribution
+        ? `, adding ${money(a.annualContribution)}/yr${a.employerMatch ? ` + ${money(a.employerMatch)} match` : ''}`
+        : ''
+      lines.push(`- ${a.label} [${a.bucket}]: ${money(a.balance)}${adding}`)
+    }
+    lines.push('')
+  }
+
+  const last = doc.lastProjection
+  if (last) {
+    lines.push(`Last projection run: ${money(last.atRetirement.total)} at age ${last.atRetirement.age}, `
+      + `${last.outcome.lastsToLifeExpectancy
+        ? 'lasts to life expectancy'
+        : `runs out at ${last.outcome.moneyRunsOutAtAge}`}. `
+      + `Re-run it rather than quoting these numbers from memory if anything has changed.`, '')
+  }
 
   const profile = Object.entries(doc.profile ?? {}).filter(([, v]) => v !== '' && v != null)
   lines.push(profile.length
@@ -102,6 +149,7 @@ function renderDossier(doc) {
   return lines.join('\n')
 }
 
+const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`
 const label = (key) => key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())
 
 // Retrieved examples change every turn, so they ride along with the user's

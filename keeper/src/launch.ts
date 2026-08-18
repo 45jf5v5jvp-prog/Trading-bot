@@ -61,6 +61,7 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
     requireLpLock: candidates.every((c) => c.launch.requireLpLock),
     maxDeployerPct: Math.max(...candidates.map((c) => c.launch.maxDeployerPct)),
     minLiquidityPls: Math.min(...candidates.map((c) => c.launch.minLiquidityPls)),
+    requireOwnerRenounced: candidates.every((c) => c.launch.requireOwnerRenounced),
   };
 
   const s = await screen(token, deployer, strictest);
@@ -87,6 +88,7 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
     if (L.requireLpLock && s.lpLockedPct < 95) return;
     if (s.deployerPct > L.maxDeployerPct) return;
     if (s.liqPls < L.minLiquidityPls) return;
+    if (L.requireOwnerRenounced && !s.ownerRenounced) return;
 
     // Holding cap, same guard the rule bot uses. A fresh launch token has no
     // position yet, so its current value is whatever the vault already bought.

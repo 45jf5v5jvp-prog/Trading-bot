@@ -23,6 +23,30 @@ function fmtPnl(pct) {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
+/** Copies the full (untruncated) token address - what's shown next to it is
+ * always the shortened display form, so there's nothing to select and copy
+ * by hand. Exists specifically so a token can be pasted into DexScreener or
+ * the emergency withdraw field without retyping a 42-character address. */
+function CopyAddressButton({ address }) {
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (very old browser, or not on HTTPS) -
+      // nothing useful to fall back to, the address is still visible to
+      // select by hand.
+    }
+  }
+  return (
+    <button type="button" className="btn btn-small" style={{ padding: "2px 8px", fontSize: 10 }} onClick={handleCopy}>
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
+
 /** A position PulseX currently can't price at any real size - either
  * getAmountsOut reverts outright (livePrice.js leaves pnlPct/valueNowPls
  * null - typically because the LP was pulled entirely) or it still quotes
@@ -49,6 +73,7 @@ function NoLiquidityPositionRow({ p, onClose, closeState }) {
     <div className="row-between dead-position-row">
       <div className="row" style={{ gap: 10 }}>
         <span className="holding-token" style={{ fontSize: 12.5 }}>{short(p.token)}</span>
+        <CopyAddressButton address={p.token} />
         <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {p.spent_pls.toLocaleString()} PLS · {label}</span>
       </div>
       <button
@@ -72,7 +97,10 @@ function HoldingCard({ p, onClose, closeState }) {
     <div className="holding-card">
       <div className="holding-card-top">
         <div>
-          <div className="holding-token">{short(p.token)}</div>
+          <div className="row" style={{ gap: 8 }}>
+            <span className="holding-token">{short(p.token)}</span>
+            <CopyAddressButton address={p.token} />
+          </div>
           <div className="holding-meta">{p.bot} · opened {fmtTs(p.opened_at)}</div>
         </div>
         <div className={`num holding-pnl ${pnlClass(p.pnlPct)}`}>{fmtPnl(p.pnlPct)}</div>

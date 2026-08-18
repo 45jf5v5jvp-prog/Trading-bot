@@ -275,6 +275,33 @@ export function useVault() {
   }, [vaultAddress, getProvider, refreshVaultInfo]);
 
   /**
+   * Withdraws the vault's entire balance of one arbitrary token straight to
+   * the owner's wallet - the manual escape hatch for a position the keeper
+   * isn't exiting on its own for whatever reason (see BotVault.sol's
+   * withdrawAll: owner-only, reads the vault's real live balance itself so
+   * there's no amount to get wrong). This is a real trade-execution
+   * workaround, not a UI nicety - it exists because the automated exit path
+   * can fail silently and the owner needs a way to get their funds out that
+   * doesn't depend on the keeper at all.
+   */
+  const withdrawToken = useCallback(async (tokenAddress, onProgress) => {
+    setError(null);
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      onProgress?.("Confirm the withdrawal in your wallet...");
+      const tx = await vault.withdrawAll([tokenAddress]);
+      onProgress?.("Waiting for it to confirm on-chain...");
+      await waitForReceipt(tx.hash);
+      await refreshVaultInfo(vaultAddress);
+    } catch (e) {
+      setError(e.message || String(e));
+      throw e;
+    }
+  }, [vaultAddress, getProvider, refreshVaultInfo]);
+
+  /**
    * Pauses or resumes the vault. While paused, executeSwap reverts for the
    * keeper (checked on chain, live() modifier) - the fastest way to stop the
    * bot without touching the keeper server or its executor key. Owner-only,
@@ -301,6 +328,6 @@ export function useVault() {
   return {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
     connectInjected, connectWalletConnect, disconnect,
-    createVault, depositWeth, withdrawWeth, setPaused, refreshVaultInfo, getProvider,
+    createVault, depositWeth, withdrawWeth, withdrawToken, setPaused, refreshVaultInfo, getProvider,
   };
 }

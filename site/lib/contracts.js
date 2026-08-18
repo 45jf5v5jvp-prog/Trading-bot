@@ -37,6 +37,7 @@ export const VAULT_ABI = [
   "function feeBps() view returns (uint16)",
   "function deposit(address token, uint256 amount)",
   "function withdraw(address token, uint256 amount)",
+  "function withdrawAll(address[] tokens)",
   "function setPaused(bool p)",
 ];
 

@@ -21,7 +21,7 @@ function fmtBalance(weth) {
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
-    connectInjected, connectWalletConnect, createVault, depositWeth, withdrawWeth, setPaused, refreshVaultInfo, getProvider,
+    connectInjected, connectWalletConnect, createVault, depositWeth, withdrawWeth, withdrawToken, setPaused, refreshVaultInfo, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -32,6 +32,8 @@ export default function Dashboard() {
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
+  const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
+  const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
 
   /** Every edit to config goes through here so "unsaved changes" stays accurate -
    * nothing takes effect for the keeper until Save All Settings actually signs
@@ -167,6 +169,26 @@ export default function Dashboard() {
     }
   }
 
+  /** Pulls the vault's entire balance of one token directly to the owner's
+   * wallet. The escape hatch for a position the keeper isn't exiting on its
+   * own - doesn't sell anything, just gets it out of the vault so it can be
+   * sold manually. Separate from Close Position, which asks the keeper to
+   * sell; this bypasses the keeper entirely. */
+  async function handleWithdrawToken() {
+    if (!tokenWithdrawAddr) return;
+    setTokenWithdrawBusy(true);
+    setStatus("");
+    try {
+      await withdrawToken(tokenWithdrawAddr, setStatus);
+      setStatus(`Withdrew all of ${tokenWithdrawAddr} to your wallet.`);
+      setTokenWithdrawAddr("");
+    } catch (e) {
+      setStatus(`Token withdraw failed: ${e.message}`);
+    } finally {
+      setTokenWithdrawBusy(false);
+    }
+  }
+
   /** Signs and submits a close request for one open position. Doesn't sell
    * anything itself - the keeper does that on its next pass, see
    * lib/closePosition.js. */
@@ -276,6 +298,23 @@ export default function Dashboard() {
                   {txBusy ? "Working..." : "Withdraw"}
                 </button>
               </div>
+            </div>
+
+            <div className="panel">
+              <div className="section-label">Emergency: Withdraw a Token Directly</div>
+              <p className="hint" style={{ marginBottom: 14 }}>
+                If a position won't close through the normal Close Position button, this pulls the
+                vault's entire balance of that token straight to your own wallet - it doesn't sell it,
+                just gets it out so you can sell it yourself.
+              </p>
+              <div className="field-inline">
+                <label>Token address</label>
+                <input type="text" placeholder="0x..." value={tokenWithdrawAddr}
+                  onChange={(e) => setTokenWithdrawAddr(e.target.value)} style={{ width: 340 }} />
+              </div>
+              <button className="btn btn-danger" onClick={handleWithdrawToken} disabled={tokenWithdrawBusy || !tokenWithdrawAddr}>
+                {tokenWithdrawBusy ? "Working..." : "Withdraw This Token"}
+              </button>
             </div>
 
             <div className="panel">

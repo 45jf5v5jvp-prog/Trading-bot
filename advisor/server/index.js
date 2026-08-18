@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { load, save, update, newId } from './store.js'
 import { getPersona, findSimilarAnswers } from './persona.js'
-import { buildSystemBlocks, buildReferenceBlock } from './prompt.js'
+import { buildSystemBlocks, buildReferenceBlock, buildPressureReminder } from './prompt.js'
+import { detectPressure } from './pressure.js'
 import { streamReply, extractMemory, MODEL } from './claude.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -52,7 +53,11 @@ app.get('/api/me', auth, (req, res) => {
       ...meta,
       messageCount: messages.length,
     })),
-    persona: { recordedAnswers: persona.entries.length, styleGuideChars: persona.styleGuide.length },
+    persona: {
+      recordedAnswers: persona.entries.length,
+      styleGuideChars: persona.styleGuide.length,
+      positionsChars: persona.positions.length,
+    },
     voice: { cloned: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID) },
     model: MODEL,
   })
@@ -109,6 +114,15 @@ app.post('/api/chat', auth, async (req, res) => {
     ? [{ type: 'text', text: reference }, { type: 'text', text: message }]
     : message
 
+  // When the client is leaning on a previous answer rather than adding to it,
+  // the reminder goes in as a mid-conversation system message — last thing read
+  // before the reply is written, and it leaves the cached prefix intact.
+  const pressure = detectPressure({ message, history })
+  const turns = [...history, { role: 'user', content: userContent }]
+  if (pressure.pressured) {
+    turns.push({ role: 'system', content: buildPressureReminder(pressure.signals) })
+  }
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
@@ -117,13 +131,17 @@ app.post('/api/chat', auth, async (req, res) => {
   })
   const send = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`)
 
-  send({ type: 'sources', sources: hits.map((h) => ({ question: h.entry.question, score: +h.score.toFixed(2) })) })
+  send({
+    type: 'sources',
+    sources: hits.map((h) => ({ question: h.entry.question, score: +h.score.toFixed(2) })),
+    pressure: pressure.signals,
+  })
 
   let reply = ''
   try {
     const stream = streamReply({
-      system: buildSystemBlocks({ styleGuide: persona.styleGuide, doc }),
-      messages: [...history, { role: 'user', content: userContent }],
+      system: buildSystemBlocks({ styleGuide: persona.styleGuide, positions: persona.positions, doc }),
+      messages: turns,
     })
 
     for await (const event of stream) {

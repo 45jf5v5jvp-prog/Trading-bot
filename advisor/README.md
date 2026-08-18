@@ -22,10 +22,12 @@ process: `npm run build && npm start`, then open http://localhost:8787.
 
 ## The part that matters: making it sound like you
 
-Two files, both under `persona/`:
+Three files, all under `persona/`:
 
 - **`style-guide.md`** — your judgment, in first person. Currently a template with prompts
   in it. Replace it entirely. This gets loaded into every conversation.
+- **`positions.md`** — where you don't move, and what you say the second and third time
+  someone leans on you. See "Not folding" below; this file is why it exists.
 - **`qa/*.md`** — your actual answers to actual questions. Four samples ship as a format
   demo; delete them and put your own in. See `persona/README.md` for the format and for
   the fastest way to build the corpus (talk, transcribe, paste).
@@ -36,6 +38,39 @@ At answer time the app pulls the five recorded answers closest to what was asked
 over your corpus) and shows them to the model alongside your style guide. The chat panel
 has a "show the recorded answers this drew on" toggle so you can see exactly which of
 your answers shaped a reply — that's the fastest way to find the gaps in your corpus.
+
+## Not folding
+
+The known failure mode of AI advice is that it agrees with you. It won't do it on the first
+answer — it does it on the third, after a client has pushed back twice, and it sounds like
+*"That's a fair point, ultimately it's your call."* An advisor whose value is partly in
+saying no cannot ship that.
+
+Three things push against it, and none of them work alone:
+
+1. **`persona/positions.md`** — the things you don't move on, each with what you say when
+   someone leans on it, and what new fact *would* legitimately change your mind. It sits in
+   the cached system prompt with the style guide, so it's in front of the model on every turn.
+2. **A push-back detector** (`server/pressure.js`) — when a client's message is pressure
+   rather than new information (asking again, asking harder, "everyone else is doing it",
+   "I'm doing it anyway"), the server appends a mid-conversation system message before the
+   reply is written: hold the line, say it shorter, don't hedge into options, don't open by
+   conceding. A message carrying an actual new fact deliberately does *not* trigger it —
+   changing your mind on new information is correct, and the model should stay free to do it.
+3. **An eval that measures it**, because prompt fixes that feel right and don't work are the
+   norm here:
+
+```bash
+npm run eval:pushback            # four scenarios, client pushes three times each
+npm run eval:pushback -- --runs 3 --show
+```
+
+Each scenario opens with something you'd say no to, then pushes three times without ever
+adding a fact. A judge grades the last reply `held` / `softened` / `caved` and prints a hold
+rate. Anything under 100% is real — the fix is to add the position it folded on to
+`positions.md`, including what you say the third time, and run it again.
+
+`npm test` runs the detector's unit tests and needs no API key.
 
 ## The memory
 
@@ -78,10 +113,14 @@ answer the question this prototype exists to answer.
 server/
   index.js      HTTP API + SSE streaming
   claude.js     model calls (chat + memory extraction)
-  prompt.js     prompt assembly — operating rules, style guide, client dossier
-  persona.js    loads and hot-reloads style-guide.md + qa/*.md
+  prompt.js     prompt assembly — operating rules, style guide, positions, dossier
+  pressure.js   detects push-back so the reply doesn't soften under it
+  persona.js    loads and hot-reloads style-guide.md, positions.md, qa/*.md
   retrieval.js  BM25 search over your recorded answers
   store.js      flat-file JSON store, one file per client
+evals/
+  pushback.mjs  scripted pressure conversations, graded for capitulation
+  pressure.test.mjs  unit tests for the detector (no API key needed)
 persona/        your voice — the only files you need to edit
 src/            React frontend
 data/           runtime storage (gitignored)

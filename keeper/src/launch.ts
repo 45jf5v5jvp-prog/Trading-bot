@@ -30,6 +30,46 @@ async function vaultWethBalance(vault: string): Promise<number> {
 
 const seen = new Set<string>();
 
+// PoolCreated fires when a pool is CREATED, which on V3 is routinely a
+// separate transaction from the one that seeds liquidity. A token glanced at
+// in that gap has nowhere to trade yet. It used to be marked seen and written
+// off forever, with no log line - a launch missed silently and unprovably.
+// Now such tokens go on this re-check list and get another look each scan
+// pass until the window expires. Same treatment for tokens screened while
+// their liquidity was still below the floor: on a fresh launch the rest of
+// the liquidity is often still on its way.
+const NO_VENUE_RETRY_MS = 30 * 60 * 1000;
+const RETRY_MIN_GAP_MS = 60 * 1000;
+const pendingRetry = new Map<string, { txHash: string; block: number; firstSeenMs: number; lastTriedMs: number }>();
+
+function queueRetry(token: string, txHash: string, block: number, why: string): void {
+  const key = token.toLowerCase();
+  if (pendingRetry.has(key)) {
+    pendingRetry.get(key)!.lastTriedMs = Date.now();
+    return;
+  }
+  pendingRetry.set(key, { txHash, block, firstSeenMs: Date.now(), lastTriedMs: Date.now() });
+  log("info", "launch", `${token}: ${why} - re-checking for ${NO_VENUE_RETRY_MS / 60000} min in case liquidity is still arriving`);
+}
+
+/** Screen rejections that can heal on their own as liquidity arrives. */
+function isRetryableReason(reason: string): boolean {
+  return /below floor|pool too thin|could not price/i.test(reason);
+}
+
+export async function retryPendingTokens(): Promise<void> {
+  for (const [key, p] of [...pendingRetry]) {
+    if (Date.now() - p.firstSeenMs > NO_VENUE_RETRY_MS) {
+      pendingRetry.delete(key);
+      log("info", "launch", `Gave up on ${key}: still nothing tradeable after ${NO_VENUE_RETRY_MS / 60000} min`);
+      continue;
+    }
+    if (Date.now() - p.lastTriedMs < RETRY_MIN_GAP_MS) continue;
+    p.lastTriedMs = Date.now();
+    await evaluateToken(key, p.txHash, p.block);
+  }
+}
+
 function firesToday(vault: string): number {
   const since = Math.floor(Date.now() / 1000) - 86400;
   const r = db.prepare(`SELECT COUNT(*) n FROM fires WHERE vault=? AND bot='launch' AND ts>=?`)
@@ -65,7 +105,10 @@ function strictestOf(candidates: VaultRecord[]): ScreenLimits & { representative
 async function handleNewToken(token: string, txHash: string, discoveryBlock: number): Promise<void> {
   if (seen.has(token.toLowerCase())) return;
   seen.add(token.toLowerCase());
+  await evaluateToken(token, txHash, discoveryBlock);
+}
 
+async function evaluateToken(token: string, txHash: string, discoveryBlock: number): Promise<void> {
   const candidates = registry.active().filter((v) => v.launch.enabled && v.launch.perLaunchPls > 0);
   if (candidates.length === 0) return;
 
@@ -77,7 +120,10 @@ async function handleNewToken(token: string, txHash: string, discoveryBlock: num
   // size someone actually wants to trade - see venues.ts for why that beats
   // comparing raw liquidity numbers across fundamentally different AMM models.
   const venue = await findBestVenue(token, representativeTradeEth);
-  if (!venue) return; // no real pool anywhere for this token yet
+  if (!venue) {
+    queueRetry(token, txHash, discoveryBlock, "pool created but nothing tradeable yet");
+    return;
+  }
 
   log("info", "launch", `New token ${token}, best venue: ${venue.kind}${venue.kind === "v3" ? ` fee=${venue.fee}` : ""}`);
 
@@ -88,8 +134,11 @@ async function handleNewToken(token: string, txHash: string, discoveryBlock: num
 
   if (!s.sellable) {
     log("info", "launch", `Rejected ${token}: ${s.reason}`);
+    if (isRetryableReason(s.reason)) queueRetry(token, txHash, discoveryBlock, "rejection may heal as liquidity arrives");
+    else pendingRetry.delete(token.toLowerCase());
     return;
   }
+  pendingRetry.delete(token.toLowerCase());
   log("info", "launch", `Screened ${token} via ${venue.kind}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
     `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} ETH`);
 
@@ -206,6 +255,10 @@ async function scanFactory(
 
 /** V2 PairCreated - each pair is exactly one token/WETH combination. */
 export async function scan(): Promise<void> {
+  // Piggybacks on this loop's cadence rather than needing its own timer in
+  // index.ts. Runs only here, never in scanV3, so a token is never evaluated
+  // twice concurrently.
+  await retryPendingTokens();
   await scanFactory(CFG.factory, FACTORY_ABI, "last_pair_block", (f) => f.filters.PairCreated!(), async (ev) => {
     const a = ev.args as [string, string, string, bigint] | undefined;
     if (!a) return;

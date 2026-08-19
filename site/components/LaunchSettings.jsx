@@ -48,12 +48,11 @@ export default function LaunchSettings({ launch, onChange }) {
       <div className="field-inline">
         <label>Trailing stop %</label>
         <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
-        <span className="hint">
-          Sells when the price falls this far off its peak. 0 = off. To let winners
-          run, set this (e.g. 25) and set Take profit to 0 - the position rides up
-          and sells only when it rolls over.
-        </span>
       </div>
+      <p className="hint" style={{ marginTop: 4 }}>
+        Sells when the price falls this far off its peak. 0 = off. To let winners run,
+        set this to 25 and Take profit to 0.
+      </p>
 
       <div className="sub-label">Screening limits (a token failing any of these is skipped, never bought)</div>
 

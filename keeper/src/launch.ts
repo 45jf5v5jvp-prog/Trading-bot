@@ -29,6 +29,40 @@ async function vaultWplsPls(vault: string): Promise<number> {
 
 const seen = new Set<string>();
 
+// PairCreated fires when the pair is CREATED, which is sometimes a separate
+// transaction from the one that adds liquidity. A token screened in that gap
+// shows liquidity 0, gets rejected "below floor", and used to stay rejected
+// forever because the seen-set never gives a token a second look. On a fresh
+// launch the liquidity is often still on its way, so a liquidity rejection
+// goes on this re-check list and gets another screen each scan pass until
+// the window expires.
+const LOW_LIQ_RETRY_MS = 30 * 60 * 1000;
+const RETRY_MIN_GAP_MS = 60 * 1000;
+const pendingRetry = new Map<string, { pair: string; txHash: string; firstSeenMs: number; lastTriedMs: number }>();
+
+function queueRetry(token: string, pair: string, txHash: string): void {
+  const key = token.toLowerCase();
+  if (pendingRetry.has(key)) {
+    pendingRetry.get(key)!.lastTriedMs = Date.now();
+    return;
+  }
+  pendingRetry.set(key, { pair, txHash, firstSeenMs: Date.now(), lastTriedMs: Date.now() });
+  log("info", "launch", `${token}: liquidity below floor on a fresh pair - re-checking for ${LOW_LIQ_RETRY_MS / 60000} min in case liquidity is still arriving`);
+}
+
+async function retryPendingTokens(): Promise<void> {
+  for (const [key, p] of [...pendingRetry]) {
+    if (Date.now() - p.firstSeenMs > LOW_LIQ_RETRY_MS) {
+      pendingRetry.delete(key);
+      log("info", "launch", `Gave up on ${key}: liquidity never reached the floor within ${LOW_LIQ_RETRY_MS / 60000} min`);
+      continue;
+    }
+    if (Date.now() - p.lastTriedMs < RETRY_MIN_GAP_MS) continue;
+    p.lastTriedMs = Date.now();
+    await evaluateToken(key, p.pair, p.txHash);
+  }
+}
+
 function firesToday(vault: string): number {
   const since = Math.floor(Date.now() / 1000) - 86400;
   const r = db.prepare(`SELECT COUNT(*) n FROM fires WHERE vault=? AND bot='launch' AND ts>=?`)
@@ -46,11 +80,14 @@ async function deployerOf(txHash: string): Promise<string | null> {
 async function handleNewPair(token: string, pair: string, txHash: string): Promise<void> {
   if (seen.has(token.toLowerCase())) return;
   seen.add(token.toLowerCase());
+  log("info", "launch", `New pair ${pair} for token ${token}`);
+  await evaluateToken(token, pair, txHash);
+}
 
+async function evaluateToken(token: string, pair: string, txHash: string): Promise<void> {
   const candidates = registry.active().filter((v) => v.launch.enabled && v.launch.perLaunchPls > 0);
   if (candidates.length === 0) return;
 
-  log("info", "launch", `New pair ${pair} for token ${token}`);
   const deployer = await deployerOf(txHash);
 
   // Screen once with the strictest limits any subscriber uses, then let each
@@ -69,8 +106,11 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
 
   if (!s.sellable) {
     log("info", "launch", `Rejected ${token}: ${s.reason}`);
+    if (/below floor/i.test(s.reason)) queueRetry(token, pair, txHash);
+    else pendingRetry.delete(token.toLowerCase());
     return;
   }
+  pendingRetry.delete(token.toLowerCase());
   log("info", "launch", `Screened ${token}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
     `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} PLS`);
 
@@ -123,6 +163,8 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
 }
 
 export async function scan(): Promise<void> {
+  // Piggybacks on this loop's cadence rather than needing its own timer.
+  await retryPendingTokens();
   const head = await provider.getBlockNumber();
   const last = Number(meta.get("last_pair_block", String(head - 200)));
   if (head <= last) return;

@@ -44,12 +44,16 @@ export interface ExitInputs {
  * (highWater > 1), so it never fires on a position that only ever fell.
  */
 export function sellSignal(pos: ExitInputs, ratio: number, nowSec: number): string | null {
+  // 0 means disabled for every exit, matching what the UI promises. Without
+  // the > 0 guards, a take-profit of 0 would mean "sell at breakeven now" -
+  // exactly wrong for the trail-only setup where TP is turned off so a
+  // winner can run.
   const pnl = (ratio - 1) * 100;
-  if (pos.tpPct != null && pnl >= pos.tpPct) return `take profit ${pnl.toFixed(1)}%`;
-  if (pos.slPct != null && pnl <= -pos.slPct) return `stop loss ${pnl.toFixed(1)}%`;
-  if (pos.trailPct != null && pos.highWater > 1 && ratio <= pos.highWater * (1 - pos.trailPct / 100))
+  if (pos.tpPct != null && pos.tpPct > 0 && pnl >= pos.tpPct) return `take profit ${pnl.toFixed(1)}%`;
+  if (pos.slPct != null && pos.slPct > 0 && pnl <= -pos.slPct) return `stop loss ${pnl.toFixed(1)}%`;
+  if (pos.trailPct != null && pos.trailPct > 0 && pos.highWater > 1 && ratio <= pos.highWater * (1 - pos.trailPct / 100))
     return `trailing stop ${pnl.toFixed(1)}% (peaked +${((pos.highWater - 1) * 100).toFixed(1)}%)`;
-  if (pos.timeExitMin != null && nowSec - pos.openedAt >= pos.timeExitMin * 60)
+  if (pos.timeExitMin != null && pos.timeExitMin > 0 && nowSec - pos.openedAt >= pos.timeExitMin * 60)
     return `time exit ${pnl.toFixed(1)}%`;
   return null;
 }

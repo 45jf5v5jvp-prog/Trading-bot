@@ -13,8 +13,9 @@ const { CHAIN } = require("./chain");
 // chain preset: 2,000,000 PLS-scale vs single-digit ETH-scale.
 const DEFAULT_LAUNCH = {
   enabled: false, perLaunchPls: 0, maxPerDay: 4, takeProfitPct: 50, stopLossPct: 35,
-  timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true,
-  maxDeployerPct: 15, minLiquidityPls: CHAIN.minLiquidityDefault, requireOwnerRenounced: false,
+  trailingStopPct: 0, timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  requireLpLock: true, maxDeployerPct: 15, minLiquidityPls: CHAIN.minLiquidityDefault,
+  requireOwnerRenounced: false,
 };
 
 const DEFAULT_MAX_HOLDING_PCT = 40;
@@ -58,7 +59,7 @@ function normalizeRule(r, i) {
 function normalizeLaunch(l) {
   const merged = { ...DEFAULT_LAUNCH, ...(l ?? {}) };
   for (const field of [
-    "perLaunchPls", "maxPerDay", "takeProfitPct", "stopLossPct", "timeExitMin",
+    "perLaunchPls", "maxPerDay", "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin",
     "maxBuyTaxBps", "maxSellTaxBps", "maxDeployerPct", "minLiquidityPls",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
@@ -70,6 +71,7 @@ function normalizeLaunch(l) {
     maxPerDay: merged.maxPerDay,
     takeProfitPct: merged.takeProfitPct,
     stopLossPct: merged.stopLossPct,
+    trailingStopPct: merged.trailingStopPct,
     timeExitMin: merged.timeExitMin,
     maxBuyTaxBps: merged.maxBuyTaxBps,
     maxSellTaxBps: merged.maxSellTaxBps,

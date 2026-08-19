@@ -11,6 +11,51 @@ function short(addr) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+/** Date for a dense list row. The full toLocaleString wraps to three lines
+ * inside a narrow cell on a phone; month/day plus time is enough to place
+ * a trade, and seconds never matter here. */
+function fmtTsShort(unixSeconds) {
+  if (!unixSeconds) return "";
+  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
+    month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+/** close_reason is written for the keeper log and can be a whole sentence,
+ * which used to blow a table row up to phone-screen height. The list shows a
+ * short label; the full sentence stays on the row's title attribute. */
+function shortReason(reason, status) {
+  if (!reason) return status === "stuck" ? "stuck" : "";
+  const r = reason.toLowerCase();
+  if (r.startsWith("trailing stop")) return reason.split(" (")[0];
+  if (r.startsWith("take profit") || r.startsWith("stop loss") || r.startsWith("time exit")) return reason;
+  if (r.startsWith("closed by owner")) return "closed by owner";
+  if (r.startsWith("balance vanished")) return "rugged";
+  if (r.startsWith("cannot sell")) return "unsellable";
+  if (r.startsWith("retired")) return "retired";
+  return reason.length > 30 ? `${reason.slice(0, 28)}...` : reason;
+}
+
+/** Realized outcome of a closed position. Null when it never sold (stuck
+ * positions have no proceeds), which renders as a dash rather than a fake 0. */
+function realizedPnlPct(p) {
+  if (p.proceeds_pls === null || p.proceeds_pls === undefined || !p.spent_pls) return null;
+  return (p.proceeds_pls / p.spent_pls - 1) * 100;
+}
+
+function ClosedPositionRow({ p }) {
+  const pnl = realizedPnlPct(p);
+  return (
+    <div className="closed-row" title={p.close_reason || ""}>
+      <span className="closed-bot">{p.bot}</span>
+      <span className="closed-token">{short(p.token)}</span>
+      <span className="closed-date">{fmtTsShort(p.closed_at)}</span>
+      <span className={`closed-pnl ${pnlClass(pnl)}`}>{pnl === null ? "-" : fmtPnl(pnl)}</span>
+      <span className="closed-reason">{shortReason(p.close_reason, p.status)}</span>
+    </div>
+  );
+}
+
 /** Amounts in the chain's base unit (PLS / ETH). PLS amounts are huge and
  * fractional dust is noise; ETH amounts are tiny and the fraction IS the
  * money - the per-chain decimal budget comes from the chain preset. */
@@ -147,6 +192,7 @@ function HoldingCard({ p, onClose, closeState }) {
  * poll (see index.js), so this is the "should I close this?" screen. */
 export default function HistoryPanel({ history, onClosePosition, closeStates }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
+  const [showAllClosed, setShowAllClosed] = useState(false);
   if (!history) return null;
   const { positions, fires } = history;
   const unit = CHAIN.nativeSymbol;
@@ -186,19 +232,17 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
       {positions.closed.length > 0 && (
         <>
           <div className="sub-label">Closed Positions</div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Bot</th><th>Token</th><th>Closed</th><th>Proceeds ({unit})</th><th>Reason</th></tr></thead>
-              <tbody>
-                {positions.closed.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.bot}</td><td>{short(p.token)}</td><td>{fmtTs(p.closed_at)}</td>
-                    <td>{fmtAmount(p.proceeds_pls)}</td><td>{p.close_reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="closed-list">
+            {(showAllClosed ? positions.closed : positions.closed.slice(0, 8)).map((p) => (
+              <ClosedPositionRow key={p.id} p={p} />
+            ))}
           </div>
+          {positions.closed.length > 8 && (
+            <button type="button" className="btn btn-small" style={{ marginTop: 8 }}
+              onClick={() => setShowAllClosed((s) => !s)}>
+              {showAllClosed ? "Show fewer" : `Show all ${positions.closed.length}`}
+            </button>
+          )}
         </>
       )}
 

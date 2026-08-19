@@ -17,6 +17,7 @@ export interface LaunchConfig {
   maxPerDay: number;
   takeProfitPct: number;
   stopLossPct: number;       // 0 disables
+  trailingStopPct: number;   // 0 disables. Sells when price falls this % off its peak.
   timeExitMin: number;       // 0 disables
   maxBuyTaxBps: number;
   maxSellTaxBps: number;
@@ -72,8 +73,9 @@ export const DEFAULT_MAX_HOLDING_PCT = 40;
 
 const DEFAULT_LAUNCH: LaunchConfig = {
   enabled: false, perLaunchPls: 0, maxPerDay: 4, takeProfitPct: 50, stopLossPct: 35,
-  timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true,
-  maxDeployerPct: 15, minLiquidityPls: 2_000_000, requireOwnerRenounced: false,
+  trailingStopPct: 0, timeExitMin: 30, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  requireLpLock: true, maxDeployerPct: 15, minLiquidityPls: 2_000_000,
+  requireOwnerRenounced: false,
 };
 
 const cache = new Map<string, VaultRecord>();

@@ -196,7 +196,8 @@ async function evaluateToken(token: string, txHash: string, discoveryBlock: numb
       openPosition({
         vault: v.address, bot: "launch", token,
         spentPls: L.perLaunchPls, tokensOut: res.amountOut,
-        tpPct: L.takeProfitPct, slPct: L.stopLossPct, timeExitMin: L.timeExitMin,
+        tpPct: L.takeProfitPct, slPct: L.stopLossPct, trailPct: L.trailingStopPct,
+        timeExitMin: L.timeExitMin,
       });
       log("info", "launch", `Opened ${L.perLaunchPls} ETH in ${token} for ${v.address} via ${venue.kind}`);
     } else {

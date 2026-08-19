@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Icaria Bots</title>
+<meta name="description" content="Automated launch-sniping and trading vaults on PulseChain and Robinhood Chain. Your vault, your keys, your exit.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --panel: #121215;
+    --panel-hover: #17171b;
+    --edge: #26262b;
+    --text: #f5f3ef;
+    --ash: #8a8b94;
+    --amber: #c98a3e;
+    --pulse: #c24ab0;
+    --hood: #4fbf8b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .wrap {
+    width: min(880px, 100% - 48px);
+    margin: 0 auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  header { padding: 28px 0; }
+  .wordmark {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 22px;
+    letter-spacing: 0.01em;
+  }
+  .wordmark .dot { color: var(--amber); }
+
+  main { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 40px 0 64px; }
+  h1 {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(34px, 6vw, 54px);
+    line-height: 1.12;
+    text-wrap: balance;
+    max-width: 15em;
+  }
+  h1 em { font-style: italic; color: var(--amber); }
+  .sub {
+    margin-top: 14px;
+    color: var(--ash);
+    max-width: 44em;
+    font-size: 16px;
+  }
+
+  .chains {
+    margin-top: 44px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 640px) { .chains { grid-template-columns: 1fr; } }
+
+  .chain {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 10px;
+    padding: 26px 24px 22px;
+    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  }
+  .chain:hover, .chain:focus-visible {
+    background: var(--panel-hover);
+    border-color: color-mix(in srgb, var(--chain-tint) 45%, var(--edge));
+    transform: translateY(-2px);
+  }
+  .chain:focus-visible { outline: 2px solid var(--chain-tint); outline-offset: 2px; }
+  .chain.pulse { --chain-tint: var(--pulse); }
+  .chain.hood  { --chain-tint: var(--hood); }
+
+  .chain-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ash);
+  }
+  .chain-label::before {
+    content: "";
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--chain-tint);
+    flex-shrink: 0;
+  }
+  .chain-name {
+    margin-top: 12px;
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 30px;
+    line-height: 1.1;
+  }
+  .chain-facts {
+    margin-top: 10px;
+    color: var(--ash);
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .chain-go {
+    margin-top: 18px;
+    font-size: 13px;
+    color: var(--amber);
+    letter-spacing: 0.02em;
+  }
+  .chain-go::after { content: " \2192"; }
+
+  footer {
+    border-top: 1px solid var(--edge);
+    padding: 20px 0 26px;
+    color: var(--ash);
+    font-size: 12.5px;
+    line-height: 1.7;
+  }
+  footer strong { color: var(--text); font-weight: 600; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chain { transition: none; }
+    .chain:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="wordmark">Icaria<span class="dot"> Bots</span></div>
+  </header>
+
+  <main>
+    <h1>Trading bots that hunt new launches, in a vault <em>only you</em> can open.</h1>
+    <p class="sub">
+      Deposit into your own on-chain vault. The bot screens every new token for
+      honeypots and rugs, buys the ones that pass, and sells on your rules
+      &mdash; take-profit, stop-loss, trailing stop, or time. It can trade your
+      vault. It can never withdraw from it.
+    </p>
+
+    <div class="chains">
+      <a class="chain pulse" href="https://pulse.icaria.pro">
+        <div class="chain-label">Chain ID 369</div>
+        <div class="chain-name">PulseChain</div>
+        <div class="chain-facts">
+          Trades in WPLS on PulseX. High launch volume, battle-tested pools.
+        </div>
+        <div class="chain-go">Open the PulseChain dashboard</div>
+      </a>
+
+      <a class="chain hood" href="https://rh.icaria.pro">
+        <div class="chain-label">Chain ID 4663</div>
+        <div class="chain-name">Robinhood Chain</div>
+        <div class="chain-facts">
+          Trades in ETH on Uniswap. New chain, early ground, launchpad tokens.
+        </div>
+        <div class="chain-go">Open the Robinhood dashboard</div>
+      </a>
+    </div>
+  </main>
+
+  <footer>
+    <strong>Non-custodial by construction.</strong> Your vault is a contract you
+    own: only your wallet can withdraw, and you can revoke the bot's trading
+    access at any time, whether or not we're online. Platform fee 0.25% per
+    trade plus gas reimbursement. New tokens are dangerous by default &mdash;
+    the screens reduce the failure rate, they don't make sniping safe. Trade
+    money you can afford to lose.
+  </footer>
+</div>
+</body>
+</html>

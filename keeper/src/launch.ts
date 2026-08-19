@@ -156,10 +156,12 @@ async function handleNewToken(token: string, txHash: string, discoveryBlock: num
   });
 }
 
-// Alchemy's free tier caps eth_getLogs to a 10-block range per request - a
-// paid plan raises this, but until then the scanner has to walk the chain in
-// small windows instead of one big range, or every single scan fails.
-const LOG_CHUNK_BLOCKS = 10;
+// eth_getLogs range per request. Alchemy's free tier caps this at 10 blocks,
+// which is why 10 is the safe default - but on an RPC without that cap (the
+// chain's public endpoint), 10-block chunks at ~0.1s block times mean
+// hundreds of thousands of calls a day for no reason. Set LOG_CHUNK_BLOCKS
+// high (e.g. 2000) when the RPC allows it.
+const LOG_CHUNK_BLOCKS = Math.max(1, Number(process.env.LOG_CHUNK_BLOCKS || "10"));
 
 /**
  * Shared chunked-scan walk, used by both the V2 and V3 watchers below. Each

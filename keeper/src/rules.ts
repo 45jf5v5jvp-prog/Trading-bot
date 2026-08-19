@@ -84,24 +84,27 @@ export async function evaluate(rule: TradingRule, v: VaultRecord): Promise<void>
   // limited to whatever V2 offers even if V3 is genuinely better priced.
   const venue = await findBestVenue(token, Number(formatEther(amountIn)));
   if (!venue) { log("debug", "rules", `${v.address} ${token}: no venue with real liquidity`); return; }
-  if (venue.kind === "v3" && v.kind !== "multiVenue") {
+  if (venue.kind === "v3" && v.kind !== "multiVenue" && v.kind !== "multiVenueV4") {
     log("debug", "rules", `${v.address} ${token}: best venue is V3, this vault can only trade V2`);
+    return;
+  }
+  if (venue.kind === "v4" && v.kind !== "multiVenueV4") {
+    log("debug", "rules", `${v.address} ${token}: best venue is V4, this vault cannot trade V4`);
     return;
   }
 
   log("info", "rules", `Trigger: ${token} ${rule.direction} ${(move * 100).toFixed(2)}% ` +
     `over ${rule.lookbackHours}h, buying ${formatEther(amountIn)} ETH for ${v.address} via ${venue.kind}`);
 
-  const res = venue.kind === "v2"
-    ? (v.kind === "multiVenue"
-        ? await executeSwapMultiVenue({
-            vault: v.address, bot: "trading", venue: { kind: "v2", path: [CFG.weth, token] },
-            amountIn, tokenLabel: token,
-          })
-        : await executeSwap({ vault: v.address, bot: "trading", path: [CFG.weth, token], amountIn, tokenLabel: token }))
+  const res = venue.kind === "v2" && v.kind === "v2"
+    ? await executeSwap({ vault: v.address, bot: "trading", path: [CFG.weth, token], amountIn, tokenLabel: token })
     : await executeSwapMultiVenue({
         vault: v.address, bot: "trading",
-        venue: { kind: "v3", tokenIn: CFG.weth, tokenOut: token, fee: venue.fee },
+        venue: venue.kind === "v2"
+          ? { kind: "v2", path: [CFG.weth, token] }
+          : venue.kind === "v3"
+          ? { kind: "v3", tokenIn: CFG.weth, tokenOut: token, fee: venue.fee }
+          : { kind: "v4", key: venue.key, buy: true },
         amountIn, tokenLabel: token,
       });
   if (!res.ok) { log("warn", "rules", `Skipped: ${res.reason}`); return; }

@@ -76,3 +76,26 @@ export const V3_POOL_ABI = [
 export const V3_QUOTER_ABI = [
   "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
 ];
+
+/// Uniswap V4 singleton PoolManager - only the one event the scanner needs.
+/// Every V4 pool announces itself here at creation; there are no per-pool
+/// contracts to discover. PoolId is bytes32, Currency and IHooks are
+/// address-backed value types, so they appear as their underlying ABI types.
+export const V4_POOL_MANAGER_ABI = [
+  "event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)",
+];
+
+/// SwapProbeV4 (contracts/SwapProbeV4.sol) - the keeper's own V4 periphery.
+/// quote() prices without funds (simulate-and-revert internally); probe()
+/// runs the real buy+sell honeypot check under eth_call.
+export const V4_PROBE_ABI = [
+  "function quote((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bool zeroForOne, uint256 amountIn) returns (uint256 amountOut)",
+  "function probe((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key) payable returns ((bool buyOk, bool sellOk, uint256 actualOut, uint256 ethReturned, uint256 roundTripLossBps) r)",
+];
+
+/// MultiVenueVaultV4 (contracts/MultiVenueVaultV4.sol) shares everything
+/// VAULT_ABI and MULTI_VENUE_VAULT_ABI already cover; this is only the V4
+/// entry point that's new to it.
+export const MULTI_VENUE_V4_VAULT_ABI = [
+  "function executeSwapV4((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bool buy, uint256 amountIn, uint256 amountOutMin, uint256 gasFee) returns (uint256)",
+];

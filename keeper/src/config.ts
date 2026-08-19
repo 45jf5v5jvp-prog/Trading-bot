@@ -56,6 +56,23 @@ export const CFG = {
   // caveat as MAX_GAS_PRICE_GWEI - tighten once real V3 launches are observed.
   v3MaxPriceImpactBps: num("V3_MAX_PRICE_IMPACT_BPS", "2000"),
 
+  // ---- V4 (all optional, same discipline as V3: no fabricated defaults).
+  // POOL_MANAGER is the Uniswap V4 singleton - every V4 pool lives inside
+  // it, including every PONS launch pool. Leaving it unset disables V4
+  // entirely. PROBE_ADDRESS_V4 is this repo's own SwapProbeV4 deployment,
+  // which handles both quoting and honeypot simulation, so no other V4
+  // periphery address is ever needed.
+  poolManager: opt("POOL_MANAGER", ""),
+  probeAddressV4: opt("PROBE_ADDRESS_V4", ""),
+  multiVenueV4VaultFactory: opt("MULTI_VENUE_V4_VAULT_FACTORY", ""),
+  // Optional comma-separated hook allowlist. Empty = accept pools with any
+  // hook (the probe still screens each one). Set this to the PONS hook
+  // address once observed in the logs to trade only PONS launches.
+  v4HooksAllowlist: opt("V4_HOOKS_ALLOWLIST", "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // Same thin-pool stopgap as V3's - see v3MaxPriceImpactBps above.
+  v4MaxPriceImpactBps: num("V4_MAX_PRICE_IMPACT_BPS", "2000"),
+
   feeBps: num("FEE_BPS", "25"),
 
   dryRun: bool("DRY_RUN", "true"),

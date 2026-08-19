@@ -61,11 +61,12 @@ export interface VaultRecord {
   // into one falling token. 0 disables (not recommended).
   maxHoldingPct: number;
   // "v2": BotVault, only ever trades through the V2 router (executeSwap).
-  // "multiVenue": MultiVenueVault, can trade V2 or V3 (executeSwapV2/V3) -
-  // see contracts/MultiVenueVault.sol. Existing vaults are permanently one
-  // kind or the other; a clone can never change which implementation it
-  // points at. executor.ts dispatches on this field.
-  kind: "v2" | "multiVenue";
+  // "multiVenue": MultiVenueVault, can trade V2 or V3 (executeSwapV2/V3).
+  // "multiVenueV4": MultiVenueVaultV4, trades V2, V3, or V4 (adds
+  // executeSwapV4) - see contracts/MultiVenueVaultV4.sol. Existing vaults
+  // are permanently one kind; a clone can never change which implementation
+  // it points at. executor.ts dispatches on this field.
+  kind: "v2" | "multiVenue" | "multiVenueV4";
 }
 
 /** Default holding cap when a config does not specify one. */
@@ -160,12 +161,14 @@ async function vaultsOf(factoryAddress: string): Promise<string[]> {
 export async function refresh(): Promise<VaultRecord[]> {
   const v2Addrs = await vaultsOf(CFG.vaultFactory);
   // Multi-venue support is opt-in - an unset factory address just means
-  // "no multi-venue vaults exist yet," not an error.
+  // "no multi-venue vaults exist yet," not an error. Same for V4.
   const multiVenueAddrs = CFG.multiVenueVaultFactory ? await vaultsOf(CFG.multiVenueVaultFactory) : [];
+  const v4Addrs = CFG.multiVenueV4VaultFactory ? await vaultsOf(CFG.multiVenueV4VaultFactory) : [];
 
-  const tagged: { addr: string; kind: "v2" | "multiVenue" }[] = [
+  const tagged: { addr: string; kind: "v2" | "multiVenue" | "multiVenueV4" }[] = [
     ...v2Addrs.map((addr) => ({ addr, kind: "v2" as const })),
     ...multiVenueAddrs.map((addr) => ({ addr, kind: "multiVenue" as const })),
+    ...v4Addrs.map((addr) => ({ addr, kind: "multiVenueV4" as const })),
   ];
 
   const recs = await mapLimit(tagged, CFG.keeperConcurrency, async ({ addr, kind }) => {

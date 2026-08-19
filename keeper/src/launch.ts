@@ -1,16 +1,16 @@
 import { Contract, formatEther, parseEther } from "ethers";
 import { CFG } from "./config.js";
 import { provider, factory, type Dyn } from "./chain.js";
-import { FACTORY_ABI, ERC20_ABI, V3_FACTORY_ABI } from "./abis.js";
+import { FACTORY_ABI, ERC20_ABI, V3_FACTORY_ABI, V4_POOL_MANAGER_ABI } from "./abis.js";
 import { registry, type VaultRecord } from "./registry.js";
-import { screen, screenV3, recordScreen, type Screen, type ScreenLimits } from "./screener.js";
-import { executeSwap, executeSwapMultiVenue } from "./executor.js";
-import { findBestVenue, type Venue } from "./venues.js";
+import { screen, screenV3, screenV4, recordScreen, type Screen, type ScreenLimits } from "./screener.js";
+import { executeSwap, executeSwapMultiVenue, type TradeVenue } from "./executor.js";
+import { findBestVenue, isBaseCurrency, type Venue } from "./venues.js";
 import { openPosition, positionsValuePls } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
 import { ensureWatched } from "./prices.js";
 import { mapLimit } from "./concurrency.js";
-import { db, meta } from "./db.js";
+import { db, meta, v4Pools } from "./db.js";
 import { log } from "./log.js";
 
 /** WETH the vault currently holds, in whole PLS. */
@@ -129,7 +129,9 @@ async function evaluateToken(token: string, txHash: string, discoveryBlock: numb
 
   const s: Screen = venue.kind === "v2"
     ? await screen(token, deployer, limits, discoveryBlock)
-    : await screenV3(token, deployer, limits, venue.fee, discoveryBlock);
+    : venue.kind === "v3"
+    ? await screenV3(token, deployer, limits, venue.fee, discoveryBlock)
+    : await screenV4(token, deployer, limits, venue.key, discoveryBlock);
   recordScreen(s);
 
   if (!s.sellable) {
@@ -150,9 +152,10 @@ async function evaluateToken(token: string, txHash: string, discoveryBlock: numb
   // many subscribers should not queue up behind a slow RPC round trip per vault.
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const L = v.launch;
-    // A plain V2-only vault (BotVault) has no way to execute a V3 trade -
-    // it simply doesn't have that function on chain. Skip, don't error.
-    if (venue.kind === "v3" && v.kind !== "multiVenue") return;
+    // A vault can only trade venues its implementation has functions for -
+    // that's fixed at clone time. Skip, don't error.
+    if (venue.kind === "v3" && v.kind !== "multiVenue" && v.kind !== "multiVenueV4") return;
+    if (venue.kind === "v4" && v.kind !== "multiVenueV4") return;
     if (firesToday(v.address) >= L.maxPerDay) return;
     if (s.buyTaxBps > L.maxBuyTaxBps) return;
     if (s.sellTaxBps > L.maxSellTaxBps) return;
@@ -176,19 +179,19 @@ async function evaluateToken(token: string, txHash: string, discoveryBlock: numb
     // means more skipped fills and fewer terrible ones.
     const slippageBps = Math.min(CFG.maxSlippageBps, 300);
 
-    const res = venue.kind === "v2"
-      ? (v.kind === "multiVenue"
-          ? await executeSwapMultiVenue({
-              vault: v.address, bot: "launch", venue: { kind: "v2", path: [CFG.weth, token] },
-              amountIn, tokenLabel: token, slippageBps,
-            })
-          : await executeSwap({
-              vault: v.address, bot: "launch", path: [CFG.weth, token],
-              amountIn, tokenLabel: token, slippageBps,
-            }))
+    const buyVenue: TradeVenue = venue.kind === "v2"
+      ? { kind: "v2", path: [CFG.weth, token] }
+      : venue.kind === "v3"
+      ? { kind: "v3", tokenIn: CFG.weth, tokenOut: token, fee: venue.fee }
+      : { kind: "v4", key: venue.key, buy: true };
+
+    const res = venue.kind === "v2" && v.kind === "v2"
+      ? await executeSwap({
+          vault: v.address, bot: "launch", path: [CFG.weth, token],
+          amountIn, tokenLabel: token, slippageBps,
+        })
       : await executeSwapMultiVenue({
-          vault: v.address, bot: "launch",
-          venue: { kind: "v3", tokenIn: CFG.weth, tokenOut: token, fee: venue.fee },
+          vault: v.address, bot: "launch", venue: buyVenue,
           amountIn, tokenLabel: token, slippageBps,
         });
 
@@ -289,6 +292,39 @@ export async function scanV3(): Promise<void> {
                 : t1.toLowerCase() === CFG.weth.toLowerCase() ? t0
                 : null;
     if (!token) return;
+    await handleNewToken(token, ev.transactionHash, ev.blockNumber);
+  });
+}
+
+/**
+ * V4 Initialize - the singleton PoolManager announces every new V4 pool
+ * here, including every PONS launchpad pool (their hook address rides along
+ * in the event). Unlike V2/V3 there is no later way to look a pool up from
+ * just the token address, so the full PoolKey is persisted the moment it's
+ * seen (db.ts's v4_pools) - quoting, screening, buying, and eventually
+ * selling all repeat that exact key back to the PoolManager.
+ */
+export async function scanV4(): Promise<void> {
+  if (!CFG.poolManager) return; // not configured - V4 scanning simply disabled
+  await scanFactory(CFG.poolManager, V4_POOL_MANAGER_ABI, "last_pool_block_v4", (f) => f.filters.Initialize!(), async (ev) => {
+    const a = ev.args as [string, string, string, bigint, bigint, string, bigint, bigint] | undefined;
+    if (!a) return;
+    const [, c0, c1, fee, tickSpacing, hooks] = a;
+    const c0Base = isBaseCurrency(c0);
+    const c1Base = isBaseCurrency(c1);
+    if (c0Base === c1Base) return; // only base-quoted pools are snipeable
+    const token = c0Base ? c1 : c0;
+
+    // Logged at info on purpose: this is how the PONS hook address gets
+    // discovered from live traffic, to then pin via V4_HOOKS_ALLOWLIST.
+    log("info", "launch", `V4 pool for ${token}: hook=${hooks} fee=${fee} tickSpacing=${tickSpacing}`);
+
+    if (CFG.v4HooksAllowlist.length && !CFG.v4HooksAllowlist.includes(String(hooks).toLowerCase())) {
+      log("debug", "launch", `Skipping V4 pool for ${token}: hook ${hooks} not in allowlist`);
+      return;
+    }
+
+    v4Pools.add(token, c0, c1, Number(fee), Number(tickSpacing), String(hooks));
     await handleNewToken(token, ev.transactionHash, ev.blockNumber);
   });
 }

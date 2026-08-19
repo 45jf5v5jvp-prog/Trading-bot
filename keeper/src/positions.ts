@@ -162,7 +162,7 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
 }
 
 async function checkAndClose(
-  r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue",
+  r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue" | "multiVenueV4",
 ): Promise<"priced" | "unpriceable" | "retired"> {
   const m = await markToMarket(r);
   if (!m.ok) {
@@ -202,12 +202,14 @@ async function checkAndClose(
   // position in the first place (see launch.ts's venue gating), so
   // m.venue.kind is always "v2" here whenever vaultKind is "v2" - this
   // dispatch is really just "which contract function does this vault have."
-  const res = vaultKind === "multiVenue"
+  const res = vaultKind !== "v2"
     ? await executeSwapMultiVenue({
         vault: r.vault, bot: "launch",
         venue: m.venue.kind === "v2"
           ? { kind: "v2", path: [r.token, CFG.weth] }
-          : { kind: "v3", tokenIn: r.token, tokenOut: CFG.weth, fee: m.venue.fee },
+          : m.venue.kind === "v3"
+          ? { kind: "v3", tokenIn: r.token, tokenOut: CFG.weth, fee: m.venue.fee }
+          : { kind: "v4", key: m.venue.key, buy: false },
         amountIn: m.held, tokenLabel: r.token,
         // On the way out, take the fill. A stop that will not execute is not a stop.
         slippageBps: Math.max(CFG.maxSlippageBps, 500),

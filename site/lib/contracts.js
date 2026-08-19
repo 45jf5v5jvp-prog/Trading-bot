@@ -10,6 +10,9 @@ export const VAULT_FACTORY = CHAIN.vaultFactory;
 // V2+V3 capable vaults (MultiVenueVault). Blank on chains where that factory
 // is not deployed - the site then stays on V2-only vaults exactly as before.
 export const MULTI_VENUE_VAULT_FACTORY = CHAIN.multiVenueVaultFactory;
+// V2+V3+V4 capable vaults (MultiVenueVaultV4) - the kind that can trade PONS
+// launches. Blank until deployed; new vaults then come from this factory.
+export const MULTI_VENUE_V4_VAULT_FACTORY = CHAIN.multiVenueV4VaultFactory;
 // The wrapped native token (WPLS on PulseChain, WETH on Robinhood Chain).
 export const WRAPPED = CHAIN.wrapped;
 export const ROUTER = CHAIN.router;

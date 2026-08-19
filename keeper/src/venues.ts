@@ -1,12 +1,64 @@
 import { Contract, parseEther } from "ethers";
 import { CFG } from "./config.js";
 import { provider, factory, type Dyn } from "./chain.js";
-import { V3_FACTORY_ABI, V3_QUOTER_ABI, ROUTER_ABI } from "./abis.js";
+import { V3_FACTORY_ABI, V3_QUOTER_ABI, ROUTER_ABI, V4_PROBE_ABI } from "./abis.js";
+import { v4Pools, type V4PoolRow } from "./db.js";
 import { log } from "./log.js";
+
+/** The full V4 pool identity - what Initialize announced and what every
+ * quote/swap against that pool must repeat verbatim. */
+export interface V4PoolKey {
+  currency0: string;
+  currency1: string;
+  fee: number;
+  tickSpacing: number;
+  hooks: string;
+}
 
 export type Venue =
   | { kind: "v2"; amountOut: bigint }
-  | { kind: "v3"; fee: number; amountOut: bigint };
+  | { kind: "v3"; fee: number; amountOut: bigint }
+  | { kind: "v4"; key: V4PoolKey; amountOut: bigint };
+
+const ZERO = "0x0000000000000000000000000000000000000000";
+
+/** True for the currencies this bot can account in: WETH and native ETH. */
+export function isBaseCurrency(c: string): boolean {
+  const lc = c.toLowerCase();
+  return lc === ZERO || lc === CFG.weth.toLowerCase();
+}
+
+function rowToKey(p: V4PoolRow): V4PoolKey {
+  return { currency0: p.currency0, currency1: p.currency1, fee: p.fee, tickSpacing: p.tick_spacing, hooks: p.hooks };
+}
+
+/** Quote through this repo's own SwapProbeV4 - see that contract for why no
+ * external V4 quoter deployment is needed. Null = pool can't serve it. */
+export async function v4Quote(key: V4PoolKey, zeroForOne: boolean, amountIn: bigint): Promise<bigint | null> {
+  if (!CFG.probeAddressV4) return null;
+  const probe = new Contract(CFG.probeAddressV4, V4_PROBE_ABI, provider) as Dyn;
+  try {
+    const out: bigint = await probe.quote.staticCall(key, zeroForOne, amountIn);
+    return out > 0n ? out : null;
+  } catch { return null; }
+}
+
+/** All V4 venue candidates for trading `token` against base, quoted at size.
+ * `sellingToken` picks the direction: false = spend base for token. */
+async function v4Candidates(token: string, amountIn: bigint, sellingToken: boolean): Promise<Venue[]> {
+  if (!CFG.poolManager || !CFG.probeAddressV4) return [];
+  const out: Venue[] = [];
+  for (const row of v4Pools.forToken(token)) {
+    const key = rowToKey(row);
+    // Direction: zeroForOne means currency0 in, currency1 out. Buying spends
+    // the base currency; selling spends the token.
+    const c0IsBase = isBaseCurrency(key.currency0);
+    const zeroForOne = sellingToken ? !c0IsBase : c0IsBase;
+    const amountOut = await v4Quote(key, zeroForOne, amountIn);
+    if (amountOut !== null) out.push({ kind: "v4", key, amountOut });
+  }
+  return out;
+}
 
 /**
  * Which venue actually gives the best price for THIS trade size, not which
@@ -54,6 +106,8 @@ export async function findBestVenue(token: string, tradeSizeEth: number): Promis
     }
   }
 
+  candidates.push(...await v4Candidates(token, amountIn, false));
+
   if (candidates.length === 0) return null;
   return candidates.reduce((best, c) => (c.amountOut > best.amountOut ? c : best));
 }
@@ -94,6 +148,8 @@ export async function findBestSellVenue(token: string, tokenAmount: bigint): Pro
       }
     }
   }
+
+  candidates.push(...await v4Candidates(token, tokenAmount, true));
 
   if (candidates.length === 0) return null;
   return candidates.reduce((best, c) => (c.amountOut > best.amountOut ? c : best));

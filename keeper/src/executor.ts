@@ -1,7 +1,8 @@
 import { Contract, formatEther, parseEther } from "ethers";
 import { CFG } from "./config.js";
 import { keeper, provider, routerRead, txQueue, tradeRateLimiter, gasOk, type Dyn } from "./chain.js";
-import { VAULT_ABI, MULTI_VENUE_VAULT_ABI, V3_QUOTER_ABI } from "./abis.js";
+import { VAULT_ABI, MULTI_VENUE_VAULT_ABI, MULTI_VENUE_V4_VAULT_ABI, V3_QUOTER_ABI } from "./abis.js";
+import { v4Quote, isBaseCurrency, type V4PoolKey } from "./venues.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
 
@@ -172,7 +173,10 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
 
 export type TradeVenue =
   | { kind: "v2"; path: string[] }
-  | { kind: "v3"; tokenIn: string; tokenOut: string; fee: number };
+  | { kind: "v3"; tokenIn: string; tokenOut: string; fee: number }
+  // The full PoolKey travels with the trade - V4 has no other way to name a
+  // pool. `buy` = spend base for the pool's token; false = sell it back.
+  | { kind: "v4"; key: V4PoolKey; buy: boolean };
 
 export interface MultiVenueSwapRequest {
   vault: string;
@@ -190,6 +194,10 @@ async function quoteVenue(venue: TradeVenue, amountIn: bigint): Promise<bigint |
       return amounts[amounts.length - 1]!;
     } catch { return null; }
   }
+  if (venue.kind === "v4") {
+    const c0IsBase = isBaseCurrency(venue.key.currency0);
+    return v4Quote(venue.key, venue.buy ? c0IsBase : !c0IsBase, amountIn);
+  }
   if (!CFG.quoterV3) return null;
   const quoter = new Contract(CFG.quoterV3, V3_QUOTER_ABI, provider) as Dyn;
   try {
@@ -200,6 +208,12 @@ async function quoteVenue(venue: TradeVenue, amountIn: bigint): Promise<bigint |
   } catch { return null; }
 }
 
+/** The traded (non-base) token of a V4 venue - the side that isn't WETH or
+ * native ETH. Used for logging and the buy/sell direction checks below. */
+function v4Token(key: V4PoolKey): string {
+  return isBaseCurrency(key.currency0) ? key.currency1 : key.currency0;
+}
+
 export async function executeSwapMultiVenue(req: MultiVenueSwapRequest): Promise<SwapResult> {
   if (CFG.globalKill) return { ok: false, amountOut: 0n, reason: "global kill switch on" };
   if (!keeper) return { ok: false, amountOut: 0n, reason: "no keeper key loaded" };
@@ -208,7 +222,7 @@ export async function executeSwapMultiVenue(req: MultiVenueSwapRequest): Promise
   // paused/maxTradeSize/maxGasFee/maxGasFeeBps/minInterval/lastTradeAt);
   // MULTI_VENUE_VAULT_ABI adds the two swap entry points this kind has that
   // the plain VAULT_ABI doesn't.
-  const vault = new Contract(req.vault, [...VAULT_ABI, ...MULTI_VENUE_VAULT_ABI], keeper) as Dyn;
+  const vault = new Contract(req.vault, [...VAULT_ABI, ...MULTI_VENUE_VAULT_ABI, ...MULTI_VENUE_V4_VAULT_ABI], keeper) as Dyn;
 
   const [paused, maxSize, minInterval, lastAt] = await Promise.all([
     vault.paused(), vault.maxTradeSize(), vault.minInterval(), vault.lastTradeAt(),
@@ -231,8 +245,12 @@ export async function executeSwapMultiVenue(req: MultiVenueSwapRequest): Promise
   if (quoted === null) return { ok: false, amountOut: 0n, reason: "quote failed" };
   if (quoted === 0n) return { ok: false, amountOut: 0n, reason: "quote returned zero" };
 
-  const tokenIn = req.venue.kind === "v2" ? req.venue.path[0]! : req.venue.tokenIn;
-  const tokenOut = req.venue.kind === "v2" ? req.venue.path[req.venue.path.length - 1]! : req.venue.tokenOut;
+  const tokenIn = req.venue.kind === "v2" ? req.venue.path[0]!
+    : req.venue.kind === "v3" ? req.venue.tokenIn
+    : req.venue.buy ? CFG.weth : v4Token(req.venue.key);
+  const tokenOut = req.venue.kind === "v2" ? req.venue.path[req.venue.path.length - 1]!
+    : req.venue.kind === "v3" ? req.venue.tokenOut
+    : req.venue.buy ? v4Token(req.venue.key) : CFG.weth;
 
   // Tax discount only exists for V2 (screen() measures it via SwapProbe's
   // quoted-vs-actual comparison). V3 has no equivalent yet - see
@@ -274,10 +292,12 @@ export async function executeSwapMultiVenue(req: MultiVenueSwapRequest): Promise
   try {
     if (req.venue.kind === "v2") {
       await vault.executeSwapV2.staticCall(req.venue.path, req.amountIn, minOut, gasFee);
-    } else {
+    } else if (req.venue.kind === "v3") {
       await vault.executeSwapV3.staticCall(
         req.venue.tokenIn, req.venue.tokenOut, req.venue.fee, req.amountIn, minOut, gasFee,
       );
+    } else {
+      await vault.executeSwapV4.staticCall(req.venue.key, req.venue.buy, req.amountIn, minOut, gasFee);
     }
   } catch (e) {
     return { ok: false, amountOut: 0n, reason: `would revert: ${(e as Error).message.slice(0, 140)}` };
@@ -297,12 +317,18 @@ export async function executeSwapMultiVenue(req: MultiVenueSwapRequest): Promise
         const v2 = req.venue;
         const est: bigint = await vault.executeSwapV2.estimateGas(v2.path, req.amountIn, minOut, gasFee);
         tx = await vault.executeSwapV2(v2.path, req.amountIn, minOut, gasFee, { gasLimit: (est * 130n) / 100n });
-      } else {
+      } else if (req.venue.kind === "v3") {
         const v3 = req.venue;
         const est: bigint = await vault.executeSwapV3.estimateGas(
           v3.tokenIn, v3.tokenOut, v3.fee, req.amountIn, minOut, gasFee,
         );
         tx = await vault.executeSwapV3(v3.tokenIn, v3.tokenOut, v3.fee, req.amountIn, minOut, gasFee, {
+          gasLimit: (est * 130n) / 100n,
+        });
+      } else {
+        const v4 = req.venue;
+        const est: bigint = await vault.executeSwapV4.estimateGas(v4.key, v4.buy, req.amountIn, minOut, gasFee);
+        tx = await vault.executeSwapV4(v4.key, v4.buy, req.amountIn, minOut, gasFee, {
           gasLimit: (est * 130n) / 100n,
         });
       }

@@ -257,7 +257,7 @@ export default function Dashboard() {
               <div className="section-label" style={{ marginTop: 18 }}>Your Vault</div>
               <p className="mono-addr" style={{ marginBottom: 4 }}>{vaultAddress}</p>
               <p className="hint" style={{ marginBottom: 14 }}>
-                {vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
+                {vaultKind === "multiVenueV4" ? "Trades on V2, V3, and V4" : vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
               </p>
 
               <div className="row-between">

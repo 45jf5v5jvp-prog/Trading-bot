@@ -70,6 +70,18 @@ CREATE TABLE IF NOT EXISTS fires (
 CREATE INDEX IF NOT EXISTS fires_vault_ts ON fires(vault, ts DESC);
 
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS v4_pools (
+  token        TEXT NOT NULL,
+  currency0    TEXT NOT NULL,
+  currency1    TEXT NOT NULL,
+  fee          INTEGER NOT NULL,
+  tick_spacing INTEGER NOT NULL,
+  hooks        TEXT NOT NULL,
+  first_seen   INTEGER NOT NULL,
+  PRIMARY KEY (token, currency0, currency1, fee, tick_spacing, hooks)
+);
+CREATE INDEX IF NOT EXISTS v4_pools_token ON v4_pools(token);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -113,6 +125,32 @@ export const prices = {
   },
   prune(olderThan: number): void {
     db.prepare("DELETE FROM prices WHERE ts < ?").run(olderThan);
+  },
+};
+
+export interface V4PoolRow {
+  token: string; currency0: string; currency1: string;
+  fee: number; tick_spacing: number; hooks: string;
+}
+
+/**
+ * Every V4 pool the scanner has seen for a token, keyed by its full PoolKey.
+ * Unlike V2 pairs and V3 pools there is no on-chain lookup to rediscover a
+ * V4 pool from a token address alone - the PoolKey (both currencies, fee,
+ * tickSpacing, hooks) IS the pool's identity, so it must be recorded at
+ * Initialize time or the pool is effectively invisible later. Persisted so
+ * a keeper restart doesn't orphan open V4 positions.
+ */
+export const v4Pools = {
+  add(token: string, currency0: string, currency1: string, fee: number, tickSpacing: number, hooks: string): void {
+    db.prepare(`INSERT OR IGNORE INTO v4_pools(token,currency0,currency1,fee,tick_spacing,hooks,first_seen)
+                VALUES(?,?,?,?,?,?,?)`)
+      .run(token.toLowerCase(), currency0.toLowerCase(), currency1.toLowerCase(),
+           fee, tickSpacing, hooks.toLowerCase(), Math.floor(Date.now() / 1000));
+  },
+  forToken(token: string): V4PoolRow[] {
+    return db.prepare("SELECT token,currency0,currency1,fee,tick_spacing,hooks FROM v4_pools WHERE token=?")
+      .all(token.toLowerCase()) as V4PoolRow[];
   },
 };
 

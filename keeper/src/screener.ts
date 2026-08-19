@@ -2,6 +2,7 @@ import { Contract, Interface, formatEther, parseEther, toBeHex } from "ethers";
 import { CFG, BURN_ADDRESSES, KNOWN_LOCKERS } from "./config.js";
 import { provider, routerRead, factory, type Dyn } from "./chain.js";
 import { ERC20_ABI, PAIR_ABI, V3_FACTORY_ABI, V3_QUOTER_ABI } from "./abis.js";
+import { v4Quote, isBaseCurrency, type V4PoolKey } from "./venues.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
 
@@ -14,6 +15,11 @@ const PROBE_V3_ABI = [
   "function probe(address token, uint24 fee) payable returns (tuple(bool buyOk,bool sellOk,uint256 actualOut,uint256 ethReturned,uint256 roundTripLossBps))",
 ];
 const probeV3Iface = new Interface(PROBE_V3_ABI);
+
+const PROBE_V4_ABI = [
+  "function probe((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key) payable returns (tuple(bool buyOk,bool sellOk,uint256 actualOut,uint256 ethReturned,uint256 roundTripLossBps))",
+];
+const probeV4Iface = new Interface(PROBE_V4_ABI);
 
 export interface Screen {
   token: string;
@@ -324,6 +330,111 @@ export async function screenV3(
 
   if (limits.requireLpLock)
     return { ...out, reason: "LP lock cannot be verified for V3 pools yet - rejecting rather than assume it's fine" };
+
+  out.deployerPct = await deployerPct(token, deployer);
+  if (out.deployerPct > limits.maxDeployerPct)
+    return { ...out, reason: `deployer holds ${out.deployerPct.toFixed(1)}% of supply` };
+
+  out.ownerRenounced = await checkOwnerRenounced(token);
+  if (limits.requireOwnerRenounced && !out.ownerRenounced)
+    return { ...out, reason: "owner has not renounced control of the contract" };
+
+  out.verdict = "pass";
+  out.reason = "clear";
+  return out;
+}
+
+/** V4 equivalent of simulateV3 - the probe runs a real buy+sell through the
+ * pool (hook code included) under eth_call. See SwapProbeV4.sol. */
+async function simulateV4(key: V4PoolKey): Promise<{
+  sellable: boolean; roundTripLossBps: number;
+} | null> {
+  const probeAddr = CFG.probeAddressV4;
+  if (!probeAddr) return null;
+
+  const value = parseEther(String(CFG.simAmountEth));
+  const data = probeV4Iface.encodeFunctionData("probe", [key]);
+
+  try {
+    const raw: string = await provider.send("eth_call", [
+      { from: CFG.simAddress, to: probeAddr, value: toBeHex(value), data },
+      "latest",
+      { [CFG.simAddress]: { balance: toBeHex(value * 2n) } },
+    ]);
+    const [r] = probeV4Iface.decodeFunctionResult("probe", raw);
+    return {
+      sellable: Boolean(r.buyOk) && Boolean(r.sellOk) && r.ethReturned > 0n,
+      roundTripLossBps: Number(r.roundTripLossBps),
+    };
+  } catch (e) {
+    log("warn", "screen", `V4 simulation failed for pool hook=${key.hooks}: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** Same thin-pool signal as v3PriceImpactBps, priced through the V4 probe. */
+async function v4PriceImpactBps(key: V4PoolKey, tradeSizeEth: number): Promise<number | null> {
+  const tiny = parseEther("0.0001");
+  const real = parseEther(String(Math.max(tradeSizeEth, 0.0001)));
+  const zeroForOne = isBaseCurrency(key.currency0); // buy direction: base in
+  const tinyOut = await v4Quote(key, zeroForOne, tiny);
+  const realOut = await v4Quote(key, zeroForOne, real);
+  if (tinyOut === null || realOut === null || tinyOut === 0n) return null;
+  const tinyRate = Number(tinyOut) / Number(tiny);
+  const realRate = Number(realOut) / Number(real);
+  if (tinyRate === 0) return null;
+  const impact = (tinyRate - realRate) / tinyRate;
+  return Math.max(0, Math.round(impact * 10_000));
+}
+
+/**
+ * V4 screen. Same flow as screenV3 (thin-pool check -> token age ->
+ * honeypot sim -> LP lock -> deployer share -> owner renounce), with the V4
+ * particulars:
+ *
+ *   - The pool's hook runs inside every probe simulation, so a hook that
+ *     taxes or blocks at screen time IS caught. A hook that changes
+ *     behaviour later is not catchable at screen time - see
+ *     MultiVenueVaultV4.sol's risk notes. Position sizing is the defence.
+ *   - LP lock can never pass, same honest refusal as V3: V4 liquidity is
+ *     position state inside the PoolManager, and lock detection for it
+ *     isn't built. Require-LP-lock therefore blocks V4 buys.
+ */
+export async function screenV4(
+  token: string,
+  deployer: string | null,
+  limits: ScreenLimits,
+  key: V4PoolKey,
+  poolBlockNumber: number,
+): Promise<Screen> {
+  const out: Screen = {
+    token, sellable: false, buyTaxBps: 0, sellTaxBps: 0, roundTripLossBps: 0,
+    lpLockedPct: 0, deployerPct: 100, liqPls: 0, ownerRenounced: true, verdict: "fail", reason: "",
+  };
+
+  if (!CFG.poolManager || !CFG.probeAddressV4) return { ...out, reason: "V4 not configured" };
+
+  const impactBps = await v4PriceImpactBps(key, CFG.simAmountEth);
+  if (impactBps === null) return { ...out, reason: "could not price this pool, refusing to guess" };
+  if (impactBps > CFG.v4MaxPriceImpactBps)
+    return { ...out, reason: `price impact ${impactBps}bps above floor ${CFG.v4MaxPriceImpactBps}bps - pool too thin` };
+
+  const deployBlock = await findDeployBlock(token, poolBlockNumber);
+  const ageBlocks = poolBlockNumber - deployBlock;
+  if (ageBlocks > CFG.maxTokenAgeBlocks)
+    return { ...out, reason: `token contract is ${ageBlocks} blocks old - existed before this pool, not a fresh launch` };
+
+  const sim = await simulateV4(key);
+  if (!sim) return { ...out, reason: "V4 simulation unavailable, refusing to guess" };
+  out.sellable = sim.sellable;
+  out.roundTripLossBps = sim.roundTripLossBps;
+
+  if (!sim.sellable) return { ...out, reason: "cannot sell after buying" };
+  if (sim.roundTripLossBps > CFG.honeypotMaxLossBps)
+    return { ...out, reason: `round trip loses ${sim.roundTripLossBps} bps` };
+
+  if (limits.requireLpLock)
+    return { ...out, reason: "LP lock cannot be verified for V4 pools yet - rejecting rather than assume it's fine" };
 
   out.deployerPct = await deployerPct(token, deployer);
   if (out.deployerPct > limits.maxDeployerPct)

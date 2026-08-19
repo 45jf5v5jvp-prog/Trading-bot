@@ -39,6 +39,7 @@ const PRESETS = {
     router: "0x165C3410fC91EF562C50559f7d2289fEbed552d9",
     vaultFactory: "0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295",
     multiVenueVaultFactory: "",
+    multiVenueV4VaultFactory: "",
     // WPLS balances are in the millions - fractional dust is noise.
     balanceMaxDecimals: 2,
     valueMaxDecimals: 0,
@@ -63,6 +64,7 @@ const PRESETS = {
     router: "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
     vaultFactory: "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54",
     multiVenueVaultFactory: "",
+    multiVenueV4VaultFactory: "",
     // ETH-scale amounts (a trade might be 0.0025) - 2 decimals would round
     // real money down to nothing.
     balanceMaxDecimals: 6,
@@ -96,6 +98,7 @@ const CHAIN = {
   router: process.env.NEXT_PUBLIC_ROUTER || p.router,
   vaultFactory: process.env.NEXT_PUBLIC_VAULT_FACTORY || p.vaultFactory,
   multiVenueVaultFactory: process.env.NEXT_PUBLIC_MULTI_VENUE_VAULT_FACTORY || p.multiVenueVaultFactory,
+  multiVenueV4VaultFactory: process.env.NEXT_PUBLIC_MULTI_VENUE_V4_VAULT_FACTORY || p.multiVenueV4VaultFactory,
   balanceMaxDecimals: p.balanceMaxDecimals,
   valueMaxDecimals: p.valueMaxDecimals,
   minLiquidityDefault: p.minLiquidityDefault,

@@ -1,14 +1,51 @@
+import { useState } from "react";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
+import { quoteTokenPrice } from "../lib/quoteTokenPrice";
 
 /**
  * Editor for one resting limit order on a token the owner already holds or
  * has deposited - a buy target (spend base currency when price drops to X)
  * or a sell target (sell tokens when price rises to X). Pure/controlled,
  * same shape as RuleEditor/SnipeEditor.
+ *
+ * The saved order only ever carries an absolute targetPrice - that's the
+ * one number the keeper checks. "% from current" here is purely a data
+ * entry convenience: it fetches today's price once, lets you type a
+ * percent, and writes the resolved absolute price into targetPrice. It
+ * deliberately does NOT persist as "25% above whatever the price is later" -
+ * a resting order tracking a moving "current" would never fire, since
+ * "current" would always just equal itself.
  */
 export default function LimitOrderEditor({ order, onChange, onRemove }) {
   const num = (field) => numberFieldProps(order[field] ?? 0, (v) => onChange({ ...order, [field]: v }));
+
+  const [mode, setMode] = useState("price"); // "price" | "percent" - editor-local, not saved
+  const [percent, setPercent] = useState(order.side === "sell" ? 25 : -15);
+  const [currentPrice, setCurrentPrice] = useState(null);
+  const [priceStatus, setPriceStatus] = useState(""); // "", "loading", "error"
+
+  async function fetchCurrentPrice(applyPercent) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(order.token)) {
+      setPriceStatus("error");
+      return;
+    }
+    setPriceStatus("loading");
+    try {
+      const price = await quoteTokenPrice(order.token);
+      setCurrentPrice(price);
+      setPriceStatus("");
+      if (applyPercent) onChange({ ...order, targetPrice: price * (1 + percent / 100) });
+    } catch {
+      setCurrentPrice(null);
+      setPriceStatus("error");
+    }
+  }
+
+  function handlePercentChange(v) {
+    setPercent(v);
+    if (currentPrice !== null) onChange({ ...order, targetPrice: currentPrice * (1 + v / 100) });
+  }
 
   return (
     <div className="rule-panel">
@@ -38,10 +75,57 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
         </select>
       </div>
 
-      <div className="field-inline">
-        <label>Target price ({CHAIN.nativeSymbol} per token)</label>
-        <input {...num("targetPrice")} min="0" step="any" style={{ width: 160 }} />
+      <div className="field-inline" style={{ marginBottom: 8 }}>
+        <label>Set target by</label>
+        <div className="row" style={{ gap: 6 }}>
+          <button
+            type="button"
+            className={mode === "price" ? "btn btn-small btn-primary" : "btn btn-small"}
+            onClick={() => setMode("price")}
+          >
+            Price
+          </button>
+          <button
+            type="button"
+            className={mode === "percent" ? "btn btn-small btn-primary" : "btn btn-small"}
+            onClick={() => { setMode("percent"); fetchCurrentPrice(true); }}
+          >
+            % from current
+          </button>
+        </div>
       </div>
+
+      {mode === "price" ? (
+        <div className="field-inline">
+          <label>Target price ({CHAIN.nativeSymbol} per token)</label>
+          <input {...num("targetPrice")} min="0" step="any" style={{ width: 160 }} />
+        </div>
+      ) : (
+        <>
+          <div className="field-inline">
+            <label>{order.side === "sell" ? "% above current" : "% below current"}</label>
+            <input
+              type="number" step="any"
+              value={percent}
+              onChange={(e) => handlePercentChange(Number(e.target.value))}
+              style={{ width: 100 }}
+            />
+            <button type="button" className="btn btn-small" onClick={() => fetchCurrentPrice(true)}>
+              {priceStatus === "loading" ? "Fetching..." : "Refresh price"}
+            </button>
+          </div>
+          {priceStatus === "error" && (
+            <p className="hint" style={{ color: "var(--bad)", marginTop: -4 }}>
+              Couldn't get a live price for that address. Enter the token address above, or switch to "Price" and type a target directly.
+            </p>
+          )}
+          {currentPrice !== null && priceStatus !== "error" && (
+            <p className="hint" style={{ marginTop: -4 }}>
+              Current: {currentPrice.toPrecision(6)} {CHAIN.nativeSymbol} → target: {order.targetPrice ? order.targetPrice.toPrecision(6) : "-"} {CHAIN.nativeSymbol}
+            </p>
+          )}
+        </>
+      )}
       <p className="hint" style={{ marginTop: -4 }}>
         {order.side === "sell"
           ? `Sells the moment the price is at or above this.`

@@ -8,6 +8,7 @@ import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
 import * as discovery from "./discovery.js";
 import * as hunter from "./hunter.js";
+import * as ask from "./ask.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -74,6 +75,9 @@ async function main(): Promise<void> {
   loop("limits", CFG.positionCheckSec, limits.tick);
   loop("discovery", CFG.discoveryScanSec, discovery.tick);
   loop("hunter", CFG.hunterScanSec, hunter.tick);
+  // A user waiting on their own "Buy it" click deserves a fast poll, same
+  // urgency as snipe/limit orders.
+  loop("ask", CFG.positionCheckSec, ask.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds, requestAskBuy, pendingAskBuyRequests } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -103,6 +103,30 @@ test("requestDiscoveryBuy is idempotent - clicking twice does not duplicate the 
   requestDiscoveryBuy(vault, 4, Date.now());
   requestDiscoveryBuy(vault, 4, Date.now());
   assert.deepEqual(pendingDiscoveryBuyIds(vault), [4]);
+});
+
+test("pendingAskBuyRequests is empty for a vault with no requests", () => {
+  const vault = "0x6".padEnd(42, "6");
+  assert.deepEqual(pendingAskBuyRequests(vault), []);
+});
+
+test("requestAskBuy then pendingAskBuyRequests round-trips token and amount", () => {
+  const vault = "0x7".padEnd(42, "7");
+  const token = "0x" + "a".repeat(40);
+  const id = requestAskBuy(vault, token, 1234.5, Date.now());
+  const pending = pendingAskBuyRequests(vault);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].id, id);
+  assert.equal(pending[0].token, token);
+  assert.equal(pending[0].amountPls, 1234.5);
+});
+
+test("requestAskBuy does NOT dedupe - asking to buy the same token twice is two separate requests", () => {
+  const vault = "0x8".padEnd(42, "8");
+  const token = "0x" + "b".repeat(40);
+  requestAskBuy(vault, token, 100, Date.now());
+  requestAskBuy(vault, token, 100, Date.now());
+  assert.equal(pendingAskBuyRequests(vault).length, 2);
 });
 
 test("requestClose is case-insensitive on the vault address, like config", () => {

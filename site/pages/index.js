@@ -16,6 +16,7 @@ import LaunchSettings from "../components/LaunchSettings";
 import DiscoverySettings from "../components/DiscoverySettings";
 import HunterSettings from "../components/HunterSettings";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
+import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
@@ -452,6 +453,10 @@ export default function Dashboard() {
                     onBuy={handleBuyOpportunity}
                     buyStates={buyStates}
                   />
+                </div>
+
+                <div className="panel">
+                  <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
                 </div>
 
                 <div className="panel">

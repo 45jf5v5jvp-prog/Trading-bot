@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS limit_fires (
   PRIMARY KEY (vault, order_id)
 );
 
+CREATE TABLE IF NOT EXISTS ask_buy_fires (
+  vault      TEXT NOT NULL,
+  request_id INTEGER NOT NULL,
+  ts         INTEGER NOT NULL,
+  tx_hash    TEXT,
+  PRIMARY KEY (vault, request_id)
+);
+
 CREATE TABLE IF NOT EXISTS opportunities (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   token           TEXT NOT NULL,
@@ -184,6 +192,21 @@ export const limitFires = {
   record(vault: string, orderId: string, txHash?: string): void {
     db.prepare(`INSERT OR REPLACE INTO limit_fires(vault,order_id,ts,tx_hash) VALUES(?,?,?,?)`)
       .run(vault.toLowerCase(), orderId, Math.floor(Date.now() / 1000), txHash ?? null);
+  },
+};
+
+/** One-shot marker for a filled Ask Icaria buy request, keyed by the site's
+ * own autoincrement request id - same "fire once, never re-fire" shape as
+ * limitFires. */
+export const askBuyFires = {
+  has(vault: string, requestId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM ask_buy_fires WHERE vault=? AND request_id=?")
+      .get(vault.toLowerCase(), requestId);
+    return Boolean(r);
+  },
+  record(vault: string, requestId: number, txHash?: string): void {
+    db.prepare(`INSERT OR REPLACE INTO ask_buy_fires(vault,request_id,ts,tx_hash) VALUES(?,?,?,?)`)
+      .run(vault.toLowerCase(), requestId, Math.floor(Date.now() / 1000), txHash ?? null);
   },
 };
 

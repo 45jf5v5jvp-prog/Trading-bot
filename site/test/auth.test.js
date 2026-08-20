@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet } = require("ethers");
-const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, buildMessage, buildCloseMessage, buildBuyOpportunityMessage } = require("../lib/auth");
+const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage } = require("../lib/auth");
 
 const VAULT = "0x" + "e".repeat(40);
 const wallet = Wallet.createRandom();
@@ -156,6 +156,48 @@ test("authorizeBuyOpportunity rejects an expired timestamp without ever calling 
   const readOwner = fakeReader(wallet.address);
   await assert.rejects(
     authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 7, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    /expired/,
+  );
+  assert.equal(readOwner.calls.length, 0);
+});
+
+const ASK_TOKEN = "0x" + "c".repeat(40);
+
+test("authorizeAskBuy accepts a correctly-signed buy request from the real owner", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildAskBuyMessage(VAULT, ASK_TOKEN, 500, ts));
+  const readOwner = fakeReader(wallet.address);
+  const result = await authorizeAskBuy({ vaultAddress: VAULT, token: ASK_TOKEN, amountPls: 500, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+});
+
+test("authorizeAskBuy rejects a signature made for a DIFFERENT amount", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildAskBuyMessage(VAULT, ASK_TOKEN, 500, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeAskBuy({ vaultAddress: VAULT, token: ASK_TOKEN, amountPls: 5000, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /invalid signature|not this vault's owner/,
+  );
+});
+
+test("authorizeAskBuy rejects a signature made for a DIFFERENT token", async () => {
+  const ts = Date.now();
+  const otherToken = "0x" + "d".repeat(40);
+  const signature = await wallet.signMessage(buildAskBuyMessage(VAULT, ASK_TOKEN, 500, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeAskBuy({ vaultAddress: VAULT, token: otherToken, amountPls: 500, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /invalid signature|not this vault's owner/,
+  );
+});
+
+test("authorizeAskBuy rejects an expired timestamp without ever calling the chain reader", async () => {
+  const staleTs = Date.now() - 10 * 60 * 1000;
+  const signature = await wallet.signMessage(buildAskBuyMessage(VAULT, ASK_TOKEN, 500, staleTs));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeAskBuy({ vaultAddress: VAULT, token: ASK_TOKEN, amountPls: 500, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);

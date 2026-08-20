@@ -27,6 +27,13 @@ function getDb() {
       requested_at   INTEGER NOT NULL,
       PRIMARY KEY (vault, opportunity_id)
     );
+    CREATE TABLE IF NOT EXISTS ask_buy_requests (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      vault        TEXT NOT NULL,
+      token        TEXT NOT NULL,
+      amount_pls   REAL NOT NULL,
+      requested_at INTEGER NOT NULL
+    );
   `);
   return db;
 }
@@ -103,6 +110,32 @@ function pendingDiscoveryBuyIds(vault) {
     .map((r) => r.opportunity_id);
 }
 
+/**
+ * Records an Ask Icaria "buy it" request - unlike the Discovery/Hunter buy
+ * requests above, there's no pre-existing opportunity catalog entry to
+ * reference, since the user typed this token in themselves. The token and
+ * amount are recorded directly, and each request gets its own id so the
+ * keeper can track exactly which ones it's already filled (see keeper/src/
+ * ask.ts's askBuyFires, the same one-shot-per-id pattern limitFires uses).
+ * No dedup on insert - genuinely asking to buy the same token twice is a
+ * valid, separate request, not a duplicate click.
+ */
+function requestAskBuy(vault, token, amountPls, nowMs) {
+  const info = getDb()
+    .prepare(`INSERT INTO ask_buy_requests (vault, token, amount_pls, requested_at) VALUES (?, ?, ?, ?)`)
+    .run(vault.toLowerCase(), token.toLowerCase(), amountPls, nowMs);
+  return Number(info.lastInsertRowid);
+}
+
+/** Every ask-buy request this vault owner has made, handled or not - the
+ * keeper is responsible for only acting on ones it hasn't already filled. */
+function pendingAskBuyRequests(vault) {
+  return getDb()
+    .prepare(`SELECT id, token, amount_pls, requested_at FROM ask_buy_requests WHERE vault = ? ORDER BY id ASC`)
+    .all(vault.toLowerCase())
+    .map((r) => ({ id: r.id, token: r.token, amountPls: r.amount_pls, requestedAt: r.requested_at }));
+}
+
 function resetForTests() {
   db = undefined;
 }
@@ -110,5 +143,6 @@ function resetForTests() {
 module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
   requestDiscoveryBuy, pendingDiscoveryBuyIds,
+  requestAskBuy, pendingAskBuyRequests,
   resetForTests, DB_PATH,
 };

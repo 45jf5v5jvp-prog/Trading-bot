@@ -37,6 +37,10 @@ const PRESETS = {
     explorerUrl: "https://scan.pulsechain.com",
     wrapped: "0xA1077a294dDE1B09bB078844df40758a5D0f9a27",
     router: "0x165C3410fC91EF562C50559f7d2289fEbed552d9",
+    // PulseX V2 factory - same address the keeper's own FACTORY default uses
+    // (keeper/src/config.ts), reused here rather than re-verified fresh,
+    // since it's already the live default this deployment trades through.
+    factory: "0x29eA7545DEf87022BAdc76323F373EA1e707C523",
     vaultFactory: "0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295",
     multiVenueVaultFactory: "",
     // V3/V4 pricing addresses - PulseX has no V3 or V4 deployment, so these
@@ -68,6 +72,11 @@ const PRESETS = {
     explorerUrl: "https://robinhoodchain.blockscout.com",
     wrapped: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
     router: "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
+    // Unset until independently verified on this chain's explorer - Ask
+    // Icaria and Hunter Bot are PulseChain-only for now (see their own
+    // module comments), so this deployment simply has no V2 factory wired
+    // up rather than trusting a guessed address.
+    factory: "",
     vaultFactory: "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54",
     multiVenueVaultFactory: "",
     // V3/V4 pricing addresses. Same "no fabricated defaults" convention as
@@ -108,6 +117,7 @@ const CHAIN = {
   // neither deployment's existing .env needs editing.
   wrapped: process.env.NEXT_PUBLIC_WETH || process.env.NEXT_PUBLIC_WPLS || p.wrapped,
   router: process.env.NEXT_PUBLIC_ROUTER || p.router,
+  factory: process.env.NEXT_PUBLIC_FACTORY_V2 || p.factory,
   vaultFactory: process.env.NEXT_PUBLIC_VAULT_FACTORY || p.vaultFactory,
   multiVenueVaultFactory: process.env.NEXT_PUBLIC_MULTI_VENUE_VAULT_FACTORY || p.multiVenueVaultFactory,
   factoryV3: process.env.NEXT_PUBLIC_FACTORY_V3 || p.factoryV3,

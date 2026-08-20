@@ -51,6 +51,10 @@ export const CFG = {
   // a 60-minute-old trend, so this runs on the slower price-poll-ish cadence
   // rather than the launch scanner's fast one.
   discoveryScanSec: num("DISCOVERY_SCAN_SEC", "90"),
+  // Slower still than discovery's - candle/indicator math is heavier per
+  // token, and a passing candidate may trigger a paid AI call, so this
+  // cadence doubles as a cost throttle, not just a "how fresh" choice.
+  hunterScanSec: num("HUNTER_SCAN_SEC", "300"),
 
   simAddress: addr("SIM_ADDRESS", "0x1111111111111111111111111111111111111111"),
   simAmountPls: num("SIM_AMOUNT_PLS", "100000"),

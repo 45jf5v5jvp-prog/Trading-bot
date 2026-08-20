@@ -7,6 +7,7 @@ import * as launch from "./launch.js";
 import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
 import * as discovery from "./discovery.js";
+import * as hunter from "./hunter.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -72,6 +73,7 @@ async function main(): Promise<void> {
   // fits better than the launch scanner's fast pace.
   loop("limits", CFG.positionCheckSec, limits.tick);
   loop("discovery", CFG.discoveryScanSec, discovery.tick);
+  loop("hunter", CFG.hunterScanSec, hunter.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

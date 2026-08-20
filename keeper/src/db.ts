@@ -201,20 +201,36 @@ export interface NewOpportunity {
   token: string; priceMovePct: number; liqGrowthPct: number; liqPls: number;
   buyTaxBps: number | null; sellTaxBps: number | null; lpLockedPct: number | null;
   ownerRenounced: boolean | null; sellable: boolean; verdict: string; reason: string; narrative: string;
+  // Hunter Bot fields - all optional so discovery.ts's existing calls (a
+  // breakout/liquidity-growth anomaly, no technical setup or AI opinion
+  // involved) need no changes. "discovery" is the default source.
+  source?: "discovery" | "hunter";
+  rsi?: number | null;
+  macdHistogram?: number | null;
+  bollingerPercentB?: number | null;
+  aiRecommend?: boolean | null;
+  aiConfidence?: "low" | "medium" | "high" | null;
+  aiReasoning?: string | null;
 }
-export interface OpportunityRow extends NewOpportunity { id: number; ts: number }
+export interface OpportunityRow extends NewOpportunity { id: number; ts: number; source: "discovery" | "hunter" }
 
-/** Discovery Bot's findings - one row per anomaly the scanner both detected
- * AND ran the full honeypot/tax/lock/renounce screen against (screened once,
- * shared across every vault interested in it - see keeper/src/discovery.ts). */
+/** Discovery Bot's and Hunter Bot's findings share one feed - one row per
+ * candidate either detector found AND ran the full honeypot/tax/lock/
+ * renounce screen against (screened once, shared across every vault
+ * interested in it - see keeper/src/discovery.ts and keeper/src/hunter.ts).
+ * `source` distinguishes which detector produced a row; everything else
+ * (the site's Opportunities panel, the manual buy-request flow) is shared. */
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
-      o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative,
+      o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
+      o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
+      o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
+      o.aiConfidence ?? null, o.aiReasoning ?? null,
     );
     return Number(info.lastInsertRowid);
   },

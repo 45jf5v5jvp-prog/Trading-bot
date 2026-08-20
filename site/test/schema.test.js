@@ -29,6 +29,53 @@ test("rejects a negative discovery threshold", () => {
   assert.throws(() => normalizeConfig({ discovery: { minPriceMovePct: -5 } }), /minPriceMovePct/);
 });
 
+test("hunter settings default to off with AI approval required", () => {
+  const c = emptyConfig();
+  assert.equal(c.hunter.enabled, false);
+  assert.equal(c.hunter.mode, "notify");
+  assert.equal(c.hunter.requireAiApproval, true);
+  assert.equal(c.hunter.minAiConfidence, "medium");
+});
+
+test("hunter settings fill in defaults for missing fields, and validate the rest", () => {
+  const out = normalizeConfig({ hunter: { enabled: true, mode: "autoBuy", allocatedPls: 50000, perTradePls: 5000 } });
+  assert.equal(out.hunter.enabled, true);
+  assert.equal(out.hunter.mode, "autoBuy");
+  assert.equal(out.hunter.allocatedPls, 50000);
+  assert.equal(out.hunter.perTradePls, 5000);
+  assert.equal(out.hunter.rsiOversold, 30); // default filled in
+  assert.equal(out.hunter.requireLpLock, true); // default filled in
+});
+
+test("rejects a hunter mode that is not notify or autoBuy", () => {
+  assert.throws(() => normalizeConfig({ hunter: { mode: "yolo" } }), /mode/);
+});
+
+test("rejects a hunter minAiConfidence outside low/medium/high", () => {
+  assert.throws(() => normalizeConfig({ hunter: { minAiConfidence: "extreme" } }), /minAiConfidence/);
+});
+
+test("rejects a negative hunter threshold", () => {
+  assert.throws(() => normalizeConfig({ hunter: { rsiOversold: -5 } }), /rsiOversold/);
+});
+
+test("rejects a hunter bollingerPercentBMax outside 0-1", () => {
+  assert.throws(() => normalizeConfig({ hunter: { bollingerPercentBMax: 1.5 } }), /bollingerPercentBMax/);
+  assert.throws(() => normalizeConfig({ hunter: { bollingerPercentBMax: -0.1 } }), /bollingerPercentBMax/);
+});
+
+test("rejects a hunter perTradePls larger than its own allocatedPls", () => {
+  assert.throws(
+    () => normalizeConfig({ hunter: { allocatedPls: 1000, perTradePls: 5000 } }),
+    /perTradePls/,
+  );
+});
+
+test("allows hunter perTradePls larger than allocatedPls when allocatedPls is 0 (still disabled)", () => {
+  const out = normalizeConfig({ hunter: { allocatedPls: 0, perTradePls: 5000 } });
+  assert.equal(out.hunter.perTradePls, 5000);
+});
+
 test("accepts a minimal valid snipe target", () => {
   const out = normalizeConfig({
     snipes: [{ enabled: true, token: "0x" + "2".repeat(40), amountPls: 1000 }],

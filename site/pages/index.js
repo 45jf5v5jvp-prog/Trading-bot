@@ -14,6 +14,7 @@ import PortfolioPanel from "../components/PortfolioPanel";
 import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
 import DiscoverySettings from "../components/DiscoverySettings";
+import HunterSettings from "../components/HunterSettings";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
@@ -435,6 +436,13 @@ export default function Dashboard() {
                   <DiscoverySettings
                     discovery={config.discovery}
                     onChange={(discovery) => updateConfig({ ...config, discovery })}
+                  />
+                </div>
+
+                <div className="panel">
+                  <HunterSettings
+                    hunter={config.hunter}
+                    onChange={(hunter) => updateConfig({ ...config, hunter })}
                   />
                 </div>
 

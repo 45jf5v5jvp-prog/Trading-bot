@@ -38,6 +38,13 @@ export default async function handler(req, res) {
     verdict: o.verdict,
     reason: o.reason,
     narrative: o.narrative,
+    source: o.source ?? "discovery",
+    rsi: o.rsi ?? null,
+    macdHistogram: o.macd_histogram ?? null,
+    bollingerPercentB: o.bollinger_percent_b ?? null,
+    aiRecommend: o.ai_recommend === null || o.ai_recommend === undefined ? null : Boolean(o.ai_recommend),
+    aiConfidence: o.ai_confidence ?? null,
+    aiReasoning: o.ai_reasoning ?? null,
     action: actions[o.id]?.action ?? null,
     txHash: actions[o.id]?.txHash ?? null,
   }));

@@ -117,6 +117,20 @@ CREATE TABLE IF NOT EXISTS discovery_actions (
   tx_hash        TEXT,
   PRIMARY KEY (vault, opportunity_id)
 );
+
+CREATE TABLE IF NOT EXISTS ask_buy_fires (
+  vault      TEXT NOT NULL,
+  request_id INTEGER NOT NULL,
+  ts         INTEGER NOT NULL,
+  tx_hash    TEXT,
+  PRIMARY KEY (vault, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS ai_exit_requests (
+  position_id INTEGER PRIMARY KEY,
+  ts          INTEGER NOT NULL,
+  reason      TEXT NOT NULL
+);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -126,6 +140,31 @@ CREATE TABLE IF NOT EXISTS discovery_actions (
   if (!cols.some((c) => c.name === "fail_count")) {
     db.exec("ALTER TABLE positions ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0");
   }
+  // Set once at open time, not read live from the vault's current Hunter Bot
+  // config - so flipping the setting later never retroactively changes how
+  // an already-open position is managed. NULL for every non-Hunter position.
+  if (!cols.some((c) => c.name === "exit_mode")) {
+    db.exec("ALTER TABLE positions ADD COLUMN exit_mode TEXT");
+  }
+}
+
+// Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request
+// pipeline discovery.ts already built rather than duplicating it, tagged by
+// `source` and carrying its own indicator + AI-verdict columns alongside
+// discovery.ts's price/liquidity ones.
+{
+  const cols = db.prepare("PRAGMA table_info(opportunities)").all() as { name: string }[];
+  const add = (name: string, ddl: string) => {
+    if (!cols.some((c) => c.name === name)) db.exec(`ALTER TABLE opportunities ADD COLUMN ${ddl}`);
+  };
+  add("source", "source TEXT NOT NULL DEFAULT 'discovery'");
+  add("rsi", "rsi REAL");
+  add("macd_histogram", "macd_histogram REAL");
+  add("bollinger_percent_b", "bollinger_percent_b REAL");
+  add("ai_recommend", "ai_recommend INTEGER");
+  add("ai_confidence", "ai_confidence TEXT");
+  add("ai_reasoning", "ai_reasoning TEXT");
+  add("ai_suggested_amount_pls", "ai_suggested_amount_pls REAL");
 }
 
 export const meta = {
@@ -207,6 +246,44 @@ export const limitFires = {
   },
 };
 
+/** One-shot marker for a filled Ask Icaria buy request, keyed by the site's
+ * own autoincrement request id - same "fire once, never re-fire" shape as
+ * limitFires. */
+export const askBuyFires = {
+  has(vault: string, requestId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM ask_buy_fires WHERE vault=? AND request_id=?")
+      .get(vault.toLowerCase(), requestId);
+    return Boolean(r);
+  },
+  record(vault: string, requestId: number, txHash?: string): void {
+    db.prepare(`INSERT OR REPLACE INTO ask_buy_fires(vault,request_id,ts,tx_hash) VALUES(?,?,?,?)`)
+      .run(vault.toLowerCase(), requestId, Math.floor(Date.now() / 1000), txHash ?? null);
+  },
+};
+
+/**
+ * Keeper-internal only, never touched by the site - Hunter Bot's "Auto
+ * Full" exit mode writes here when its periodic AI re-judgment decides an
+ * open position should be sold now (see hunter.ts's reviewFullModePositions
+ * and ai.ts's assessExit). positions.ts's tick() reads this the same way it
+ * reads the site's manual close-requests, treating a row here as an
+ * immediate forced exit - the mandatory stop-loss is still the safety net,
+ * this is just an earlier, judgment-based exit on top of it.
+ */
+export const aiExitRequests = {
+  request(positionId: number, reason: string): void {
+    db.prepare(`INSERT OR REPLACE INTO ai_exit_requests(position_id,ts,reason) VALUES(?,?,?)`)
+      .run(positionId, Math.floor(Date.now() / 1000), reason);
+  },
+  pendingIds(): Set<number> {
+    const rows = db.prepare("SELECT position_id FROM ai_exit_requests").all() as { position_id: number }[];
+    return new Set(rows.map((r) => r.position_id));
+  },
+  clear(positionId: number): void {
+    db.prepare("DELETE FROM ai_exit_requests WHERE position_id=?").run(positionId);
+  },
+};
+
 export const watched = {
   add(token: string, symbol: string, decimals: number, pair: string): void {
     db.prepare(`INSERT OR IGNORE INTO watched(token,symbol,decimals,pair,first_seen)
@@ -221,20 +298,42 @@ export interface NewOpportunity {
   token: string; priceMovePct: number; liqGrowthPct: number; liqPls: number;
   buyTaxBps: number | null; sellTaxBps: number | null; lpLockedPct: number | null;
   ownerRenounced: boolean | null; sellable: boolean; verdict: string; reason: string; narrative: string;
+  // Hunter Bot fields - all optional so discovery.ts's existing calls (a
+  // breakout/liquidity-growth anomaly, no technical setup or AI opinion
+  // involved) need no changes. "discovery" is the default source.
+  source?: "discovery" | "hunter";
+  rsi?: number | null;
+  macdHistogram?: number | null;
+  bollingerPercentB?: number | null;
+  aiRecommend?: boolean | null;
+  aiConfidence?: "low" | "medium" | "high" | null;
+  aiReasoning?: string | null;
+  /** How much of Hunter Bot's per-trade ceiling the AI actually wants to
+   * spend - see ai.ts's assess()/AiVerdict.suggestedAmountPls. Used both
+   * for the initial autoBuy and for a later manual "Buy Now" on the same
+   * opportunity, so a human approving it spends what the AI sized, not the
+   * full ceiling by default. */
+  aiSuggestedAmountPls?: number | null;
 }
-export interface OpportunityRow extends NewOpportunity { id: number; ts: number }
+export interface OpportunityRow extends NewOpportunity { id: number; ts: number; source: "discovery" | "hunter" }
 
-/** Discovery Bot's findings - one row per anomaly the scanner both detected
- * AND ran the full honeypot/tax/lock/renounce screen against (screened once,
- * shared across every vault interested in it - see keeper/src/discovery.ts). */
+/** Discovery Bot's and Hunter Bot's findings share one feed - one row per
+ * candidate either detector found AND ran the full honeypot/tax/lock/
+ * renounce screen against (screened once, shared across every vault
+ * interested in it - see keeper/src/discovery.ts and keeper/src/hunter.ts).
+ * `source` distinguishes which detector produced a row; everything else
+ * (the site's Opportunities panel, the manual buy-request flow) is shared. */
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
-      o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative,
+      o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
+      o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
+      o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
+      o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
     );
     return Number(info.lastInsertRowid);
   },
@@ -246,8 +345,28 @@ export const opportunities = {
       .get(token.toLowerCase(), sinceTs);
     return Boolean(r);
   },
+  // Explicit column aliases (snake_case -> camelCase), not `SELECT *` cast as
+  // the camelCase type - a real bug fixed here: the cast lied about shape,
+  // and nothing had surfaced it because no caller touched a field whose
+  // casing actually differed until aiSuggestedAmountPls needed it.
   get(id: number): OpportunityRow | undefined {
-    return db.prepare("SELECT * FROM opportunities WHERE id=?").get(id) as OpportunityRow | undefined;
+    const r = db.prepare(`
+      SELECT id, token, ts,
+             price_move_pct AS priceMovePct, liq_growth_pct AS liqGrowthPct, liq_pls AS liqPls,
+             buy_tax_bps AS buyTaxBps, sell_tax_bps AS sellTaxBps, lp_locked_pct AS lpLockedPct,
+             owner_renounced AS ownerRenounced, sellable, verdict, reason, narrative,
+             source, rsi, macd_histogram AS macdHistogram, bollinger_percent_b AS bollingerPercentB,
+             ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
+             ai_suggested_amount_pls AS aiSuggestedAmountPls
+      FROM opportunities WHERE id=?
+    `).get(id) as any;
+    if (!r) return undefined;
+    return {
+      ...r,
+      ownerRenounced: r.ownerRenounced === null ? null : Boolean(r.ownerRenounced),
+      sellable: Boolean(r.sellable),
+      aiRecommend: r.aiRecommend === null ? null : Boolean(r.aiRecommend),
+    } as OpportunityRow;
   },
 };
 

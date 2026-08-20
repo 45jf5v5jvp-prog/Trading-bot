@@ -77,11 +77,13 @@ function getV4PoolsForToken(token) {
 }
 
 /**
- * Discovery Bot's findings, newest first. Every opportunity the scanner both
- * detected and screened is included - a failed screen is shown too (with its
- * reason), never hidden, since "this pumped but looks like a trap" is useful
- * information even when it's not buyable. Returns [] if the table doesn't
- * exist (a keeper build that predates Discovery Bot) rather than throwing.
+ * Discovery Bot's and Hunter Bot's findings, newest first, in one shared
+ * feed (see `source`). Every opportunity a detector both found and screened
+ * is included - a failed screen is shown too (with its reason), never
+ * hidden, since "this pumped but looks like a trap" (or "this looked
+ * oversold but liquidity looks pulled") is useful information even when
+ * it's not buyable. Returns [] if the table doesn't exist (a keeper build
+ * that predates Discovery Bot) rather than throwing.
  */
 function getOpportunities(limit = 50) {
   const d = getDb();
@@ -89,7 +91,9 @@ function getOpportunities(limit = 50) {
   try {
     return d.prepare(
       `SELECT id, token, ts, price_move_pct, liq_growth_pct, liq_pls, buy_tax_bps, sell_tax_bps,
-              lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative
+              lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative,
+              source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning,
+              ai_suggested_amount_pls
        FROM opportunities ORDER BY ts DESC LIMIT ?`,
     ).all(limit);
   } catch {

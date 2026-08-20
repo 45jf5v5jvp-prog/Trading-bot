@@ -14,7 +14,9 @@ import PortfolioPanel from "../components/PortfolioPanel";
 import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
 import DiscoverySettings from "../components/DiscoverySettings";
+import HunterSettings from "../components/HunterSettings";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
+import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
@@ -439,11 +441,22 @@ export default function Dashboard() {
                 </div>
 
                 <div className="panel">
+                  <HunterSettings
+                    hunter={config.hunter}
+                    onChange={(hunter) => updateConfig({ ...config, hunter })}
+                  />
+                </div>
+
+                <div className="panel">
                   <OpportunitiesPanel
                     opportunities={opportunities}
                     onBuy={handleBuyOpportunity}
                     buyStates={buyStates}
                   />
+                </div>
+
+                <div className="panel">
+                  <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
                 </div>
 
                 <div className="panel">

@@ -49,13 +49,18 @@ const V4_TOKEN = "0x" + "d".repeat(40);
 setup.prepare(`INSERT INTO v4_pools (token,currency0,currency1,fee,tick_spacing,hooks,first_seen)
   VALUES (?,?,?,?,?,?,?)`).run(V4_TOKEN, V4_TOKEN, "0x" + "e".repeat(40), 3000, 60, "0x" + "0".repeat(40), 1000);
 
-// Same schema as keeper/src/db.ts's opportunities/discovery_actions tables.
+// Same schema as keeper/src/db.ts's opportunities/discovery_actions tables -
+// opportunities includes Hunter Bot's columns (source, indicators, AI
+// verdict) alongside Discovery Bot's original price/liquidity ones, since
+// both detectors share this one table (tagged by `source`).
 setup.exec(`
   CREATE TABLE opportunities (
     id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT NOT NULL, ts INTEGER NOT NULL,
     price_move_pct REAL NOT NULL, liq_growth_pct REAL NOT NULL, liq_pls REAL NOT NULL,
     buy_tax_bps INTEGER, sell_tax_bps INTEGER, lp_locked_pct REAL, owner_renounced INTEGER,
-    sellable INTEGER NOT NULL, verdict TEXT NOT NULL, reason TEXT, narrative TEXT NOT NULL
+    sellable INTEGER NOT NULL, verdict TEXT NOT NULL, reason TEXT, narrative TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'discovery', rsi REAL, macd_histogram REAL, bollinger_percent_b REAL,
+    ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT, ai_suggested_amount_pls REAL
   );
   CREATE TABLE discovery_actions (
     vault TEXT NOT NULL, opportunity_id INTEGER NOT NULL, ts INTEGER NOT NULL,
@@ -64,9 +69,9 @@ setup.exec(`
 `);
 const OPP_TOKEN = "0x" + "f".repeat(40);
 setup.prepare(`INSERT INTO opportunities
-  (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-  .run(OPP_TOKEN, 2000, 30, 20, 3000000, 100, 100, 100, 1, 1, "pass", "clear", "moved up 30%");
+  (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(OPP_TOKEN, 2000, 30, 20, 3000000, 100, 100, 100, 1, 1, "pass", "clear", "moved up 30%", "discovery");
 setup.prepare(`INSERT INTO discovery_actions (vault,opportunity_id,ts,action,tx_hash) VALUES (?,?,?,?,?)`)
   .run(VAULT, 1, 2001, "notified", null);
 
@@ -147,6 +152,8 @@ test("getOpportunities returns Discovery Bot findings newest first", () => {
   assert.equal(rows[0].token, OPP_TOKEN);
   assert.equal(rows[0].verdict, "pass");
   assert.equal(rows[0].narrative, "moved up 30%");
+  assert.equal(rows[0].source, "discovery");
+  assert.equal(rows[0].rsi, null);
 });
 
 test("getOpportunities returns [] when the keeper.db predates Discovery Bot (no opportunities table)", () => {

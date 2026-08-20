@@ -4,11 +4,12 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
 /**
  * GET /api/vaults/:address/opportunities - public read, same reasoning as
- * portfolio/history: nothing sensitive in a list of tokens that pumped.
- * Discovery Bot's findings are global (one scanner, shared across every
- * vault), so this reads the keeper's own opportunities table directly and
- * layers on just this vault's own notified/bought status, so the dashboard
- * can grey out a Buy Now button already acted on.
+ * portfolio/history: nothing sensitive in a list of tokens that pumped or
+ * looked oversold. Discovery Bot's and Hunter Bot's findings are both global
+ * (one scanner each, shared across every vault - see the `source` column),
+ * so this reads the keeper's own opportunities table directly and layers on
+ * just this vault's own notified/bought status, so the dashboard can grey
+ * out a Buy Now button already acted on.
  */
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -38,6 +39,14 @@ export default async function handler(req, res) {
     verdict: o.verdict,
     reason: o.reason,
     narrative: o.narrative,
+    source: o.source ?? "discovery",
+    rsi: o.rsi ?? null,
+    macdHistogram: o.macd_histogram ?? null,
+    bollingerPercentB: o.bollinger_percent_b ?? null,
+    aiRecommend: o.ai_recommend === null || o.ai_recommend === undefined ? null : Boolean(o.ai_recommend),
+    aiConfidence: o.ai_confidence ?? null,
+    aiReasoning: o.ai_reasoning ?? null,
+    aiSuggestedAmountPls: o.ai_suggested_amount_pls ?? null,
     action: actions[o.id]?.action ?? null,
     txHash: actions[o.id]?.txHash ?? null,
   }));

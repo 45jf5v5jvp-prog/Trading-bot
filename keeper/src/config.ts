@@ -99,6 +99,10 @@ export const CFG = {
   // a 60-minute-old trend, so this runs on the slower price-poll-ish cadence
   // rather than the launch scanner's fast one.
   discoveryScanSec: num("DISCOVERY_SCAN_SEC", "90"),
+  // Slower still than discovery's - candle/indicator math is heavier per
+  // token, and a passing candidate may trigger a paid AI call, so this
+  // cadence doubles as a cost throttle, not just a "how fresh" choice.
+  hunterScanSec: num("HUNTER_SCAN_SEC", "300"),
 
   simAddress: addr("SIM_ADDRESS", "0x1111111111111111111111111111111111111111"),
   simAmountEth: num("SIM_AMOUNT_ETH", "0.02"),
@@ -113,6 +117,12 @@ export const CFG = {
   // a token that's been sitting around for weeks does not, regardless of
   // which quote asset just got paired with it.
   maxTokenAgeBlocks: num("MAX_TOKEN_AGE_BLOCKS", "36000"),
+
+  // Empty by default, same "unset means off, not a fake default" rule as
+  // PROBE_ADDRESS. Hunter Bot's AI gate and Ask Icaria both no-op with a
+  // clear log line rather than guess when this is missing.
+  anthropicApiKey: opt("ANTHROPIC_API_KEY", ""),
+  anthropicModel: opt("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
 
   dbPath: opt("DB_PATH", "./keeper.db"),
   logLevel: opt("LOG_LEVEL", "info"),

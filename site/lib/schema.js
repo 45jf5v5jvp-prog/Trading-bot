@@ -33,6 +33,23 @@ const DEFAULT_DISCOVERY = {
   maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true, requireOwnerRenounced: false,
 };
 
+// Hunter Bot: hunts RSI/MACD/Bollinger dip-buying setups across every
+// watched token, trading a dedicated slice of the vault (allocatedPls)
+// rather than the whole balance - see keeper/src/registry.ts's
+// HunterConfig comment for the full reasoning, including the
+// liquidity-coherence check (always on, not a setting here) that catches a
+// price crash caused by a liquidity pull before it's mistaken for a dip.
+const DEFAULT_HUNTER = {
+  enabled: false, mode: "notify", allocatedPls: 0, maxPerTradePls: 0, maxPerDay: 3,
+  exitMode: "limited",
+  requireRsi: true, rsiOversold: 30, requireMacdCross: true,
+  requireBollinger: true, bollingerPercentBMax: 0.15,
+  minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  requireLpLock: true, requireOwnerRenounced: false,
+  requireAiApproval: true, minAiConfidence: "medium",
+  takeProfitPct: 40, stopLossPct: 25, trailingStopPct: 0, timeExitMin: 0,
+};
+
 function isFiniteNumber(v) {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -122,6 +139,56 @@ function normalizeLimitOrder(o, i) {
   };
 }
 
+function normalizeHunter(h) {
+  const merged = { ...DEFAULT_HUNTER, ...(h ?? {}) };
+  if (merged.mode !== "notify" && merged.mode !== "autoBuy")
+    throw new Error(`hunter.mode must be "notify" or "autoBuy"`);
+  if (merged.exitMode !== "limited" && merged.exitMode !== "full")
+    throw new Error(`hunter.exitMode must be "limited" or "full"`);
+  if (merged.minAiConfidence !== "low" && merged.minAiConfidence !== "medium" && merged.minAiConfidence !== "high")
+    throw new Error(`hunter.minAiConfidence must be "low", "medium", or "high"`);
+  for (const field of [
+    "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
+    "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
+  ]) {
+    if (!isFiniteNumber(merged[field]) || merged[field] < 0)
+      throw new Error(`hunter.${field} must be a non-negative number`);
+  }
+  if (!isFiniteNumber(merged.bollingerPercentBMax) || merged.bollingerPercentBMax < 0 || merged.bollingerPercentBMax > 1)
+    throw new Error("hunter.bollingerPercentBMax must be between 0 and 1");
+  if (merged.maxPerTradePls > merged.allocatedPls && merged.allocatedPls > 0)
+    throw new Error("hunter.maxPerTradePls cannot exceed hunter.allocatedPls");
+  // Auto Full hands the AI ongoing exit authority - the stop-loss is the one
+  // thing that authority can never remove, so it must be a real number here,
+  // not left at the "disabled" 0 a limited-mode owner might reasonably use.
+  if (merged.exitMode === "full" && merged.stopLossPct <= 0)
+    throw new Error("hunter.stopLossPct must be greater than 0 when exitMode is \"full\" - Auto Full still needs a mandatory stop-loss");
+  return {
+    enabled: Boolean(merged.enabled),
+    mode: merged.mode,
+    allocatedPls: merged.allocatedPls,
+    maxPerTradePls: merged.maxPerTradePls,
+    maxPerDay: merged.maxPerDay,
+    exitMode: merged.exitMode,
+    requireRsi: Boolean(merged.requireRsi),
+    rsiOversold: merged.rsiOversold,
+    requireMacdCross: Boolean(merged.requireMacdCross),
+    requireBollinger: Boolean(merged.requireBollinger),
+    bollingerPercentBMax: merged.bollingerPercentBMax,
+    minLiquidityPls: merged.minLiquidityPls,
+    maxBuyTaxBps: merged.maxBuyTaxBps,
+    maxSellTaxBps: merged.maxSellTaxBps,
+    requireLpLock: Boolean(merged.requireLpLock),
+    requireOwnerRenounced: Boolean(merged.requireOwnerRenounced),
+    requireAiApproval: Boolean(merged.requireAiApproval),
+    minAiConfidence: merged.minAiConfidence,
+    takeProfitPct: merged.takeProfitPct,
+    stopLossPct: merged.stopLossPct,
+    trailingStopPct: merged.trailingStopPct,
+    timeExitMin: merged.timeExitMin,
+  };
+}
+
 function normalizeLaunch(l) {
   const merged = { ...DEFAULT_LAUNCH, ...(l ?? {}) };
   for (const field of [
@@ -199,16 +266,17 @@ function normalizeConfig(body) {
   const limitOrders = limitOrdersIn.map(normalizeLimitOrder);
   const launch = normalizeLaunch(body.launch);
   const discovery = normalizeDiscovery(body.discovery);
-  return { launch, rules, snipes, limitOrders, discovery, maxHoldingPct };
+  const hunter = normalizeHunter(body.hunter);
+  return { launch, rules, snipes, limitOrders, discovery, hunter, maxHoldingPct };
 }
 
 function emptyConfig() {
   return {
     launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [],
-    discovery: { ...DEFAULT_DISCOVERY }, maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+    discovery: { ...DEFAULT_DISCOVERY }, hunter: { ...DEFAULT_HUNTER }, maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
   };
 }
 
 module.exports = {
-  normalizeConfig, emptyConfig, DEFAULT_LAUNCH, DEFAULT_DISCOVERY, DEFAULT_MAX_HOLDING_PCT,
+  normalizeConfig, emptyConfig, DEFAULT_LAUNCH, DEFAULT_DISCOVERY, DEFAULT_HUNTER, DEFAULT_MAX_HOLDING_PCT,
 };

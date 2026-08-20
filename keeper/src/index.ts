@@ -7,6 +7,8 @@ import * as launch from "./launch.js";
 import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
 import * as discovery from "./discovery.js";
+import * as hunter from "./hunter.js";
+import * as ask from "./ask.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -67,6 +69,8 @@ async function main(): Promise<void> {
     log("error", "main", "POOL_MANAGER is set but PROBE_ADDRESS_V4 is not. V4 Launch Bot will refuse every token rather than buy unscreened.");
   if (CFG.poolManager && !CFG.multiVenueV4VaultFactory)
     log("warn", "main", "POOL_MANAGER is set but MULTI_VENUE_V4_VAULT_FACTORY is not - V4 launches will be seen and screened, but no vault can execute them.");
+  if (!CFG.anthropicApiKey)
+    log("info", "main", "ANTHROPIC_API_KEY is unset. Hunter Bot's AI gate and Ask Icaria's AI read both no-op (mechanical checks still run).");
   if (CFG.dryRun)
     log("warn", "main", "DRY_RUN is on. Everything is evaluated and simulated, nothing is broadcast.");
   if (CFG.globalKill)
@@ -86,6 +90,10 @@ async function main(): Promise<void> {
   // fast pace.
   loop("limits", CFG.positionCheckSec, limits.tick);
   loop("discovery", CFG.discoveryScanSec, discovery.tick);
+  loop("hunter", CFG.hunterScanSec, hunter.tick);
+  // A user waiting on their own "Buy it" click deserves a fast poll, same
+  // urgency as snipe/limit orders.
+  loop("ask", CFG.positionCheckSec, ask.tick);
   if (CFG.factoryV3) loop("launchV3", CFG.pairScanSec, launch.scanV3);
   if (CFG.poolManager) loop("launchV4", CFG.pairScanSec, launch.scanV4);
   loop("rules", CFG.ruleEvalSec, rules.tick);

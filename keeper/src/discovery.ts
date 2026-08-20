@@ -55,7 +55,7 @@ const DETECT_WINDOW_HOURS = 1;
 const DEDUP_HOURS = 2;
 const MIN_POINTS = 3;
 
-interface DiscoveryScreen {
+export interface DiscoveryScreen {
   sellable: boolean;
   buyTaxBps: number;
   sellTaxBps: number;
@@ -70,8 +70,12 @@ interface DiscoveryScreen {
  * Same checks screener.ts's screen() runs, minus the liquidity floor (already
  * applied from our own price history before this is called) and minus the
  * deployer-share check (no deployer on file - see the module comment above).
+ *
+ * Exported so hunter.ts can run the identical screen on its own candidates
+ * rather than duplicating it - a technical setup deserves exactly the same
+ * scrutiny a price/liquidity anomaly does, no lighter and no heavier.
  */
-async function screenOpportunity(
+export async function screenOpportunity(
   token: string,
   pair: string,
   limits: { maxBuyTaxBps: number; maxSellTaxBps: number; requireLpLock: boolean; requireOwnerRenounced: boolean },
@@ -219,7 +223,11 @@ async function dispatch(
  * approves buying something this bot already vetted and showed, not an
  * arbitrary opportunity id.
  */
-async function fetchBuyRequests(vault: string): Promise<number[]> {
+/** Exported for hunter.ts - the opportunity id queue is shared and source-
+ * agnostic (the site's route returns every pending request for a vault
+ * regardless of which detector produced the opportunity), so each detector
+ * pulls the same list and filters to the rows it produced. */
+export async function fetchBuyRequests(vault: string): Promise<number[]> {
   const api = process.env.CONFIG_API;
   if (!api) return [];
   try {
@@ -238,7 +246,10 @@ async function processBuyRequests(candidates: VaultRecord[]): Promise<void> {
     for (const id of ids) {
       if (discoveryActions.actionFor(v.address, id) === "bought") continue; // no double-buy
       const opp = opportunities.get(id);
-      if (!opp || opp.verdict !== "pass") continue;
+      // Only ever act on this detector's own rows - hunter.ts runs the same
+      // loop filtered to its own source, so a hunter-found candidate is
+      // bought with hunter's sizing/budget, never discovery's.
+      if (!opp || opp.verdict !== "pass" || (opp.source ?? "discovery") !== "discovery") continue;
       try {
         await executeDiscoveryBuy(v, id, opp.token);
       } catch (e) {

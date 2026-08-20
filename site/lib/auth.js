@@ -38,6 +38,15 @@ function buildBuyOpportunityMessage(vaultAddress, opportunityId, timestampMs) {
   return `Icaria: buy opportunity ${opportunityId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape, for "buy this exact token and amount from Ask Icaria" - binds
+ * the signature to the specific token AND amount, unlike the opportunity-id
+ * buy above, since there's no pre-existing catalog entry to reference; a
+ * signature for 1000 ETH of token A must never authorize any other amount
+ * or token. */
+function buildAskBuyMessage(vaultAddress, token, amountPls, timestampMs) {
+  return `Icaria: buy ${amountPls} ETH of ${token.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 function checkFresh(timestampMs) {
   if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
   const age = Date.now() - timestampMs;
@@ -99,7 +108,13 @@ async function authorizeBuyOpportunity({ vaultAddress, opportunityId, timestampM
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeAskBuy({ vaultAddress, token, amountPls, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildAskBuyMessage(vaultAddress, token, amountPls, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, MESSAGE_MAX_AGE_MS,
 };

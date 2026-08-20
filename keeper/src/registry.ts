@@ -112,6 +112,87 @@ export interface DiscoveryConfig {
   requireOwnerRenounced: boolean;
 }
 
+/**
+ * Hunter Bot: hunts technical dip-buying setups (RSI oversold, a bullish
+ * MACD cross, a Bollinger lower-band touch) across every watched token,
+ * trading a dedicated slice of the vault's WETH rather than the whole
+ * balance - `allocatedPls` caps how much of the vault this bot can ever have
+ * deployed at once (freed back as positions close, not a lifetime spend
+ * cap), so a bad run stays contained to the amount the owner chose to risk
+ * on it, same spirit as "give it $100 and see what it does."
+ *
+ * A technical setup is not a safety check. Before anything executes, a
+ * candidate still runs the same honeypot/tax/LP-lock/renounce screen every
+ * other bot runs, AND a liquidity-coherence check (see indicators.ts's
+ * liquidityDropIsSuspicious) that catches the specific trap that motivated
+ * this bot: a token whose price cratered because its liquidity was pulled,
+ * which looks exactly like an oversold dip to pure price/RSI math. That
+ * check is not configurable - it always runs.
+ *
+ * `requireAiApproval` adds one more layer on top of the mechanical checks:
+ * a Claude API call (see ai.ts) that judges the whole picture together
+ * before an autoBuy fires. It never substitutes for the mechanical checks
+ * above, and with no ANTHROPIC_API_KEY configured it fails safe - no
+ * verdict means no auto-buy, never a silent bypass.
+ *
+ * `maxPerTradePls` is a ceiling, not a fixed size - full authority up to
+ * that amount, not "always spend exactly this." When requireAiApproval is
+ * on, the AI's own verdict decides how much of the ceiling to actually use
+ * (see ai.ts's assess()), spending less when its confidence is lower. With
+ * requireAiApproval off there is no sizing judgment to defer to, so the
+ * bot simply spends the full ceiling every time.
+ *
+ * `exitMode` chooses how a position this bot opens gets managed:
+ *   - "limited": takeProfitPct/stopLossPct/trailingStopPct/timeExitMin all
+ *     apply exactly as configured - the same fixed-target exit every other
+ *     bot in this codebase uses.
+ *   - "full": the AI periodically re-judges the open position (see ai.ts's
+ *     assessExit, hunter.ts's reviewFullModePositions) and decides when to
+ *     exit - it can ride a winner past what a fixed take-profit would have
+ *     locked in. takeProfitPct/trailingStopPct/timeExitMin are not applied
+ *     in this mode; stopLossPct still is, unconditionally, as a floor the
+ *     AI's judgment cannot override or remove.
+ *
+ * Detection here is V2-only, on purpose, not an oversight - same reasoning
+ * as DiscoveryConfig above (see keeper/src/discovery.ts's module comment):
+ * this keeper's price-history/candle collection only ever samples V2 pair
+ * reserves, so every token Hunter Bot evaluates is V2-quoted by
+ * construction. The BUY side is still vault-kind aware (see hunter.ts's
+ * executeHunterBuy), mirroring the identical "detection is V2-only,
+ * execution is venue-aware" tradeoff Discovery Bot already made on this
+ * repo, for the identical reason.
+ */
+export interface HunterConfig {
+  enabled: boolean;
+  mode: "notify" | "autoBuy";
+  allocatedPls: number;   // dedicated bankroll deployed at once. 0 disables.
+  maxPerTradePls: number;
+  maxPerDay: number;
+  exitMode: "limited" | "full";
+
+  // At least one enabled trigger must fire for a candidate to qualify.
+  requireRsi: boolean;
+  rsiOversold: number;         // RSI(14) at or below this = oversold
+  requireMacdCross: boolean;   // a bullish MACD crossover just occurred
+  requireBollinger: boolean;
+  bollingerPercentBMax: number; // at or below this %B = riding the lower band
+
+  minLiquidityPls: number;
+
+  maxBuyTaxBps: number;
+  maxSellTaxBps: number;
+  requireLpLock: boolean;
+  requireOwnerRenounced: boolean;
+
+  requireAiApproval: boolean;
+  minAiConfidence: "low" | "medium" | "high";
+
+  takeProfitPct: number;
+  stopLossPct: number;
+  trailingStopPct: number;
+  timeExitMin: number;
+}
+
 export interface TradingRule {
   enabled: boolean;
   token: string;
@@ -139,6 +220,7 @@ export interface VaultRecord {
   snipes: TargetSnipe[];
   limitOrders: LimitOrder[];
   discovery: DiscoveryConfig;
+  hunter: HunterConfig;
   // Never let one token exceed this share of the vault's value. The single most
   // important safety setting: without it a dip-buying rule tips the whole vault
   // into one falling token. 0 disables (not recommended).
@@ -169,20 +251,32 @@ const DEFAULT_DISCOVERY: DiscoveryConfig = {
   maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true, requireOwnerRenounced: false,
 };
 
+const DEFAULT_HUNTER: HunterConfig = {
+  enabled: false, mode: "notify", allocatedPls: 0, maxPerTradePls: 0, maxPerDay: 3,
+  exitMode: "limited",
+  requireRsi: true, rsiOversold: 30, requireMacdCross: true,
+  requireBollinger: true, bollingerPercentBMax: 0.15,
+  minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  requireLpLock: true, requireOwnerRenounced: false,
+  requireAiApproval: true, minAiConfidence: "medium",
+  takeProfitPct: 40, stopLossPct: 25, trailingStopPct: 0, timeExitMin: 0,
+};
+
 const cache = new Map<string, VaultRecord>();
 
 interface RawConfig {
   launch?: Partial<LaunchConfig>; rules?: TradingRule[]; snipes?: TargetSnipe[];
-  limitOrders?: LimitOrder[]; discovery?: Partial<DiscoveryConfig>; maxHoldingPct?: number;
+  limitOrders?: LimitOrder[]; discovery?: Partial<DiscoveryConfig>; hunter?: Partial<HunterConfig>;
+  maxHoldingPct?: number;
 }
 type LoadedConfig = {
   launch: LaunchConfig; rules: TradingRule[]; snipes: TargetSnipe[];
-  limitOrders: LimitOrder[]; discovery: DiscoveryConfig; maxHoldingPct: number;
+  limitOrders: LimitOrder[]; discovery: DiscoveryConfig; hunter: HunterConfig; maxHoldingPct: number;
 };
 
 const EMPTY: LoadedConfig = {
   launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [],
-  discovery: { ...DEFAULT_DISCOVERY }, maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+  discovery: { ...DEFAULT_DISCOVERY }, hunter: { ...DEFAULT_HUNTER }, maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
 };
 
 function shape(raw: RawConfig): LoadedConfig {
@@ -192,6 +286,7 @@ function shape(raw: RawConfig): LoadedConfig {
     snipes: (raw.snipes ?? []).filter((s) => s.enabled && s.amountPls > 0),
     limitOrders: (raw.limitOrders ?? []).filter((o) => o.enabled && o.id),
     discovery: { ...DEFAULT_DISCOVERY, ...(raw.discovery ?? {}) },
+    hunter: { ...DEFAULT_HUNTER, ...(raw.hunter ?? {}) },
     maxHoldingPct: raw.maxHoldingPct ?? DEFAULT_MAX_HOLDING_PCT,
   };
 }
@@ -277,8 +372,8 @@ export async function refresh(): Promise<VaultRecord[]> {
       const [owner, executor, paused] = await Promise.all([v.owner(), v.executor(), v.paused()]);
       const executorOk =
         String(executor).toLowerCase() === (process.env.KEEPER_ADDRESS || "").toLowerCase();
-      const { launch, rules, snipes, limitOrders, discovery, maxHoldingPct } = await loadConfig(addr);
-      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, limitOrders, discovery, maxHoldingPct, kind };
+      const { launch, rules, snipes, limitOrders, discovery, hunter, maxHoldingPct } = await loadConfig(addr);
+      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, limitOrders, discovery, hunter, maxHoldingPct, kind };
       cache.set(addr.toLowerCase(), rec);
       return rec;
     } catch (e) {

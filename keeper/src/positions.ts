@@ -7,27 +7,34 @@ import { findBestSellVenue, type Venue } from "./venues.js";
 import { registry } from "./registry.js";
 import { sellSignal } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
-import { db } from "./db.js";
+import { db, aiExitRequests } from "./db.js";
 import { log } from "./log.js";
 
 export interface OpenArgs {
-  vault: string; bot: "launch" | "trading" | "snipe" | "limit" | "discovery"; token: string;
+  vault: string; bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask"; token: string;
   spentPls: number; tokensOut: bigint;
   tpPct: number; slPct: number; timeExitMin: number;
   trailPct?: number;
+  /** Hunter Bot only - "limited" (fixed tp/sl/trailing/time, the default
+   * everywhere else) or "full" (AI periodically re-judges whether to hold
+   * or sell, on top of the same mandatory stop-loss - see hunter.ts's
+   * reviewFullModePositions). Set once at open time so a later settings
+   * change never retroactively changes how an already-open position is
+   * managed. Undefined/null for every non-Hunter position. */
+  exitMode?: "limited" | "full" | null;
 }
 
 export function openPosition(a: OpenArgs): void {
   const tokens = Number(formatEther(a.tokensOut));
   const entry = tokens > 0 ? a.spentPls / tokens : 0;
   db.prepare(`INSERT INTO positions
-    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open')`).run(
+    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status,exit_mode)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open',?)`).run(
     a.vault.toLowerCase(), a.bot, a.token.toLowerCase(), Math.floor(Date.now() / 1000),
     // high_water is the peak value/cost ratio, so it starts at 1.0 (break even),
     // not at the entry price. Trailing stops read it as a ratio.
     entry, a.spentPls, a.tokensOut.toString(), 1.0,
-    a.tpPct, a.slPct || null, a.trailPct || null, a.timeExitMin || null,
+    a.tpPct, a.slPct || null, a.trailPct || null, a.timeExitMin || null, a.exitMode ?? null,
   );
 }
 
@@ -35,7 +42,7 @@ interface Row {
   id: number; vault: string; token: string; opened_at: number; entry_price: number;
   spent_pls: number; tokens_held: string; high_water: number;
   tp_pct: number | null; sl_pct: number | null; trail_pct: number | null; time_exit_min: number | null;
-  fail_count: number | null;
+  fail_count: number | null; exit_mode: string | null;
 }
 
 /**
@@ -161,8 +168,15 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
   }
 }
 
+/**
+ * `forceReason`, when non-null, closes the position immediately regardless
+ * of what sellSignal() says and is used verbatim as the recorded
+ * close_reason - either an owner-requested manual close, or (Auto Full
+ * Hunter positions only) the AI's own exit judgment. Null means "no
+ * override," the normal tp/sl/trailing/time check applies.
+ */
 async function checkAndClose(
-  r: Row, now: number, manualClose: boolean, vaultKind: "v2" | "multiVenue" | "multiVenueV4",
+  r: Row, now: number, forceReason: string | null, vaultKind: "v2" | "multiVenue" | "multiVenueV4",
 ): Promise<"priced" | "unpriceable" | "retired"> {
   const m = await markToMarket(r);
   if (!m.ok) {
@@ -187,10 +201,10 @@ async function checkAndClose(
     db.prepare(`UPDATE positions SET high_water=? WHERE id=?`).run(highWater, r.id);
   }
 
-  // An owner-requested close always wins over whatever the normal exit
-  // targets say - they asked for it directly, so it doesn't need to clear
+  // An owner-requested close or an AI exit judgment always wins over
+  // whatever the normal exit targets say - it doesn't need to clear
   // take-profit/stop-loss/trailing/time thresholds first.
-  const reason = manualClose ? "closed by owner" : sellSignal(
+  const reason = forceReason ?? sellSignal(
     { tpPct: r.tp_pct, slPct: r.sl_pct, trailPct: r.trail_pct, timeExitMin: r.time_exit_min,
       openedAt: r.opened_at, highWater },
     ratio, now,
@@ -223,6 +237,7 @@ async function checkAndClose(
   if (res.ok) {
     db.prepare(`UPDATE positions SET status='closed',closed_at=?,proceeds_pls=?,close_reason=? WHERE id=?`)
       .run(now, Number(formatEther(res.amountOut)), reason, r.id);
+    aiExitRequests.clear(r.id);
     return "priced";
   }
 
@@ -268,13 +283,19 @@ export async function tick(): Promise<void> {
     if (list) list.push(r); else byVault.set(key, [r]);
   }
 
+  const aiExitReasons = new Map<number, string>(
+    (db.prepare("SELECT position_id, reason FROM ai_exit_requests").all() as { position_id: number; reason: string }[])
+      .map((r) => [r.position_id, `AI exit: ${r.reason}`]),
+  );
+
   const outcomes: { id: number; token: string; outcome: "priced" | "unpriceable" | "retired" }[] = [];
   await mapLimit([...byVault.values()], CFG.keeperConcurrency, async (vaultRows) => {
     const vaultAddr = vaultRows[0]!.vault;
     const closeIds = await fetchCloseRequests(vaultAddr);
     const vaultKind = registry.get(vaultAddr)?.kind ?? "v2";
     for (const r of vaultRows) {
-      const outcome = await checkAndClose(r, now, closeIds.has(r.id), vaultKind);
+      const forceReason = closeIds.has(r.id) ? "closed by owner" : (aiExitReasons.get(r.id) ?? null);
+      const outcome = await checkAndClose(r, now, forceReason, vaultKind);
       outcomes.push({ id: r.id, token: r.token, outcome });
     }
   });

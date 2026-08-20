@@ -1,0 +1,25 @@
+{
+  "name": "trading-bot",
+  "version": "1.0.0",
+  "description": "Automated trading bots for PulseChain. Read **HANDOFF.md** first.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node scripts/compile.js && hardhat test --no-compile"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/45jf5v5jvp-prog/Trading-bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/45jf5v5jvp-prog/Trading-bot/issues"
+  },
+  "homepage": "https://github.com/45jf5v5jvp-prog/Trading-bot#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.29.1",
+    "solc": "^0.8.24"
+  }
+}

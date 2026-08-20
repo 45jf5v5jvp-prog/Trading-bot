@@ -49,6 +49,12 @@ async function v4Candidates(token: string, amountIn: bigint, sellingToken: boole
   if (!CFG.poolManager || !CFG.probeAddressV4) return [];
   const out: Venue[] = [];
   for (const row of v4Pools.forToken(token)) {
+    // The hook allowlist gates BUYS here too, not just discovery - pools
+    // recorded before the allowlist was set (or via another pool of an
+    // allowed token) must not become buyable through the retry path.
+    // Sells are exempt on purpose: an exit from something already held
+    // must never be blocked by a config change made afterwards.
+    if (!sellingToken && CFG.v4HooksAllowlist.length && !CFG.v4HooksAllowlist.includes(row.hooks.toLowerCase())) continue;
     const key = rowToKey(row);
     // Direction: zeroForOne means currency0 in, currency1 out. Buying spends
     // the base currency; selling spends the token.

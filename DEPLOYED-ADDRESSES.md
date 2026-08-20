@@ -13,32 +13,48 @@ sell, not raw token units - see `contracts/BotVault.sol` commit `869ecc1`).
 
 | Contract | Address |
 | --- | --- |
-| BotVault (implementation, never used directly) | `0x6bAd39Da9B4741bB34cd8474402AdD402665e110` |
-| VaultFactory | `0xf86d01b997CAFE018b72Ff0b7602240a099c1E11` |
+| BotVault (implementation, never used directly) | `0x586dcE2185dba2CBA61a804c6c116F366D7f6554` |
+| VaultFactory | `0x5B5d3B68814857695F3Fedfe0543F03166Bc73e0` |
 | SwapProbe | *(unchanged from v1 - `0xdE18E7b40e9319432318090b7CfbdAa1e67bA597`, not affected by the BotVault fix)* |
 
 ### VaultFactory constructor arguments used
 | arg | value |
 | --- | --- |
-| `_impl` | `0x6bAd39Da9B4741bB34cd8474402AdD402665e110` |
+| `_impl` | `0x586dcE2185dba2CBA61a804c6c116F366D7f6554` |
 | `_executor` | `0xA5519278B6be31545b0318B88e476Bdf13A1567e` (the current, non-compromised keeper wallet - correct by default now, no `setExecutor` workaround needed for new vaults) |
 | `_treasury` | `0x22B7faCA9f94ed2645364AbEe11F117B56b6469a` |
 | `_router` (PulseX V2) | `0x165C3410fC91EF562C50559f7d2289fEbed552d9` |
 | `_baseToken` (WPLS) | `0xA1077a294dDE1B09bB078844df40758a5D0f9a27` |
 | `_feeBps` | `25` (0.25%, can only be lowered from here, never raised) |
 
-**Not yet independently verified against scan.pulsechain.com by anyone other
-than the deployer's own report of the addresses** - verify both contracts
-there (bytecode, constructor args, and that `VaultFactory.executor()` really
-reads back as the current wallet above) before depositing anything real.
+**Verified working, not just deployed:** Remix's environment badge read
+"PulseChain" for both contracts (the account balance showed PLS, matching the
+working v1 deployment's account), and calling the new VaultFactory directly
+in Remix confirmed `vaultCount()` returns `0` and `executor()` reads back
+`0xA5519278B6be31545b0318B88e476Bdf13A1567e` exactly. That's on-chain
+confirmation, not just a reported address. Still not yet checked against
+scan.pulsechain.com's own contract page (bytecode/verification) - worth doing
+before depositing anything beyond the standard tiny test amount.
+
+**A first attempt at this redeploy landed on the wrong chain entirely** -
+`0x6bAd39Da9B4741bB34cd8474402AdD402665e110` (BotVault) and
+`0xf86d01b997CAFE018b72Ff0b7602240a099c1E11` (VaultFactory) were deployed
+while Remix's injected provider was pointed at Robinhood Chain, not
+PulseChain (MetaMask had been left switched from earlier, unrelated work).
+Those two addresses have no PulseChain contract behind them - pointing
+`keeper/.env` at the VaultFactory one briefly crash-looped the keeper
+(`vaultCount()` returning undecodable empty data) until it was reverted back
+to v1 and the redeploy was redone on the correct network. Recorded here only
+so nobody mistakes those two addresses for real PulseChain contracts later.
 
 ### Next steps
-1. Verify both v2 contracts on https://scan.pulsechain.com, including
-   reading `VaultFactory.executor()` back to confirm it matches the current
-   keeper wallet, not the compromised one.
+1. Verify both v2 contracts on https://scan.pulsechain.com (contract page,
+   bytecode) as a second confirmation beyond the Remix checks above.
 2. Put the new VaultFactory address into `keeper/.env`:
-   `VAULT_FACTORY=0xf86d01b997CAFE018b72Ff0b7602240a099c1E11`
-   (`PROBE_ADDRESS` is unchanged - SwapProbe wasn't redeployed.)
+   `VAULT_FACTORY=0x5B5d3B68814857695F3Fedfe0543F03166Bc73e0`
+   (`PROBE_ADDRESS` is unchanged - SwapProbe wasn't redeployed.) Restart with
+   `pm2 restart icaria-keeper --update-env` (a plain `pm2 restart` reuses
+   pm2's cached environment snapshot rather than rereading `.env`).
 3. Call `createVault([])` on the new VaultFactory from your real long-term
    wallet, then `vaultOf(yourAddress)` to get its address. Confirm its
    `executor()` is already correct - no manual `setExecutor` call needed.

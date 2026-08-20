@@ -16,7 +16,13 @@ import Sun from "../components/Sun";
 function fmtBalance(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return v;
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: CHAIN.balanceMaxDecimals });
+  // Truncated, never rounded. Rounding up shows a number a hair above the
+  // real balance, and typing that number back in makes an exact-balance
+  // withdrawal fail - found the hard way. What's displayed must always be
+  // withdrawable as typed.
+  const scale = 10 ** CHAIN.balanceMaxDecimals;
+  const floored = Math.floor(n * scale) / scale;
+  return floored.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: CHAIN.balanceMaxDecimals });
 }
 
 export default function Dashboard() {
@@ -290,6 +296,12 @@ export default function Dashboard() {
               <div className="field-inline">
                 <label>Amount ({CHAIN.baseSymbol})</label>
                 <input type="number" onFocus={(e) => e.target.select()} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
+                {/* The exact on-chain balance to full precision - the displayed
+                    balance is truncated for reading and typing it back in can
+                    never quite empty the vault. */}
+                <button type="button" className="btn btn-small" onClick={() => setAmount(vaultInfo.baseBalance)}>
+                  Max
+                </button>
               </div>
               <div className="row">
                 <button className="btn btn-primary" onClick={handleDeposit} disabled={txBusy || !amount}>

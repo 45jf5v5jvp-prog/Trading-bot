@@ -186,25 +186,72 @@ function HoldingCard({ p, onClose, closeState }) {
   );
 }
 
+const BOT_LABELS = {
+  all: "All", launch: "Launch", discovery: "Discovery", hunter: "Hunter",
+  trading: "Rules", snipe: "Snipe", limit: "Limit Order", ask: "Ask Icaria",
+};
+
+/** Every bot identifier actually present in this vault's history, in a
+ * fixed display order - so the filter row only ever shows bots that have
+ * actually done something here, never a wall of empty tabs for bots this
+ * vault has never used. */
+function botsPresent(history) {
+  const seen = new Set();
+  for (const p of history.positions.open) seen.add(p.bot);
+  for (const p of history.positions.closed) seen.add(p.bot);
+  for (const f of history.fires) seen.add(f.bot);
+  return Object.keys(BOT_LABELS).filter((k) => k !== "all" && seen.has(k));
+}
+
 /** Shows what the keeper has actually done for this vault - the answer to
  * "is it working?" without needing to SSH into the server and read logs.
  * Open positions are the main event: live value and P/L, refreshed on every
- * poll (see index.js), so this is the "should I close this?" screen. */
+ * poll (see index.js), so this is the "should I close this?" screen. The bot
+ * filter lets someone check one bot at a time - e.g. "just show me what
+ * Discovery Bot is doing" - without hiding anything, since "All" stays the
+ * default view.
+ */
 export default function HistoryPanel({ history, onClosePosition, closeStates }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
   const [showAllClosed, setShowAllClosed] = useState(false);
   const [showAllTrades, setShowAllTrades] = useState(false);
+  const [botFilter, setBotFilter] = useState("all");
   if (!history) return null;
-  const { positions, fires } = history;
   const unit = CHAIN.nativeSymbol;
-  const noHistoryYet = positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0;
+  const noHistoryYet = history.positions.open.length === 0 && history.positions.closed.length === 0 && history.fires.length === 0;
+  const available = botsPresent(history);
+  const matches = (bot) => botFilter === "all" || bot === botFilter;
+  const positions = {
+    open: history.positions.open.filter((p) => matches(p.bot)),
+    closed: history.positions.closed.filter((p) => matches(p.bot)),
+  };
+  const fires = history.fires.filter((f) => matches(f.bot));
   const priced = positions.open.filter((p) => !hasNoLiquidity(p));
   const noLiquidity = positions.open.filter(hasNoLiquidity);
 
   return (
     <div>
-      <div className="section-label">Current Holdings</div>
+      <div className="row-between" style={{ marginBottom: available.length > 1 ? 10 : 0 }}>
+        <div className="section-label" style={{ marginBottom: 0 }}>Current Holdings</div>
+        {available.length > 1 && (
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {["all", ...available].map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={botFilter === key ? "btn btn-small btn-primary" : "btn btn-small"}
+                onClick={() => setBotFilter(key)}
+              >
+                {BOT_LABELS[key]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       {noHistoryYet && <p className="hint">No trades yet. This is normal for a brand-new vault - the bot buys on its own schedule once its settings are saved and it finds a launch that passes screening.</p>}
+      {!noHistoryYet && botFilter !== "all" && positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0 && (
+        <p className="hint">Nothing from {BOT_LABELS[botFilter]} yet.</p>
+      )}
       {!noHistoryYet && positions.open.length === 0 && (
         <p className="hint">Nothing open right now. The bot isn't holding any tokens.</p>
       )}

@@ -20,6 +20,7 @@ import HunterSettings from "../components/HunterSettings";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
 import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
+import PnlSnapshot from "../components/PnlSnapshot";
 import Sun from "../components/Sun";
 
 /** Balance in the chain's wrapped base token. The per-chain decimal budget
@@ -513,6 +514,10 @@ export default function Dashboard() {
               <button className="btn btn-danger" onClick={handleWithdrawToken} disabled={tokenWithdrawBusy || !tokenWithdrawAddr}>
                 {tokenWithdrawBusy ? "Working..." : "Withdraw This Token"}
               </button>
+            </div>
+
+            <div className="panel">
+              <PnlSnapshot history={history} />
             </div>
 
             <div className="panel">

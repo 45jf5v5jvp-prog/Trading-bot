@@ -362,6 +362,18 @@ export default function Dashboard() {
                 <button className={dirty ? "btn btn-primary" : "btn"} onClick={handleSave} disabled={saving}>
                   {saving ? "Saving..." : dirty ? "Save All Settings (unsaved changes)" : "Save All Settings"}
                 </button>
+
+                {/* Pinned to the viewport while anything is unsaved - the top-of-page
+                    warning scrolls away, and an unsaved launch bot someone believes
+                    is live is the single most confusing failure this UI can produce. */}
+                {dirty && (
+                  <div className="unsaved-bar">
+                    <span>Your changes are NOT live yet - the bot is still running the old settings.</span>
+                    <button className="btn btn-primary btn-small" onClick={handleSave} disabled={saving}>
+                      {saving ? "Saving..." : "Save now"}
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>

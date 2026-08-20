@@ -193,6 +193,7 @@ function HoldingCard({ p, onClose, closeState }) {
 export default function HistoryPanel({ history, onClosePosition, closeStates }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
   const [showAllClosed, setShowAllClosed] = useState(false);
+  const [showAllTrades, setShowAllTrades] = useState(false);
   if (!history) return null;
   const { positions, fires } = history;
   const unit = CHAIN.nativeSymbol;
@@ -253,9 +254,9 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
             <table>
               <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount ({unit})</th><th>Tx</th></tr></thead>
               <tbody>
-                {fires.map((f) => (
+                {(showAllTrades ? fires : fires.slice(0, 8)).map((f) => (
                   <tr key={f.id}>
-                    <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTs(f.ts)}</td>
+                    <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTsShort(f.ts)}</td>
                     <td>{fmtAmount(f.amount)}</td>
                     <td>{f.tx_hash
                       ? (EXPLORER_URL
@@ -267,6 +268,12 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
               </tbody>
             </table>
           </div>
+          {fires.length > 8 && (
+            <button type="button" className="btn btn-small" style={{ marginTop: 8 }}
+              onClick={() => setShowAllTrades((s) => !s)}>
+              {showAllTrades ? "Show fewer" : `Show all ${fires.length}`}
+            </button>
+          )}
         </>
       )}
     </div>

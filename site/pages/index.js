@@ -567,6 +567,7 @@ export default function Dashboard() {
                   <DiscoverySettings
                     discovery={config.discovery}
                     onChange={(discovery) => updateConfig({ ...config, discovery })}
+                    vaultBalance={Number(vaultInfo.baseBalance) || 0}
                   />
                 </div>
 

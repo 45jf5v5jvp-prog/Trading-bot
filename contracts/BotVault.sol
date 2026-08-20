@@ -253,7 +253,7 @@ contract BotVault {
         uint256 gasFee
     ) external onlyExecutor live nonReentrant returns (uint256 amountOut) {
         require(path.length >= 2, "bad path");
-        require(amountIn > 0 && amountIn <= maxTradeSize, "size out of bounds");
+        require(amountIn > 0, "zero amount");
         require(block.timestamp >= lastTradeAt + minInterval, "cooldown");
         // Constrain what can be SPENT, not what can be RECEIVED. A token that
         // launched thirty seconds ago cannot be on an allowlist written earlier,
@@ -292,8 +292,18 @@ contract BotVault {
         // amountIn is denominated in the token being sold, so comparing it to a
         // gas figure in WPLS compares two different units and means nothing. That
         // check therefore moves below, against the actual proceeds.
+        // maxTradeSize is the owner's risk ceiling, meant in WPLS terms. On a
+        // buy amountIn already IS WPLS, so it is checked here, up front. On a
+        // sell amountIn is denominated in whatever token is being sold, which
+        // can be worth wildly more or less than WPLS per unit, so checking it
+        // here would bound the wrong quantity. The sell-side check instead
+        // runs below against amountOut, once the trade's actual WPLS value is
+        // known.
         bool payingIn = tokenIn == baseToken;
-        if (payingIn) require(gasFee <= (amountIn * maxGasFeeBps) / 10_000, "gas above your share limit");
+        if (payingIn) {
+            require(amountIn <= maxTradeSize, "size out of bounds");
+            require(gasFee <= (amountIn * maxGasFeeBps) / 10_000, "gas above your share limit");
+        }
         uint256 fee = (amountIn * feeBps) / 10_000;
         uint256 swapAmount = amountIn;
 
@@ -341,6 +351,10 @@ contract BotVault {
         if (!payingIn) {
             // Selling. Charges come out of the WPLS that just arrived.
             require(tokenOut == baseToken, "sell must settle in base token");
+            // Same risk ceiling as the buy-side check above, applied to the
+            // WPLS actually received instead of the (differently-denominated)
+            // token that was sold.
+            require(amountOut <= maxTradeSize, "size out of bounds");
             require(gasFee <= (amountOut * maxGasFeeBps) / 10_000, "gas above your share limit");
             uint256 outFee = (amountOut * feeBps) / 10_000;
             require(outFee + gasFee < amountOut, "charges exceed proceeds");

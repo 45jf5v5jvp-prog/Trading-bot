@@ -217,6 +217,7 @@ export default function Dashboard() {
           <Sun size={26} />
           <span className="brand wordmark">ICARIA</span>
           <span className="wordmark-sub">Bots</span>
+          <span className="beta-badge">BETA</span>
         </div>
 
         {initializing && !account && (

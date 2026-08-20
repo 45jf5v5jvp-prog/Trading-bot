@@ -70,6 +70,18 @@ h1, h2, h3 { font-weight: 600; }
   margin-left: 4px;
 }
 
+.beta-badge {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--amber);
+  border-radius: 999px;
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .section-label {
   font-family: 'Montserrat', system-ui, sans-serif;
   font-size: 11px;

@@ -227,6 +227,18 @@ td { color: var(--text); }
 
 /* Closed positions: dense single-line rows. The reason gets whatever width
    is left and ellipsizes - the full sentence lives on the row's title. */
+
+/* Unsaved-changes bar: fixed to the viewport bottom so it cannot scroll out
+   of sight. Amber on dark panel, one line, one action. */
+.unsaved-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  flex-wrap: wrap; padding: 12px 16px;
+  background: var(--panel); border-top: 2px solid var(--amber);
+  color: var(--amber); font-size: 13.5px; font-weight: 600;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.45);
+}
+
 .closed-list { font-size: 13px; }
 .closed-row {
   display: flex; align-items: baseline; gap: 10px;

@@ -36,6 +36,19 @@ setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spen
   VALUES (?,?,?,?,?,?,?,?,?)`).run(OTHER_VAULT, "trading", "0x" + "c".repeat(40), 1000, 1, 50, "0", 1, "open");
 setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
   .run(VAULT, "trading", "0x" + "a".repeat(40), 1000, 100, 0.25, "0xabc123");
+
+// Same schema as keeper/src/db.ts's v4_pools - present on a Robinhood
+// keeper.db, absent on a PulseChain one (see the "no such table" test below).
+setup.exec(`
+  CREATE TABLE v4_pools (
+    token TEXT NOT NULL, currency0 TEXT NOT NULL, currency1 TEXT NOT NULL,
+    fee INTEGER NOT NULL, tick_spacing INTEGER NOT NULL, hooks TEXT NOT NULL, first_seen INTEGER NOT NULL
+  );
+`);
+const V4_TOKEN = "0x" + "d".repeat(40);
+setup.prepare(`INSERT INTO v4_pools (token,currency0,currency1,fee,tick_spacing,hooks,first_seen)
+  VALUES (?,?,?,?,?,?,?)`).run(V4_TOKEN, V4_TOKEN, "0x" + "e".repeat(40), 3000, 60, "0x" + "0".repeat(40), 1000);
+
 setup.close();
 
 test("returns positions and fires for a vault that has real trading history", () => {
@@ -77,6 +90,31 @@ test("a missing keeper.db file (no keeper has run yet) returns empty results, no
   const { getPositions, getRecentFires } = require("../lib/keeperDb");
   assert.deepEqual(getPositions(VAULT), { open: [], closed: [] });
   assert.deepEqual(getRecentFires(VAULT), []);
+});
+
+test("getV4PoolsForToken returns the pools recorded for that exact token", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getV4PoolsForToken } = require("../lib/keeperDb");
+  const rows = getV4PoolsForToken(V4_TOKEN);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].fee, 3000);
+  assert.equal(getV4PoolsForToken("0x" + "1".repeat(40)).length, 0);
+});
+
+test("getV4PoolsForToken returns [] when the keeper.db predates V4 (no v4_pools table)", () => {
+  const NO_V4_DB = path.join(__dirname, "fake-keeper-no-v4.db");
+  for (const p2 of [NO_V4_DB, NO_V4_DB + "-wal", NO_V4_DB + "-shm"]) {
+    if (fs.existsSync(p2)) fs.unlinkSync(p2);
+  }
+  const noV4 = new Database(NO_V4_DB);
+  noV4.exec(`CREATE TABLE positions (id INTEGER PRIMARY KEY);`);
+  noV4.close();
+  process.env.KEEPER_DB_PATH = NO_V4_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getV4PoolsForToken } = require("../lib/keeperDb");
+  assert.deepEqual(getV4PoolsForToken(V4_TOKEN), []);
+  fs.unlinkSync(NO_V4_DB);
 });
 
 test("the connection is opened read-only - a write attempt must fail", () => {

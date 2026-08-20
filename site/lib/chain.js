@@ -39,6 +39,13 @@ const PRESETS = {
     router: "0x165C3410fC91EF562C50559f7d2289fEbed552d9",
     vaultFactory: "0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295",
     multiVenueVaultFactory: "",
+    // V3/V4 pricing addresses - PulseX has no V3 or V4 deployment, so these
+    // stay empty like the keeper's own FACTORY_V3/POOL_MANAGER do. Empty
+    // means "don't try this venue," not "broken."
+    factoryV3: "",
+    quoterV3: "",
+    poolManager: "",
+    probeAddressV4: "",
     // WPLS balances are in the millions - fractional dust is noise.
     balanceMaxDecimals: 2,
     valueMaxDecimals: 0,
@@ -63,6 +70,13 @@ const PRESETS = {
     router: "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
     vaultFactory: "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54",
     multiVenueVaultFactory: "",
+    // V3/V4 pricing addresses. Same "no fabricated defaults" convention as
+    // the keeper's own FACTORY_V3/POOL_MANAGER - unset until the matching
+    // NEXT_PUBLIC_* var is set on the deployment, matched to keeper/.env.
+    factoryV3: "",
+    quoterV3: "",
+    poolManager: "",
+    probeAddressV4: "",
     // ETH-scale amounts (a trade might be 0.0025) - 2 decimals would round
     // real money down to nothing.
     balanceMaxDecimals: 6,
@@ -96,6 +110,11 @@ const CHAIN = {
   router: process.env.NEXT_PUBLIC_ROUTER || p.router,
   vaultFactory: process.env.NEXT_PUBLIC_VAULT_FACTORY || p.vaultFactory,
   multiVenueVaultFactory: process.env.NEXT_PUBLIC_MULTI_VENUE_VAULT_FACTORY || p.multiVenueVaultFactory,
+  factoryV3: process.env.NEXT_PUBLIC_FACTORY_V3 || p.factoryV3,
+  quoterV3: process.env.NEXT_PUBLIC_QUOTER_V3 || p.quoterV3,
+  v3FeeTiers: (process.env.NEXT_PUBLIC_V3_FEE_TIERS || "500,3000,10000").split(",").map(Number),
+  poolManager: process.env.NEXT_PUBLIC_POOL_MANAGER || p.poolManager,
+  probeAddressV4: process.env.NEXT_PUBLIC_PROBE_ADDRESS_V4 || p.probeAddressV4,
   balanceMaxDecimals: p.balanceMaxDecimals,
   valueMaxDecimals: p.valueMaxDecimals,
   minLiquidityDefault: p.minLiquidityDefault,

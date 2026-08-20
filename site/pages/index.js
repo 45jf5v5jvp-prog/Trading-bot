@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
@@ -347,6 +348,7 @@ export default function Dashboard() {
           <span className="brand wordmark">ICARIA</span>
           <span className="wordmark-sub">Bots</span>
           <span className="beta-badge">BETA</span>
+          <Link href="/faq" style={{ marginLeft: "auto" }} className="btn btn-small">FAQ</Link>
         </div>
 
         {account && (
@@ -579,6 +581,7 @@ export default function Dashboard() {
                     opportunities={opportunities}
                     onBuy={handleBuyOpportunity}
                     buyStates={buyStates}
+                    onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}
                   />
                 </div>
 

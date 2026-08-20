@@ -161,7 +161,12 @@ async function evaluateToken(token: string, txHash: string, discoveryBlock: numb
     if (s.sellTaxBps > L.maxSellTaxBps) return;
     if (L.requireLpLock && s.lpLockedPct < 95) return;
     if (s.deployerPct > L.maxDeployerPct) return;
-    if (s.liqPls < L.minLiquidityPls) return;
+    // The absolute liquidity floor is a V2 reserves concept. V3/V4 screens
+    // have no reserves number to floor against (s.liqPls stays 0 there) and
+    // guard pool depth with the price-impact check instead - comparing that
+    // 0 against the floor here silently vetoed every V3/V4 buy for every
+    // vault with a nonzero floor.
+    if (venue.kind === "v2" && s.liqPls < L.minLiquidityPls) return;
     if (L.requireOwnerRenounced && !s.ownerRenounced) return;
 
     // Holding cap, same guard the rule bot uses. A fresh launch token has no

@@ -11,7 +11,7 @@ import { db } from "./db.js";
 import { log } from "./log.js";
 
 export interface OpenArgs {
-  vault: string; bot: "launch" | "trading" | "snipe"; token: string;
+  vault: string; bot: "launch" | "trading" | "snipe" | "limit"; token: string;
   spentPls: number; tokensOut: bigint;
   tpPct: number; slPct: number; timeExitMin: number;
   trailPct?: number;

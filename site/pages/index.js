@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
+import { loadPortfolio } from "../lib/loadPortfolio";
 import { closePosition } from "../lib/closePosition";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
 import SnipesList from "../components/SnipesList";
+import PortfolioPanel from "../components/PortfolioPanel";
+import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
@@ -34,6 +37,7 @@ export default function Dashboard() {
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState(null);
+  const [portfolio, setPortfolio] = useState(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
@@ -78,6 +82,17 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
+  // Same polling idea for the Portfolio panel - live balances/values for
+  // whatever tokens the saved limit orders reference.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const refresh = () => loadPortfolio(vaultAddress).then((p) => { if (!cancelled) setPortfolio(p.portfolio); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [vaultAddress]);
+
   // Same idea for the vault's balance/paused state - previously this only
   // updated right after a deposit/withdraw/pause, so the balance would sit
   // stale until the user did something. Silent failures here (e.g. the
@@ -96,8 +111,9 @@ export default function Dashboard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const [, h] = await Promise.all([refreshVaultInfo(vaultAddress), loadHistory(vaultAddress)]);
+      const [, h, p] = await Promise.all([refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress)]);
       setHistory(h);
+      setPortfolio(p.portfolio);
     } catch (e) {
       setStatus(`Refresh failed: ${e.message}`);
     } finally {
@@ -377,6 +393,17 @@ export default function Dashboard() {
                   <SnipesList
                     snipes={config.snipes ?? []}
                     onChange={(snipes) => updateConfig({ ...config, snipes })}
+                  />
+                </div>
+
+                <div className="panel">
+                  <PortfolioPanel portfolio={portfolio} />
+                </div>
+
+                <div className="panel">
+                  <LimitOrdersList
+                    orders={config.limitOrders ?? []}
+                    onChange={(limitOrders) => updateConfig({ ...config, limitOrders })}
                   />
                 </div>
 

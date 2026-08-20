@@ -1,5 +1,11 @@
-const { JsonRpcProvider, Contract, formatEther } = require("ethers");
+const { JsonRpcProvider, Contract, formatEther, formatUnits } = require("ethers");
 const { CHAIN } = require("./chain");
+
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+];
 
 // Server-side only, but the values are the same NEXT_PUBLIC_ chain config the
 // browser uses - one source of truth in lib/chain.js.
@@ -70,4 +76,37 @@ async function priceOpenPositions(openPositions) {
   }));
 }
 
-module.exports = { priceOpenPositions, quotePlsValue };
+/**
+ * Live snapshot of one token's presence in a vault, for the Portfolio panel:
+ * the vault's actual on-chain balance (decimals-correct) and what that
+ * balance is worth right now. Quoted through the same V2-only router as
+ * quotePlsValue/priceOpenPositions above - a token that only ever traded on
+ * V3/V4 (a fresh PONS launch, say) won't price here yet. A quote or balance
+ * failure returns nulls rather than throwing, so one bad/illiquid token
+ * doesn't blank the whole panel.
+ */
+async function getPortfolioToken(vaultAddress, token) {
+  const erc = new Contract(token, ERC20_ABI, getProvider());
+  try {
+    const [balanceRaw, decimals, symbol] = await Promise.all([
+      withTimeout(erc.balanceOf(vaultAddress), 8000),
+      withTimeout(erc.decimals(), 8000).catch(() => 18),
+      withTimeout(erc.symbol(), 8000).catch(() => "???"),
+    ]);
+    const balance = Number(formatUnits(balanceRaw, decimals));
+    let valuePls = null;
+    if (balanceRaw > 0n) {
+      try { valuePls = await quotePlsValue(token, balanceRaw.toString()); } catch { /* leave null */ }
+    }
+    return { token: token.toLowerCase(), symbol, decimals, balance, valuePls };
+  } catch {
+    return { token: token.toLowerCase(), symbol: "???", decimals: 18, balance: null, valuePls: null };
+  }
+}
+
+async function getPortfolio(vaultAddress, tokens) {
+  const distinct = [...new Set(tokens.map((t) => t.toLowerCase()))];
+  return Promise.all(distinct.map((t) => getPortfolioToken(vaultAddress, t)));
+}
+
+module.exports = { priceOpenPositions, quotePlsValue, getPortfolio };

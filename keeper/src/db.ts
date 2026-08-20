@@ -71,6 +71,14 @@ CREATE INDEX IF NOT EXISTS fires_vault_ts ON fires(vault, ts DESC);
 
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
+CREATE TABLE IF NOT EXISTS limit_fires (
+  vault    TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  ts       INTEGER NOT NULL,
+  tx_hash  TEXT,
+  PRIMARY KEY (vault, order_id)
+);
+
 CREATE TABLE IF NOT EXISTS v4_pools (
   token        TEXT NOT NULL,
   currency0    TEXT NOT NULL,
@@ -151,6 +159,24 @@ export const v4Pools = {
   forToken(token: string): V4PoolRow[] {
     return db.prepare("SELECT token,currency0,currency1,fee,tick_spacing,hooks FROM v4_pools WHERE token=?")
       .all(token.toLowerCase()) as V4PoolRow[];
+  },
+};
+
+/**
+ * One-shot marker for a filled limit order, keyed by the order's own id
+ * (not by token) - a vault can have several orders on the same token (a
+ * buy target and a sell target, or two sell targets at different prices),
+ * and each needs its own independent fired/not-fired state.
+ */
+export const limitFires = {
+  has(vault: string, orderId: string): boolean {
+    const r = db.prepare("SELECT 1 FROM limit_fires WHERE vault=? AND order_id=?")
+      .get(vault.toLowerCase(), orderId);
+    return Boolean(r);
+  },
+  record(vault: string, orderId: string, txHash?: string): void {
+    db.prepare(`INSERT OR REPLACE INTO limit_fires(vault,order_id,ts,tx_hash) VALUES(?,?,?,?)`)
+      .run(vault.toLowerCase(), orderId, Math.floor(Date.now() / 1000), txHash ?? null);
   },
 };
 

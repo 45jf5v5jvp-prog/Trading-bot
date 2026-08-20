@@ -80,6 +80,35 @@ function normalizeSnipe(s, i) {
   };
 }
 
+/**
+ * Validates and normalizes one limit order. Deliberately lighter than a
+ * rule or the launch screens - side, a target price, and an amount is the
+ * whole shape, since this targets a token the owner already trusts (holds
+ * or deposited themselves), not one the bot is discovering and judging.
+ */
+function normalizeLimitOrder(o, i) {
+  if (typeof o !== "object" || o === null) throw new Error(`limitOrders[${i}] must be an object`);
+  if (typeof o.id !== "string" || o.id.length === 0)
+    throw new Error(`limitOrders[${i}].id is required`);
+  if (typeof o.token !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(o.token))
+    throw new Error(`limitOrders[${i}].token must be a 0x-address`);
+  if (o.side !== "buy" && o.side !== "sell")
+    throw new Error(`limitOrders[${i}].side must be "buy" or "sell"`);
+  if (!isFiniteNumber(o.targetPrice) || o.targetPrice <= 0)
+    throw new Error(`limitOrders[${i}].targetPrice must be a positive number`);
+  if (!isFiniteNumber(o.amount) || o.amount < 0)
+    throw new Error(`limitOrders[${i}].amount must be a non-negative number`);
+  return {
+    id: o.id,
+    enabled: Boolean(o.enabled),
+    token: o.token.toLowerCase(),
+    side: o.side,
+    targetPrice: o.targetPrice,
+    amount: o.amount,
+    sellAll: Boolean(o.sellAll),
+  };
+}
+
 function normalizeLaunch(l) {
   const merged = { ...DEFAULT_LAUNCH, ...(l ?? {}) };
   for (const field of [
@@ -122,12 +151,18 @@ function normalizeConfig(body) {
   const snipesIn = Array.isArray(body.snipes) ? body.snipes : [];
   if (snipesIn.length > 50) throw new Error("too many snipe targets (max 50)");
   const snipes = snipesIn.map(normalizeSnipe);
+  const limitOrdersIn = Array.isArray(body.limitOrders) ? body.limitOrders : [];
+  if (limitOrdersIn.length > 50) throw new Error("too many limit orders (max 50)");
+  const limitOrders = limitOrdersIn.map(normalizeLimitOrder);
   const launch = normalizeLaunch(body.launch);
-  return { launch, rules, snipes, maxHoldingPct };
+  return { launch, rules, snipes, limitOrders, maxHoldingPct };
 }
 
 function emptyConfig() {
-  return { launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT };
+  return {
+    launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [],
+    maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+  };
 }
 
 module.exports = { normalizeConfig, emptyConfig, DEFAULT_LAUNCH, DEFAULT_MAX_HOLDING_PCT };

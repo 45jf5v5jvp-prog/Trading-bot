@@ -178,13 +178,29 @@ async function deployerPct(token: string, deployer: string | null): Promise<numb
 async function findDeployBlock(token: string, atOrBeforeBlock: number): Promise<number> {
   let lo = 0;
   let hi = atOrBeforeBlock;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    const code = await provider.getCode(token, mid);
-    if (code === "0x") lo = mid + 1;
-    else hi = mid;
+  try {
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const code = await provider.getCode(token, mid);
+      if (code === "0x") lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  } catch (e) {
+    // Non-archive RPCs (the chain's free public endpoint included) cannot
+    // serve getCode at a historical block - they answer "metadata is not
+    // found". This used to throw straight through screen()/screenV3()/
+    // screenV4(), killing the whole screen, so every launch died at the age
+    // check and nothing was ever bought. Fall back to "deployed at the
+    // pool's block" (age 0): permissive on this one guard, keeping the
+    // simulation/deployer/renounce/impact guards, which all work on a plain
+    // RPC. Point RPC_URL at an archive-capable endpoint to get the real age
+    // check back.
+    log("warn", "screen",
+      `Token age unknowable on this RPC (no historical state) - treating ${token} as fresh. ` +
+      `${(e as Error).message.slice(0, 80)}`);
+    return atOrBeforeBlock;
   }
-  return lo;
 }
 
 /**

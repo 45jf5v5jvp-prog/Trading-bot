@@ -89,8 +89,13 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
               : ""}
           </p>
         )}
+        {o.stale && !bought && (
+          <p className="hint" style={{ margin: "4px 0 0", color: "var(--red, #c0392b)" }}>
+            Expired: {o.staleReason || "too much time has passed since this was flagged."}
+          </p>
+        )}
       </div>
-      {passed && !bought && (
+      {passed && !bought && !o.stale && (
         <span className="row" style={{ gap: 6, alignItems: "center" }}>
           <input
             type="number"
@@ -111,6 +116,9 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
           </button>
         </span>
       )}
+      {passed && !bought && o.stale && (
+        <button type="button" className="btn btn-small" disabled title={o.staleReason || ""}>Expired</button>
+      )}
       {passed && bought && (
         <button type="button" className="btn btn-small" disabled>Bought</button>
       )}
@@ -125,7 +133,11 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
  * a request for whatever amount is typed into the box next to it - the
  * keeper picks the request up on its next pass, still subject to that bot's
  * own holding-cap (and, for Hunter, allocation) limits regardless of the
- * amount requested here.
+ * amount requested here. A notification that's gone stale (too old, or
+ * price has moved enough that the original signal no longer holds - see
+ * discovery.ts's refreshStaleness) shows why instead of a Buy Now button,
+ * rather than either silently disappearing or staying clickable on a signal
+ * that's no longer real.
  */
 export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, onCopyFallback }) {
   return (

@@ -153,6 +153,9 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   add("ai_confidence", "ai_confidence TEXT");
   add("ai_reasoning", "ai_reasoning TEXT");
   add("ai_suggested_amount_pls", "ai_suggested_amount_pls REAL");
+  add("price_at_detection", "price_at_detection REAL");
+  add("stale", "stale INTEGER NOT NULL DEFAULT 0");
+  add("stale_reason", "stale_reason TEXT");
 }
 
 export const meta = {
@@ -276,8 +279,17 @@ export interface NewOpportunity {
    * opportunity, so a human approving it spends what the AI sized, not the
    * full ceiling by default. */
   aiSuggestedAmountPls?: number | null;
+  /** The token's own price at the moment this opportunity was detected -
+   * not the move percentage, the actual price - so a later pass can tell
+   * whether it has since pulled back toward where it started (see
+   * refreshStaleness in discovery.ts). Null is fine (an old row from before
+   * this existed); staleness then falls back to the time-based check alone. */
+  priceAtDetection?: number | null;
 }
-export interface OpportunityRow extends NewOpportunity { id: number; ts: number; source: "discovery" | "hunter" }
+export interface OpportunityRow extends NewOpportunity {
+  id: number; ts: number; source: "discovery" | "hunter";
+  stale: boolean; staleReason: string | null;
+}
 
 /** Discovery Bot's and Hunter Bot's findings share one feed - one row per
  * candidate either detector found AND ran the full honeypot/tax/lock/
@@ -288,14 +300,15 @@ export interface OpportunityRow extends NewOpportunity { id: number; ts: number;
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
       o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
       o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
       o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
       o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
+      o.priceAtDetection ?? null,
     );
     return Number(info.lastInsertRowid);
   },
@@ -315,7 +328,8 @@ export const opportunities = {
              owner_renounced AS ownerRenounced, sellable, verdict, reason, narrative,
              source, rsi, macd_histogram AS macdHistogram, bollinger_percent_b AS bollingerPercentB,
              ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
-             ai_suggested_amount_pls AS aiSuggestedAmountPls
+             ai_suggested_amount_pls AS aiSuggestedAmountPls,
+             price_at_detection AS priceAtDetection, stale, stale_reason AS staleReason
       FROM opportunities WHERE id=?
     `).get(id) as any;
     if (!r) return undefined;
@@ -324,7 +338,26 @@ export const opportunities = {
       ownerRenounced: r.ownerRenounced === null ? null : Boolean(r.ownerRenounced),
       sellable: Boolean(r.sellable),
       aiRecommend: r.aiRecommend === null ? null : Boolean(r.aiRecommend),
+      stale: Boolean(r.stale),
     } as OpportunityRow;
+  },
+  /** Every notified-but-not-bought opportunity from the last `withinSec`
+   * seconds that isn't already marked stale - the working set
+   * refreshStaleness() re-checks each tick. Bounded to a recent window on
+   * purpose: an opportunity nobody acted on from days ago has long since
+   * been superseded by the TTL check anyway, so there's no reason to keep
+   * re-querying it forever. */
+  notifiedCandidatesForStaleness(withinSec: number): { id: number; token: string; ts: number; source: "discovery" | "hunter"; priceAtDetection: number | null }[] {
+    const since = Math.floor(Date.now() / 1000) - withinSec;
+    return db.prepare(`
+      SELECT DISTINCT o.id, o.token, o.ts, o.source, o.price_at_detection AS priceAtDetection
+      FROM opportunities o
+      JOIN discovery_actions a ON a.opportunity_id = o.id AND a.action = 'notified'
+      WHERE o.ts >= ? AND o.stale = 0
+    `).all(since) as any;
+  },
+  markStale(id: number, reason: string): void {
+    db.prepare("UPDATE opportunities SET stale=1, stale_reason=? WHERE id=?").run(reason, id);
   },
 };
 

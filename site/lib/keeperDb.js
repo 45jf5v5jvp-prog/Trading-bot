@@ -98,7 +98,9 @@ function getV4PoolsForToken(token) {
  * here, not just hidden client-side, so `limit` still returns that many
  * REAL candidates instead of being padded out with rejects. Returns [] if
  * the table doesn't exist (a keeper build that predates Discovery Bot)
- * rather than throwing.
+ * rather than throwing - same reasoning covers a keeper that predates the
+ * stale/stale_reason columns (deploy the keeper before the site to avoid
+ * a momentary empty feed after adding this feature).
  */
 function getOpportunities(limit = 50) {
   const d = getDb();
@@ -108,7 +110,7 @@ function getOpportunities(limit = 50) {
       `SELECT id, token, ts, price_move_pct, liq_growth_pct, liq_pls, buy_tax_bps, sell_tax_bps,
               lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative,
               source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning,
-              ai_suggested_amount_pls
+              ai_suggested_amount_pls, stale, stale_reason
        FROM opportunities WHERE verdict = 'pass' ORDER BY ts DESC LIMIT ?`,
     ).all(limit);
   } catch {

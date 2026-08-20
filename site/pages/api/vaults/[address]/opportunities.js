@@ -46,6 +46,8 @@ export default async function handler(req, res) {
     aiConfidence: o.ai_confidence ?? null,
     aiReasoning: o.ai_reasoning ?? null,
     aiSuggestedAmountPls: o.ai_suggested_amount_pls ?? null,
+    stale: Boolean(o.stale),
+    staleReason: o.stale_reason ?? null,
     action: actions[o.id]?.action ?? null,
     txHash: actions[o.id]?.txHash ?? null,
   }));

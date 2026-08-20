@@ -59,7 +59,8 @@ setup.exec(`
     buy_tax_bps INTEGER, sell_tax_bps INTEGER, lp_locked_pct REAL, owner_renounced INTEGER,
     sellable INTEGER NOT NULL, verdict TEXT NOT NULL, reason TEXT, narrative TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'discovery', rsi REAL, macd_histogram REAL, bollinger_percent_b REAL,
-    ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT, ai_suggested_amount_pls REAL
+    ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT, ai_suggested_amount_pls REAL,
+    price_at_detection REAL, stale INTEGER NOT NULL DEFAULT 0, stale_reason TEXT
   );
   CREATE TABLE discovery_actions (
     vault TEXT NOT NULL, opportunity_id INTEGER NOT NULL, ts INTEGER NOT NULL,
@@ -80,6 +81,15 @@ setup.prepare(`INSERT INTO opportunities
   .run(FAILED_OPP_TOKEN, 2100, 40, -60, 500000, 100, 100, 0, 0, 0, "fail", "liquidity pulled", "moved up 40% but liquidity fell");
 setup.prepare(`INSERT INTO discovery_actions (vault,opportunity_id,ts,action,tx_hash) VALUES (?,?,?,?,?)`)
   .run(VAULT, 1, 2001, "notified", null);
+
+// A passed screen that later went stale - still returned (verdict alone
+// gates what reaches the site, not staleness), so someone can see why they
+// missed it instead of it just vanishing.
+const STALE_OPP_TOKEN = "0x" + "8".repeat(40);
+setup.prepare(`INSERT INTO opportunities
+  (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,stale,stale_reason)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(STALE_OPP_TOKEN, 1900, 25, 18, 4000000, 100, 100, 100, 1, 1, "pass", "clear", "moved up 25%", 1, "Notified 130 minutes ago - too much time has passed to trust the original signal.");
 
 setup.close();
 
@@ -169,11 +179,23 @@ test("getOpportunities returns Discovery Bot findings newest first, passed scree
   delete require.cache[require.resolve("../lib/keeperDb")];
   const { getOpportunities } = require("../lib/keeperDb");
   const rows = getOpportunities();
-  assert.equal(rows.length, 1);
+  assert.equal(rows.length, 2); // the passed one, plus the passed-but-now-stale one - not the failed one
   assert.equal(rows[0].token, OPP_TOKEN);
   assert.equal(rows[0].verdict, "pass");
   assert.equal(rows[0].narrative, "moved up 30%");
+  assert.equal(rows[0].stale, 0);
   assert.ok(!rows.some((r) => r.token === FAILED_OPP_TOKEN), "a failed screen must never reach the site");
+});
+
+test("getOpportunities still returns a stale opportunity - staleness doesn't hide it, verdict does", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getOpportunities } = require("../lib/keeperDb");
+  const rows = getOpportunities();
+  const stale = rows.find((r) => r.token === STALE_OPP_TOKEN);
+  assert.ok(stale, "a stale-but-passed opportunity must still reach the site");
+  assert.equal(stale.stale, 1);
+  assert.match(stale.stale_reason, /too much time has passed/);
 });
 
 test("getOpportunities returns [] when the keeper.db predates Discovery Bot (no opportunities table)", () => {

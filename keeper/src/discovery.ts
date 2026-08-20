@@ -270,7 +270,7 @@ async function evaluateWatchedToken(
     token: w.token, priceMovePct, liqGrowthPct, liqPls: last.liq,
     buyTaxBps: s.buyTaxBps, sellTaxBps: s.sellTaxBps, lpLockedPct: s.lpLockedPct,
     ownerRenounced: s.ownerRenounced, sellable: s.sellable, verdict: s.verdict, reason: s.reason,
-    narrative,
+    narrative, priceAtDetection: last.price,
   });
   log("info", "discovery", `Opportunity #${id}: ${narrative}`);
 
@@ -282,7 +282,59 @@ async function evaluateWatchedToken(
   await dispatch(id, w.token, { priceMovePct, liqGrowthPct, liqPls: last.liq }, s, candidates);
 }
 
+// How long a notified-but-untouched opportunity stays buyable at all,
+// regardless of price. Someone clicking "Buy Now" on a notification from
+// hours ago is acting on a stale signal, not the live one they think
+// they're seeing - this is the hard backstop for that, independent of the
+// price check below.
+const STALE_TTL_MIN = 120;
+// How far price can move away from where it was AT DETECTION before the
+// original signal no longer describes reality. Direction depends on the
+// strategy: Discovery chases a breakout already in progress, so a pullback
+// means the move it reacted to has failed. Hunter buys an oversold dip, so
+// the equivalent "already passed" signal is the opposite direction - price
+// has already bounced back up, so it is no longer oversold.
+const STALE_PRICE_MOVE_PCT = 15;
+
+/**
+ * Marks a notified (never bought) opportunity stale once it's no longer a
+ * fair description of the market - either because too long has passed, or
+ * because price has since moved enough that the reason it was flagged no
+ * longer holds. Never touches an already-bought opportunity (nothing to
+ * protect there) or a notify a vault has never even seen. Runs every tick
+ * so the site's Buy Now button reflects this within one scan interval, not
+ * only when someone happens to load the page.
+ */
+async function refreshStaleness(): Promise<void> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  // Looks back twice the TTL purely so an opportunity sitting exactly at the
+  // TTL boundary is still caught by this tick rather than the next one -
+  // the TTL check below is what actually decides staleness by age.
+  const candidates = opportunities.notifiedCandidatesForStaleness(STALE_TTL_MIN * 60 * 2);
+
+  for (const c of candidates) {
+    const ageMin = (nowSec - c.ts) / 60;
+    if (ageMin >= STALE_TTL_MIN) {
+      opportunities.markStale(c.id, `Notified ${Math.round(ageMin)} minutes ago - too much time has passed to trust the original signal.`);
+      continue;
+    }
+
+    if (c.priceAtDetection === null || c.priceAtDetection <= 0) continue; // old row from before this existed - TTL is the only check available
+    const latest = prices.latest(c.token);
+    if (!latest || latest.price <= 0) continue;
+
+    const movePctSinceDetection = ((latest.price - c.priceAtDetection) / c.priceAtDetection) * 100;
+    if (c.source === "hunter" && movePctSinceDetection >= STALE_PRICE_MOVE_PCT) {
+      opportunities.markStale(c.id, `Price is already up ${movePctSinceDetection.toFixed(0)}% since this was flagged as oversold - it's no longer the same dip.`);
+    } else if (c.source !== "hunter" && movePctSinceDetection <= -STALE_PRICE_MOVE_PCT) {
+      opportunities.markStale(c.id, `Price has pulled back ${Math.abs(movePctSinceDetection).toFixed(0)}% since this was flagged - the move it reacted to has since reversed.`);
+    }
+  }
+}
+
 export async function tick(): Promise<void> {
+  await refreshStaleness();
+
   const candidates = registry.active().filter((v) => v.discovery.enabled);
   if (candidates.length === 0) return;
 

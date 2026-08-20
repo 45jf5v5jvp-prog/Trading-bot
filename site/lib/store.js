@@ -34,6 +34,18 @@ function getDb() {
       amount_pls   REAL NOT NULL,
       requested_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS referrals (
+      vault    TEXT PRIMARY KEY,
+      referrer TEXT NOT NULL,
+      bound_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS referral_payouts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      referrer   TEXT NOT NULL,
+      amount_pls REAL NOT NULL,
+      tx_hash    TEXT NOT NULL,
+      paid_at    INTEGER NOT NULL
+    );
   `);
   return db;
 }
@@ -136,6 +148,69 @@ function pendingAskBuyRequests(vault) {
     .map((r) => ({ id: r.id, token: r.token, amountPls: r.amount_pls, requestedAt: r.requested_at }));
 }
 
+/**
+ * Referral program, off-chain by design (see the git history around this
+ * feature for why: BotVault.sol's fee split is fixed on chain, and this
+ * repo's already redeployed that contract twice in one night - a referral
+ * split doesn't need that risk). A vault's referrer is bound at most once,
+ * permanently, the same "no changing your mind later" rule vault ownership
+ * itself already follows.
+ */
+
+/** null if this vault has no referrer on record. */
+function getReferrer(vault) {
+  const row = getDb()
+    .prepare("SELECT referrer FROM referrals WHERE vault = ?")
+    .get(vault.toLowerCase());
+  return row ? row.referrer : null;
+}
+
+/**
+ * Binds vault -> referrer, once. Re-submitting the SAME referrer is a
+ * harmless no-op (the "I already have a vault, retry the request" case);
+ * submitting a DIFFERENT one throws, since silently letting a binding move
+ * would let someone redirect another wallet's already-earned referral credit
+ * after the fact. Self-referral is rejected outright.
+ */
+function setReferrer(vault, referrer, nowMs) {
+  vault = vault.toLowerCase();
+  referrer = referrer.toLowerCase();
+  if (vault === referrer) throw new Error("a vault cannot refer itself");
+  const existing = getReferrer(vault);
+  if (existing) {
+    if (existing !== referrer) throw new Error("this vault already has a different referrer on record");
+    return;
+  }
+  getDb()
+    .prepare("INSERT INTO referrals (vault, referrer, bound_at) VALUES (?, ?, ?)")
+    .run(vault, referrer, nowMs);
+}
+
+/** Every vault this wallet is credited as the referrer for. */
+function getReferredVaults(referrer) {
+  return getDb()
+    .prepare("SELECT vault FROM referrals WHERE referrer = ?")
+    .all(referrer.toLowerCase())
+    .map((r) => r.vault);
+}
+
+/** Total PLS already paid out to this referrer across every payout batch. */
+function getReferralPaidTotal(referrer) {
+  const row = getDb()
+    .prepare("SELECT COALESCE(SUM(amount_pls), 0) as total FROM referral_payouts WHERE referrer = ?")
+    .get(referrer.toLowerCase());
+  return row.total;
+}
+
+/** Records one payout batch. Called by the operator's manual payout script
+ * (scripts/pay-referrals.js) after a real on-chain deposit into the
+ * referrer's own vault, never by anything a site visitor can trigger. */
+function recordReferralPayout(referrer, amountPls, txHash, nowMs) {
+  getDb()
+    .prepare("INSERT INTO referral_payouts (referrer, amount_pls, tx_hash, paid_at) VALUES (?, ?, ?, ?)")
+    .run(referrer.toLowerCase(), amountPls, txHash, nowMs);
+}
+
 function resetForTests() {
   db = undefined;
 }
@@ -144,5 +219,6 @@ module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
   requestDiscoveryBuy, pendingDiscoveryBuyIds,
   requestAskBuy, pendingAskBuyRequests,
+  getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout,
   resetForTests, DB_PATH,
 };

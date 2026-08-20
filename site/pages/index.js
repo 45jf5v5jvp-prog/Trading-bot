@@ -6,6 +6,7 @@ import { loadPortfolio } from "../lib/loadPortfolio";
 import { loadOpportunities } from "../lib/loadOpportunities";
 import { closePosition } from "../lib/closePosition";
 import { buyOpportunity } from "../lib/buyOpportunity";
+import { setReferral, loadReferral, loadReferralEarnings } from "../lib/setReferral";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
@@ -54,6 +55,51 @@ export default function Dashboard() {
   const [buyStates, setBuyStates] = useState({}); // { [opportunityId]: "pending" | "requested" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
+  const [referralCode, setReferralCode] = useState(""); // captured from ?ref=, or pasted in manually
+  const [myReferrer, setMyReferrer] = useState(null); // who referred THIS vault, once known
+  const [referralEarnings, setReferralEarnings] = useState(null); // what THIS wallet has earned referring others
+  const [referralCopied, setReferralCopied] = useState(false);
+
+  const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+
+  // Captures a referral code the moment someone arrives via ?ref=0x... - kept
+  // in localStorage (not just component state) so it survives the page
+  // reload that happens partway through connecting a wallet. Whichever link
+  // was clicked most recently wins if more than one ever gets clicked before
+  // a vault exists; once a vault is created the binding is permanent and this
+  // stops mattering. A manually pasted code (someone read it off a screenshot
+  // rather than clicking a link) works exactly the same way.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref && ADDR_RE.test(ref)) {
+      window.localStorage.setItem("icaria_pending_referrer", ref);
+    }
+    const pending = window.localStorage.getItem("icaria_pending_referrer");
+    if (pending) setReferralCode(pending);
+  }, []);
+
+  // Who referred this vault, if anyone - read once a vault exists, purely
+  // informational (the binding itself happens at vault-creation time, see
+  // handleCreateVault).
+  useEffect(() => {
+    if (!vaultAddress) return;
+    loadReferral(vaultAddress).then((r) => setMyReferrer(r.referrer)).catch(() => {});
+  }, [vaultAddress]);
+
+  // What this wallet has earned referring OTHER people's vaults - doesn't
+  // require this wallet to have a vault of its own, just to have referred
+  // someone who does. Polled the same way history/portfolio are, so it stays
+  // current as referred vaults keep trading.
+  useEffect(() => {
+    if (!account) return;
+    let cancelled = false;
+    const refresh = () => loadReferralEarnings(account).then((e) => { if (!cancelled) setReferralEarnings(e); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [account]);
 
   /** Every edit to config goes through here so "unsaved changes" stays accurate -
    * nothing takes effect for the keeper until Save All Settings actually signs
@@ -163,8 +209,23 @@ export default function Dashboard() {
     setTxBusy(true);
     setStatus("");
     try {
-      await createVault(setStatus);
+      const addr = await createVault(setStatus);
       setStatus("Vault created.");
+      // Bind the referral, if a valid one was captured or pasted in. Best
+      // effort: the vault itself already exists at this point regardless of
+      // whether this succeeds, so a referral failure is reported but doesn't
+      // look like the vault creation itself failed.
+      const code = referralCode.trim();
+      if (code && ADDR_RE.test(code) && code.toLowerCase() !== addr.toLowerCase()) {
+        try {
+          await setReferral(getProvider, addr, code);
+          setMyReferrer(code.toLowerCase());
+          if (typeof window !== "undefined") window.localStorage.removeItem("icaria_pending_referrer");
+          setStatus("Vault created. Referral recorded.");
+        } catch (e) {
+          setStatus(`Vault created, but the referral could not be recorded: ${e.message}`);
+        }
+      }
     } catch (e) {
       setStatus(`Create vault failed: ${e.message}`);
     } finally {
@@ -250,6 +311,20 @@ export default function Dashboard() {
     }
   }
 
+  /** Copies this wallet's own referral link. Falls back to selecting the text
+   * for manual copy on a browser that blocks the clipboard API (some in-app
+   * wallet browsers do), rather than failing silently. */
+  async function handleCopyReferralLink() {
+    const link = `${window.location.origin}/?ref=${account}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setReferralCopied(true);
+      setTimeout(() => setReferralCopied(false), 2000);
+    } catch {
+      setStatus(`Copy this link manually: ${link}`);
+    }
+  }
+
   /** Signs and submits a manual buy request for one Discovery Bot
    * opportunity. Doesn't buy anything itself - the keeper does that on its
    * next pass, see lib/buyOpportunity.js. */
@@ -273,6 +348,39 @@ export default function Dashboard() {
           <span className="wordmark-sub">Bots</span>
           <span className="beta-badge">BETA</span>
         </div>
+
+        {account && (
+          <div className="panel">
+            <div className="section-label">Referral Link</div>
+            <p className="hint" style={{ marginBottom: 14 }}>
+              Share this link. Anyone who creates a vault after visiting it is permanently credited
+              to you - you earn {"0.05%"} of everything their vault ever trades (the platform keeps
+              {" 0.20%"} instead of its usual {"0.25%"}; they never pay more for having been
+              referred). Earnings are tracked below and paid into your own vault in batches, not
+              automatically on every trade.
+            </p>
+            <div className="field-inline">
+              <input
+                type="text"
+                readOnly
+                value={typeof window !== "undefined" ? `${window.location.origin}/?ref=${account}` : ""}
+                onFocus={(e) => e.target.select()}
+                style={{ width: 420 }}
+              />
+              <button className="btn btn-small" onClick={handleCopyReferralLink}>
+                {referralCopied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+            {referralEarnings && (
+              <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
+                Referral fees: {referralEarnings.referredVaultCount} vault
+                {referralEarnings.referredVaultCount === 1 ? "" : "s"} referred, earned{" "}
+                {fmtBalance(referralEarnings.totalEarnedPls)} {CHAIN.baseSymbol} total,{" "}
+                {fmtBalance(referralEarnings.pendingPls)} {CHAIN.baseSymbol} not yet paid out.
+              </p>
+            )}
+          </div>
+        )}
 
         {initializing && !account && (
           <div className="panel">
@@ -305,6 +413,20 @@ export default function Dashboard() {
           <div className="panel">
             <p className="mono-addr" style={{ marginBottom: 14 }}>Connected: {account}</p>
             <p className="lede" style={{ marginBottom: 16 }}>No vault found for this wallet yet.</p>
+            <div className="field-inline">
+              <label>Referred by (optional)</label>
+              <input
+                type="text"
+                placeholder="0x..."
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value)}
+                style={{ width: 340 }}
+              />
+            </div>
+            <p className="hint" style={{ marginTop: -6, marginBottom: 16 }}>
+              Filled in automatically if you arrived via someone's referral link. This is set once,
+              permanently, when your vault is created - there's no way to add or change it later.
+            </p>
             <button className="btn btn-primary" onClick={handleCreateVault} disabled={txBusy}>
               {txBusy ? "Working..." : "Create My Vault"}
             </button>
@@ -344,6 +466,11 @@ export default function Dashboard() {
                 It does not affect deposits or withdrawals, which always stay available to you as
                 the owner.
               </p>
+              {myReferrer && (
+                <p className="hint" style={{ marginBottom: 0 }}>
+                  Referred by <span className="mono-addr" style={{ display: "inline" }}>{myReferrer}</span>.
+                </p>
+              )}
             </div>
 
             <div className="panel">

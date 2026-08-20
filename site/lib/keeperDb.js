@@ -54,6 +54,18 @@ function getRecentFires(vault, limit = 25) {
   ).all(vault.toLowerCase(), limit);
 }
 
+/** Every platform fee (PLS) this vault has ever generated, summed - the
+ * referral program's input: a referrer is owed a fixed share of exactly this
+ * number, across every vault they're credited for (see lib/store.js's
+ * getReferredVaults). 0 if the keeper.db file doesn't exist yet, same
+ * "missing history isn't an error" convention as the rest of this file. */
+function getTotalFees(vault) {
+  const d = getDb();
+  if (!d) return 0;
+  const row = d.prepare(`SELECT COALESCE(SUM(fee), 0) as total FROM fires WHERE vault = ?`).get(vault.toLowerCase());
+  return row.total;
+}
+
 /**
  * Every V4 pool the keeper's scanner has recorded for a token. V4 has no
  * on-chain "getPool(tokenA, tokenB, fee)" lookup the way V2/V3 do - a
@@ -126,7 +138,7 @@ function resetForTests() {
 }
 
 module.exports = {
-  getPositions, getRecentFires, getV4PoolsForToken,
+  getPositions, getRecentFires, getTotalFees, getV4PoolsForToken,
   getOpportunities, getDiscoveryActionsForVault,
   resetForTests, resolveDbPath,
 };

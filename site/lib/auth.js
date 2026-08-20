@@ -47,6 +47,15 @@ function buildAskBuyMessage(vaultAddress, token, amountPls, timestampMs) {
   return `Icaria: buy ${amountPls} PLS of ${token.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape, for binding a vault's referrer - the vault's owner must sign
+ * this, not the referrer, since it's the owner's fee that's being split and
+ * the owner who benefits from having been referred. Binds the exact referrer
+ * address into the signed message so a captured signature can never be
+ * replayed to bind a different referrer later. */
+function buildReferralMessage(vaultAddress, referrer, timestampMs) {
+  return `Icaria: set referrer ${referrer.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 function checkFresh(timestampMs) {
   if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
   const age = Date.now() - timestampMs;
@@ -114,7 +123,13 @@ async function authorizeAskBuy({ vaultAddress, token, amountPls, timestampMs, si
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeReferral({ vaultAddress, referrer, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildReferralMessage(vaultAddress, referrer, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, MESSAGE_MAX_AGE_MS,
 };

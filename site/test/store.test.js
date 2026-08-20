@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds, requestAskBuy, pendingAskBuyRequests } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -133,4 +133,67 @@ test("requestClose is case-insensitive on the vault address, like config", () =>
   const lower = "0x2".padEnd(42, "2");
   requestClose(lower.toUpperCase(), 9, Date.now());
   assert.deepEqual(pendingCloseIds(lower), [9]);
+});
+
+test("getReferrer is null for a vault with no referral on record", () => {
+  const vault = "0x" + "10".repeat(20);
+  assert.equal(getReferrer(vault), null);
+});
+
+test("setReferrer then getReferrer round-trips, stored lowercase", () => {
+  const vault = "0x" + "11".repeat(20);
+  const referrer = ("0x" + "12".repeat(20)).toUpperCase();
+  setReferrer(vault, referrer, Date.now());
+  assert.equal(getReferrer(vault), referrer.toLowerCase());
+});
+
+test("setReferrer rejects a vault referring itself", () => {
+  const vault = "0x" + "13".repeat(20);
+  assert.throws(() => setReferrer(vault, vault, Date.now()), /cannot refer itself/);
+  assert.equal(getReferrer(vault), null);
+});
+
+test("setReferrer re-submitting the SAME referrer is a harmless no-op", () => {
+  const vault = "0x" + "14".repeat(20);
+  const referrer = "0x" + "15".repeat(20);
+  setReferrer(vault, referrer, Date.now());
+  assert.doesNotThrow(() => setReferrer(vault, referrer, Date.now()));
+  assert.equal(getReferrer(vault), referrer);
+});
+
+test("setReferrer rejects trying to change an already-bound referrer", () => {
+  const vault = "0x" + "16".repeat(20);
+  const first = "0x" + "17".repeat(20);
+  const second = "0x" + "18".repeat(20);
+  setReferrer(vault, first, Date.now());
+  assert.throws(() => setReferrer(vault, second, Date.now()), /already has a different referrer/);
+  assert.equal(getReferrer(vault), first); // unchanged
+});
+
+test("getReferredVaults lists every vault credited to a referrer, and none belonging to someone else", () => {
+  const referrer = "0x" + "19".repeat(20);
+  const other = "0x" + "20".repeat(20);
+  const vaultA = "0x" + "21".repeat(20);
+  const vaultB = "0x" + "22".repeat(20);
+  const vaultC = "0x" + "23".repeat(20);
+  setReferrer(vaultA, referrer, Date.now());
+  setReferrer(vaultB, referrer, Date.now());
+  setReferrer(vaultC, other, Date.now());
+  const referred = getReferredVaults(referrer);
+  assert.equal(referred.length, 2);
+  assert.ok(referred.includes(vaultA));
+  assert.ok(referred.includes(vaultB));
+  assert.ok(!referred.includes(vaultC));
+});
+
+test("getReferralPaidTotal is 0 for a referrer with no payouts yet", () => {
+  const referrer = "0x" + "24".repeat(20);
+  assert.equal(getReferralPaidTotal(referrer), 0);
+});
+
+test("recordReferralPayout then getReferralPaidTotal sums across multiple payout batches", () => {
+  const referrer = "0x" + "25".repeat(20);
+  recordReferralPayout(referrer, 10.5, "0xaaa", Date.now());
+  recordReferralPayout(referrer, 4.25, "0xbbb", Date.now());
+  assert.equal(getReferralPaidTotal(referrer), 14.75);
 });

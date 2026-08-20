@@ -36,6 +36,8 @@ setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spen
   VALUES (?,?,?,?,?,?,?,?,?)`).run(OTHER_VAULT, "trading", "0x" + "c".repeat(40), 1000, 1, 50, "0", 1, "open");
 setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
   .run(VAULT, "trading", "0x" + "a".repeat(40), 1000, 100, 0.25, "0xabc123");
+setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
+  .run(VAULT, "launch", "0x" + "b".repeat(40), 1100, 200, 0.5, "0xdef456");
 
 // Same schema as keeper/src/db.ts's v4_pools - present on a Robinhood
 // keeper.db, absent on a PulseChain one (see the "no such table" test below).
@@ -86,8 +88,23 @@ test("returns positions and fires for a vault that has real trading history", ()
   assert.equal(closed[0].close_reason, "take profit 25%");
 
   const fires = getRecentFires(VAULT);
-  assert.equal(fires.length, 1);
-  assert.equal(fires[0].tx_hash, "0xabc123");
+  assert.equal(fires.length, 2);
+  assert.equal(fires[0].tx_hash, "0xdef456"); // newest first (ts DESC)
+});
+
+test("getTotalFees sums every fire's fee for a vault, scoped to that vault only", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getTotalFees } = require("../lib/keeperDb");
+  assert.equal(getTotalFees(VAULT), 0.75); // 0.25 + 0.5
+  assert.equal(getTotalFees(OTHER_VAULT), 0); // no fires recorded for this one
+});
+
+test("getTotalFees is 0 for a vault with no trading history at all", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getTotalFees } = require("../lib/keeperDb");
+  assert.equal(getTotalFees("0x" + "9".repeat(40)), 0);
 });
 
 test("only returns data scoped to the requested vault, never another vault's", () => {

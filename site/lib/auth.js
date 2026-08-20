@@ -32,10 +32,12 @@ function buildCloseMessage(vaultAddress, positionId, timestampMs) {
   return `Icaria: close position ${positionId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
-/** Same shape, for "buy this Discovery Bot opportunity now" - a distinct
- * action string, same replay-prevention reasoning as buildCloseMessage. */
-function buildBuyOpportunityMessage(vaultAddress, opportunityId, timestampMs) {
-  return `Icaria: buy opportunity ${opportunityId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+/** Same shape, for "buy this Discovery/Hunter Bot opportunity now" - binds
+ * the specific amount into the message, same reasoning as
+ * buildAskBuyMessage below: a signature authorizing 500 PLS must never be
+ * replayable as authorization for a different amount. */
+function buildBuyOpportunityMessage(vaultAddress, opportunityId, amountPls, timestampMs) {
+  return `Icaria: buy opportunity ${opportunityId} for vault ${vaultAddress.toLowerCase()} spending ${amountPls} PLS at ${timestampMs}`;
 }
 
 /** Same shape, for "buy this exact token and amount from Ask Icaria" - binds
@@ -111,9 +113,9 @@ async function authorizeClose({ vaultAddress, positionId, timestampMs, signature
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
-async function authorizeBuyOpportunity({ vaultAddress, opportunityId, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+async function authorizeBuyOpportunity({ vaultAddress, opportunityId, amountPls, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
   checkFresh(timestampMs);
-  const expectedMessage = buildBuyOpportunityMessage(vaultAddress, opportunityId, timestampMs);
+  const expectedMessage = buildBuyOpportunityMessage(vaultAddress, opportunityId, amountPls, timestampMs);
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 

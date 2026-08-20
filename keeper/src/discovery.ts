@@ -117,26 +117,28 @@ function actionsToday(vault: string): number {
 
 /**
  * The actual buy, shared by autoBuy-mode dispatch and by a manual "Buy Now"
- * request from notify mode (see fetchBuyRequests below). Always sized off
- * the vault's own configured discovery.amountPls - a manual request approves
- * buying THIS token with the amount already chosen for Discovery Bot, not an
- * arbitrary amount typed in on the spot.
+ * request from notify mode (see fetchBuyRequests below). Sized off the
+ * vault's own configured discovery.amountPls by default; `amountOverride`
+ * lets a manual "Buy Now" request spend whatever the owner typed in instead
+ * (see site/pages/api/vaults/[address]/opportunities/[id]/buy.js) - still
+ * subject to the same holding-cap guard either way.
  */
-async function executeDiscoveryBuy(v: VaultRecord, id: number, token: string): Promise<void> {
+async function executeDiscoveryBuy(v: VaultRecord, id: number, token: string, amountOverride?: number): Promise<void> {
   const D = v.discovery;
-  if (D.amountPls <= 0) return;
+  const amountPls = amountOverride ?? D.amountPls;
+  if (amountPls <= 0) return;
 
   // Same holding-cap guard the Launch Bot uses. A token discovered this way
   // has no position yet, so its current value is whatever's already open.
   const { total: posValue, byToken } = await positionsValuePls(v.address);
   const totalValue = (await vaultWplsPls(v.address)) + posValue;
   const tokenNow = byToken.get(token.toLowerCase()) ?? 0;
-  if (exceedsHoldingCap(tokenNow + D.amountPls, totalValue, v.maxHoldingPct)) {
+  if (exceedsHoldingCap(tokenNow + amountPls, totalValue, v.maxHoldingPct)) {
     log("info", "discovery", `${v.address} ${token}: holding cap ${v.maxHoldingPct}% would be exceeded, skipping buy`);
     return;
   }
 
-  const amountIn = parseEther(String(D.amountPls));
+  const amountIn = parseEther(String(amountPls));
   const res = await executeSwap({
     vault: v.address, bot: "discovery", path: [CFG.wpls, token], amountIn, tokenLabel: token,
     // New attention on a token can move price fast, same reasoning as launch/snipe.
@@ -146,11 +148,11 @@ async function executeDiscoveryBuy(v: VaultRecord, id: number, token: string): P
   if (res.ok) {
     openPosition({
       vault: v.address, bot: "discovery", token,
-      spentPls: D.amountPls, tokensOut: res.amountOut,
+      spentPls: amountPls, tokensOut: res.amountOut,
       tpPct: D.takeProfitPct, slPct: D.stopLossPct, trailPct: D.trailingStopPct, timeExitMin: D.timeExitMin,
     });
     discoveryActions.record(v.address, id, "bought", res.txHash);
-    log("info", "discovery", `${v.address} bought ${D.amountPls} PLS of ${token} on opportunity #${id}`);
+    log("info", "discovery", `${v.address} bought ${amountPls} PLS of ${token} on opportunity #${id}`);
   } else {
     log("warn", "discovery", `${v.address} skipped opportunity #${id} (${token}): ${res.reason}`);
   }
@@ -197,17 +199,21 @@ async function dispatch(
  * approves buying something this bot already vetted and showed, not an
  * arbitrary opportunity id.
  */
+export type BuyRequest = { id: number; amountPls: number | null };
+
 /** Exported for hunter.ts - the opportunity id queue is shared and source-
  * agnostic (the site's route returns every pending request for a vault
  * regardless of which detector produced the opportunity), so each detector
- * pulls the same list and filters to the rows it produced. */
-export async function fetchBuyRequests(vault: string): Promise<number[]> {
+ * pulls the same list and filters to the rows it produced. amountPls is
+ * null for a request made before "type your own amount" existed - callers
+ * fall back to their own configured amount in that case. */
+export async function fetchBuyRequests(vault: string): Promise<BuyRequest[]> {
   const api = process.env.CONFIG_API;
   if (!api) return [];
   try {
     const res = await fetch(`${api}/vaults/${vault}/discovery-buy-requests`);
     if (!res.ok) return [];
-    return (await res.json()) as number[];
+    return (await res.json()) as BuyRequest[];
   } catch (e) {
     log("warn", "discovery", `Buy-request fetch failed for ${vault}: ${(e as Error).message}`);
     return [];
@@ -216,8 +222,8 @@ export async function fetchBuyRequests(vault: string): Promise<number[]> {
 
 async function processBuyRequests(candidates: VaultRecord[]): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
-    const ids = await fetchBuyRequests(v.address);
-    for (const id of ids) {
+    const requests = await fetchBuyRequests(v.address);
+    for (const { id, amountPls } of requests) {
       if (discoveryActions.actionFor(v.address, id) === "bought") continue; // no double-buy
       const opp = opportunities.get(id);
       // Only ever act on this detector's own rows - hunter.ts runs the same
@@ -225,7 +231,7 @@ async function processBuyRequests(candidates: VaultRecord[]): Promise<void> {
       // bought with hunter's sizing/budget, never discovery's.
       if (!opp || opp.verdict !== "pass" || (opp.source ?? "discovery") !== "discovery") continue;
       try {
-        await executeDiscoveryBuy(v, id, opp.token);
+        await executeDiscoveryBuy(v, id, opp.token, amountPls ?? undefined);
       } catch (e) {
         log("error", "discovery", `${v.address} buy request for opportunity #${id}: ${(e as Error).message}`);
       }

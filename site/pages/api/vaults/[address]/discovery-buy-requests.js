@@ -1,4 +1,4 @@
-const { pendingDiscoveryBuyIds } = require("../../../../lib/store");
+const { pendingDiscoveryBuyRequests } = require("../../../../lib/store");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -6,7 +6,10 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
  * GET /api/vaults/:address/discovery-buy-requests - public read, same
  * reasoning as close-requests: the keeper has to be able to read this for
  * every vault to act on it at all, and there's nothing sensitive in a list
- * of opportunity IDs. Polled by the keeper (discovery.ts) every tick.
+ * of opportunity IDs and amounts. Polled by the keeper (discovery.ts) every
+ * tick. Returns [{ id, amountPls }] - amountPls is null for a request made
+ * before "type your own amount" existed, and the keeper falls back to the
+ * bot's own configured amount in that case.
  */
 export default async function handler(req, res) {
   const { address } = req.query;
@@ -21,5 +24,5 @@ export default async function handler(req, res) {
     return;
   }
 
-  res.status(200).json(pendingDiscoveryBuyIds(address));
+  res.status(200).json(pendingDiscoveryBuyRequests(address));
 }

@@ -47,6 +47,17 @@ function getDb() {
       paid_at    INTEGER NOT NULL
     );
   `);
+
+  // Additive migration: databases created before "Buy Now" let someone type
+  // their own amount predate this column. SQLite has no ALTER TABLE IF NOT
+  // EXISTS, so probe first - same pattern keeper/src/db.ts already uses.
+  {
+    const cols = db.prepare("PRAGMA table_info(discovery_buy_requests)").all();
+    if (!cols.some((c) => c.name === "amount_pls")) {
+      db.exec("ALTER TABLE discovery_buy_requests ADD COLUMN amount_pls REAL");
+    }
+  }
+
   return db;
 }
 
@@ -101,27 +112,31 @@ function pendingCloseIds(vault) {
 }
 
 /**
- * Records that the owner wants this Discovery Bot opportunity bought now.
- * Same "site writes an intent, keeper executes" split as requestClose - only
- * the keeper's key can call executeSwap, and the keeper only acts on an
- * opportunity that already passed its screen (see keeper/src/discovery.ts's
- * fetchBuyRequests/processBuyRequests).
+ * Records that the owner wants this Discovery/Hunter Bot opportunity bought
+ * now, for a specific amount they typed in themselves - same "site writes an
+ * intent, keeper executes" split as requestClose - only the keeper's key can
+ * call executeSwap, and the keeper only acts on an opportunity that already
+ * passed its screen (see keeper/src/discovery.ts's
+ * fetchBuyRequests/processBuyRequests). amountPls is null only for a request
+ * made before this feature existed - the keeper falls back to the bot's own
+ * configured amount in that case, never to spending nothing.
  */
-function requestDiscoveryBuy(vault, opportunityId, nowMs) {
+function requestDiscoveryBuy(vault, opportunityId, nowMs, amountPls = null) {
   getDb()
-    .prepare(`INSERT OR IGNORE INTO discovery_buy_requests (vault, opportunity_id, requested_at) VALUES (?, ?, ?)`)
-    .run(vault.toLowerCase(), opportunityId, nowMs);
+    .prepare(
+      `INSERT OR IGNORE INTO discovery_buy_requests (vault, opportunity_id, requested_at, amount_pls) VALUES (?, ?, ?, ?)`,
+    )
+    .run(vault.toLowerCase(), opportunityId, nowMs, amountPls);
 }
 
-/** Every opportunity ID this vault owner has asked to buy, handled or not -
- * the keeper is responsible for only acting on ones not already bought. */
-function pendingDiscoveryBuyIds(vault) {
+/** Every buy request this vault owner has made, handled or not - the keeper
+ * is responsible for only acting on ones not already bought. */
+function pendingDiscoveryBuyRequests(vault) {
   return getDb()
-    .prepare(`SELECT opportunity_id FROM discovery_buy_requests WHERE vault = ?`)
+    .prepare(`SELECT opportunity_id, amount_pls FROM discovery_buy_requests WHERE vault = ?`)
     .all(vault.toLowerCase())
-    .map((r) => r.opportunity_id);
+    .map((r) => ({ id: r.opportunity_id, amountPls: r.amount_pls }));
 }
-
 /**
  * Records an Ask Icaria "buy it" request - unlike the Discovery/Hunter buy
  * requests above, there's no pre-existing opportunity catalog entry to
@@ -217,7 +232,7 @@ function resetForTests() {
 
 module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
-  requestDiscoveryBuy, pendingDiscoveryBuyIds,
+  requestDiscoveryBuy, pendingDiscoveryBuyRequests,
   requestAskBuy, pendingAskBuyRequests,
   getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout,
   resetForTests, DB_PATH,

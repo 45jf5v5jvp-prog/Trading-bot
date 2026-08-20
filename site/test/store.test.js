@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -87,22 +87,28 @@ test("requestClose is idempotent - clicking twice does not duplicate the request
   assert.deepEqual(pendingCloseIds(vault), [3]);
 });
 
-test("pendingDiscoveryBuyIds is empty for a vault with no buy requests", () => {
+test("pendingDiscoveryBuyRequests is empty for a vault with no buy requests", () => {
   const vault = "0x3".padEnd(42, "3");
-  assert.deepEqual(pendingDiscoveryBuyIds(vault), []);
+  assert.deepEqual(pendingDiscoveryBuyRequests(vault), []);
 });
 
-test("requestDiscoveryBuy then pendingDiscoveryBuyIds round-trips the opportunity id", () => {
+test("requestDiscoveryBuy then pendingDiscoveryBuyRequests round-trips the opportunity id and the typed-in amount", () => {
   const vault = "0x4".padEnd(42, "4");
-  requestDiscoveryBuy(vault, 12, Date.now());
-  assert.deepEqual(pendingDiscoveryBuyIds(vault), [12]);
+  requestDiscoveryBuy(vault, 12, Date.now(), 750);
+  assert.deepEqual(pendingDiscoveryBuyRequests(vault), [{ id: 12, amountPls: 750 }]);
+});
+
+test("requestDiscoveryBuy defaults amountPls to null when omitted (a pre-existing request, before this feature)", () => {
+  const vault = "0x9".padEnd(42, "9");
+  requestDiscoveryBuy(vault, 20, Date.now());
+  assert.deepEqual(pendingDiscoveryBuyRequests(vault), [{ id: 20, amountPls: null }]);
 });
 
 test("requestDiscoveryBuy is idempotent - clicking twice does not duplicate the request", () => {
   const vault = "0x5".padEnd(42, "5");
-  requestDiscoveryBuy(vault, 4, Date.now());
-  requestDiscoveryBuy(vault, 4, Date.now());
-  assert.deepEqual(pendingDiscoveryBuyIds(vault), [4]);
+  requestDiscoveryBuy(vault, 4, Date.now(), 200);
+  requestDiscoveryBuy(vault, 4, Date.now(), 200);
+  assert.deepEqual(pendingDiscoveryBuyRequests(vault), [{ id: 4, amountPls: 200 }]);
 });
 
 test("pendingAskBuyRequests is empty for a vault with no requests", () => {

@@ -134,28 +134,38 @@ test("authorizeClose rejects an expired timestamp without ever calling the chain
 
 test("authorizeBuyOpportunity accepts a correctly-signed buy request from the real owner", async () => {
   const ts = Date.now();
-  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, ts));
+  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, 500, ts));
   const readOwner = fakeReader(wallet.address);
-  const result = await authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 7, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  const result = await authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 7, amountPls: 500, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
   assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
 });
 
 test("authorizeBuyOpportunity rejects a signature made for a DIFFERENT opportunity id", async () => {
   const ts = Date.now();
-  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, ts));
+  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, 500, ts));
   const readOwner = fakeReader(wallet.address);
   await assert.rejects(
-    authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 8, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 8, amountPls: 500, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
+});
+
+test("authorizeBuyOpportunity rejects a signature made for a DIFFERENT amount (can't retype a bigger spend onto a small-amount signature)", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, 500, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 7, amountPls: 50000, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
     /not this vault's owner/,
   );
 });
 
 test("authorizeBuyOpportunity rejects an expired timestamp without ever calling the chain reader", async () => {
   const staleTs = Date.now() - 10 * 60 * 1000;
-  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, staleTs));
+  const signature = await wallet.signMessage(buildBuyOpportunityMessage(VAULT, 7, 500, staleTs));
   const readOwner = fakeReader(wallet.address);
   await assert.rejects(
-    authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 7, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    authorizeBuyOpportunity({ vaultAddress: VAULT, opportunityId: 7, amountPls: 500, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);

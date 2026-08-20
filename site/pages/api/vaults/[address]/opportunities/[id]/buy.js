@@ -7,13 +7,16 @@ const RPC_URL = CHAIN.rpcUrl;
 
 /**
  * POST /api/vaults/:address/opportunities/:id/buy - requests a manual buy of
- * one Discovery Bot opportunity. Requires a signature from that vault's
- * on-chain owner (see lib/auth.js's authorizeBuyOpportunity), same pattern as
- * a manual position close. This does NOT buy anything itself - only the
- * keeper's key can call the vault's executeSwap. It just records the
- * request; the keeper picks it up on its own schedule and, if the
- * opportunity still passed its screen, executes it.
- * Body: { timestampMs: number, signature: "0x..." }
+ * one Discovery/Hunter Bot opportunity, for an amount the owner chose
+ * themselves. Requires a signature from that vault's on-chain owner (see
+ * lib/auth.js's authorizeBuyOpportunity) binding the exact amount, same
+ * pattern as Ask Icaria's buy request. This does NOT buy anything itself -
+ * only the keeper's key can call the vault's executeSwap. It just records
+ * the request; the keeper picks it up on its own schedule and, if the
+ * opportunity still passed its screen, executes it - still subject to that
+ * bot's own holding-cap and (for Hunter) allocation checks regardless of
+ * what amount was requested here.
+ * Body: { amountPls: number, timestampMs: number, signature: "0x..." }
  */
 export default async function handler(req, res) {
   const { address, id } = req.query;
@@ -34,18 +37,22 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { timestampMs, signature } = req.body ?? {};
+  const { amountPls, timestampMs, signature } = req.body ?? {};
+  if (typeof amountPls !== "number" || !Number.isFinite(amountPls) || amountPls <= 0) {
+    res.status(400).json({ error: "amountPls must be a positive number" });
+    return;
+  }
   if (typeof signature !== "string" || !signature.startsWith("0x")) {
     res.status(400).json({ error: "signature is required" });
     return;
   }
   try {
-    await authorizeBuyOpportunity({ vaultAddress: vault, opportunityId, timestampMs, signature, rpcUrl: RPC_URL });
+    await authorizeBuyOpportunity({ vaultAddress: vault, opportunityId, amountPls, timestampMs, signature, rpcUrl: RPC_URL });
   } catch (e) {
     res.status(403).json({ error: e.message });
     return;
   }
 
-  requestDiscoveryBuy(vault, opportunityId, Date.now());
-  res.status(200).json({ requested: true });
+  requestDiscoveryBuy(vault, opportunityId, Date.now(), amountPls);
+  res.status(200).json({ requested: true, amountPls });
 }

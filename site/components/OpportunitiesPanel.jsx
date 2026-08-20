@@ -60,6 +60,12 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
   const busy = buyState === "pending";
   const bought = o.action === "bought" || buyState === "requested";
   const isHunter = o.source === "hunter";
+  // Pre-filled with the AI's own sizing when there is one (already shown in
+  // the narrative below), so accepting its suggestion is a single click -
+  // but always editable, since the whole point is choosing your own amount
+  // rather than being locked to whatever the bot would have spent.
+  const [amount, setAmount] = useState(o.aiSuggestedAmountPls ? String(Math.round(o.aiSuggestedAmountPls)) : "");
+  const amountValid = Number(amount) > 0;
 
   return (
     <div className="row-between dead-position-row">
@@ -84,15 +90,29 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
           </p>
         )}
       </div>
-      {passed && (
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => onBuy(o.id)}
-          disabled={busy || bought}
-        >
-          {busy ? "..." : bought ? "Bought" : "Buy Now"}
-        </button>
+      {passed && !bought && (
+        <span className="row" style={{ gap: 6, alignItems: "center" }}>
+          <input
+            type="number"
+            placeholder={CHAIN.nativeSymbol}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            disabled={busy}
+            style={{ width: 90 }}
+          />
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => onBuy(o.id, Number(amount))}
+            disabled={busy || !amountValid}
+          >
+            {busy ? "..." : "Buy Now"}
+          </button>
+        </span>
+      )}
+      {passed && bought && (
+        <button type="button" className="btn btn-small" disabled>Bought</button>
       )}
     </div>
   );
@@ -102,9 +122,10 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
  * Discovery Bot's and Hunter Bot's findings, one shared feed - global across
  * every vault, since each scanner runs once and screens once per token (see
  * keeper/src/discovery.ts, keeper/src/hunter.ts). Buy Now signs and submits
- * a request the keeper picks up on its next pass; it spends whatever the
- * vault's own bot's "amount per buy" setting is for that opportunity's
- * source, same as an auto-buy would.
+ * a request for whatever amount is typed into the box next to it - the
+ * keeper picks the request up on its next pass, still subject to that bot's
+ * own holding-cap (and, for Hunter, allocation) limits regardless of the
+ * amount requested here.
  */
 export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, onCopyFallback }) {
   return (
@@ -114,7 +135,7 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
         Tokens on {CHAIN.dexName} that Discovery Bot spotted moving (price and liquidity climbing
         together) or Hunter Bot spotted looking oversold (RSI/MACD/Bollinger). Turn either one on
         above to start seeing new ones. Copy a token's address to look it up yourself before
-        trusting the screen alone.
+        trusting the screen alone, or set your own amount and buy it directly.
       </p>
       {(!opportunities || opportunities.length === 0) && (
         <p className="hint">Nothing found yet. This fills in as Discovery Bot or Hunter Bot runs.</p>

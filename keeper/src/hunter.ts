@@ -327,18 +327,20 @@ async function reviewFullModePositions(): Promise<void> {
 
 async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
-    const ids = await fetchBuyRequests(v.address);
-    for (const id of ids) {
+    const requests = await fetchBuyRequests(v.address);
+    for (const { id, amountPls: requestedAmountPls } of requests) {
       if (discoveryActions.actionFor(v.address, id) === "bought") continue;
       const opp = opportunities.get(id);
       if (!opp || opp.verdict !== "pass" || opp.source !== "hunter") continue;
       try {
-        // A manual "Buy Now" from notify mode has no fresh AI verdict of its
-        // own - reuse whatever the detector already computed (the AI's
-        // sizing shown in the Opportunities panel), clamped to this vault's
-        // own ceiling same as an autoBuy would be. Falls back to the full
+        // The owner typed their own amount in on the site - still clamped
+        // to this vault's own per-trade ceiling, same protection an autoBuy
+        // gets. Without one (a request made before that existed), fall back
+        // to the AI's suggested sizing from detection time, or the full
         // ceiling if no AI ran (requireAiApproval was off at detection time).
-        const amountPls = opp.aiSuggestedAmountPls
+        const amountPls = requestedAmountPls
+          ? Math.min(requestedAmountPls, v.hunter.maxPerTradePls)
+          : opp.aiSuggestedAmountPls
           ? Math.min(opp.aiSuggestedAmountPls, v.hunter.maxPerTradePls)
           : v.hunter.maxPerTradePls;
         await executeHunterBuy(v, id, opp.token, amountPls);

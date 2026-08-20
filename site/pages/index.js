@@ -326,13 +326,14 @@ export default function Dashboard() {
     }
   }
 
-  /** Signs and submits a manual buy request for one Discovery Bot
-   * opportunity. Doesn't buy anything itself - the keeper does that on its
-   * next pass, see lib/buyOpportunity.js. */
-  async function handleBuyOpportunity(opportunityId) {
+  /** Signs and submits a manual buy request for one Discovery/Hunter Bot
+   * opportunity, for the amount the owner typed in themselves in
+   * OpportunitiesPanel. Doesn't buy anything itself - the keeper does that
+   * on its next pass, see lib/buyOpportunity.js. */
+  async function handleBuyOpportunity(opportunityId, amountPls) {
     setBuyStates((s) => ({ ...s, [opportunityId]: "pending" }));
     try {
-      await buyOpportunity(getProvider, vaultAddress, opportunityId);
+      await buyOpportunity(getProvider, vaultAddress, opportunityId, amountPls);
       setBuyStates((s) => ({ ...s, [opportunityId]: "requested" }));
     } catch (e) {
       setBuyStates((s) => ({ ...s, [opportunityId]: "error" }));

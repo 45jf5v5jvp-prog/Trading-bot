@@ -77,6 +77,41 @@ export interface LimitOrder {
   sellAll: boolean;
 }
 
+/**
+ * Discovery Bot: watches every token the scanner has ever seen (not just
+ * fresh launches - see prices.ts's ensureWatched, now called unconditionally
+ * in launch.ts) for a price move and a liquidity increase happening together
+ * over a fixed 60-minute window - liquidity growing alongside the price is
+ * the cheap, honest signal that real buying is happening, not a wash-traded
+ * pump. This is arithmetic on price history the keeper already collects, not
+ * an AI/LLM call - the "narrative" field is a plain-English template built
+ * from the same numbers, not a model-generated one. Every candidate still
+ * runs the identical honeypot/tax/LP-lock/renounce screen a Launch Bot buy
+ * gets before anything executes; "trending" is not "safe." Deployer-share
+ * is the one Launch Bot check this omits - there's no deployer address on
+ * file for a token discovered this way, only for ones seen at pair-creation.
+ *
+ * Detection here is V2-only, on purpose, not an oversight - see
+ * keeper/src/discovery.ts's module comment for why.
+ */
+export interface DiscoveryConfig {
+  enabled: boolean;
+  mode: "notify" | "autoBuy";
+  amountPls: number;
+  maxPerDay: number;
+  minPriceMovePct: number;
+  minLiquidityGrowthPct: number;
+  minLiquidityPls: number;
+  takeProfitPct: number;
+  stopLossPct: number;
+  trailingStopPct: number;
+  timeExitMin: number;
+  maxBuyTaxBps: number;
+  maxSellTaxBps: number;
+  requireLpLock: boolean;
+  requireOwnerRenounced: boolean;
+}
+
 export interface TradingRule {
   enabled: boolean;
   token: string;
@@ -103,6 +138,7 @@ export interface VaultRecord {
   rules: TradingRule[];
   snipes: TargetSnipe[];
   limitOrders: LimitOrder[];
+  discovery: DiscoveryConfig;
   // Never let one token exceed this share of the vault's value. The single most
   // important safety setting: without it a dip-buying rule tips the whole vault
   // into one falling token. 0 disables (not recommended).
@@ -126,19 +162,27 @@ const DEFAULT_LAUNCH: LaunchConfig = {
   requireOwnerRenounced: false,
 };
 
+const DEFAULT_DISCOVERY: DiscoveryConfig = {
+  enabled: false, mode: "notify", amountPls: 0, maxPerDay: 4,
+  minPriceMovePct: 20, minLiquidityGrowthPct: 15, minLiquidityPls: 2_000_000,
+  takeProfitPct: 50, stopLossPct: 35, trailingStopPct: 0, timeExitMin: 60,
+  maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true, requireOwnerRenounced: false,
+};
+
 const cache = new Map<string, VaultRecord>();
 
 interface RawConfig {
   launch?: Partial<LaunchConfig>; rules?: TradingRule[]; snipes?: TargetSnipe[];
-  limitOrders?: LimitOrder[]; maxHoldingPct?: number;
+  limitOrders?: LimitOrder[]; discovery?: Partial<DiscoveryConfig>; maxHoldingPct?: number;
 }
 type LoadedConfig = {
   launch: LaunchConfig; rules: TradingRule[]; snipes: TargetSnipe[];
-  limitOrders: LimitOrder[]; maxHoldingPct: number;
+  limitOrders: LimitOrder[]; discovery: DiscoveryConfig; maxHoldingPct: number;
 };
 
 const EMPTY: LoadedConfig = {
-  launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+  launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [],
+  discovery: { ...DEFAULT_DISCOVERY }, maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
 };
 
 function shape(raw: RawConfig): LoadedConfig {
@@ -147,6 +191,7 @@ function shape(raw: RawConfig): LoadedConfig {
     rules: (raw.rules ?? []).filter((r) => r.enabled),
     snipes: (raw.snipes ?? []).filter((s) => s.enabled && s.amountPls > 0),
     limitOrders: (raw.limitOrders ?? []).filter((o) => o.enabled && o.id),
+    discovery: { ...DEFAULT_DISCOVERY, ...(raw.discovery ?? {}) },
     maxHoldingPct: raw.maxHoldingPct ?? DEFAULT_MAX_HOLDING_PCT,
   };
 }
@@ -232,8 +277,8 @@ export async function refresh(): Promise<VaultRecord[]> {
       const [owner, executor, paused] = await Promise.all([v.owner(), v.executor(), v.paused()]);
       const executorOk =
         String(executor).toLowerCase() === (process.env.KEEPER_ADDRESS || "").toLowerCase();
-      const { launch, rules, snipes, limitOrders, maxHoldingPct } = await loadConfig(addr);
-      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, limitOrders, maxHoldingPct, kind };
+      const { launch, rules, snipes, limitOrders, discovery, maxHoldingPct } = await loadConfig(addr);
+      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, limitOrders, discovery, maxHoldingPct, kind };
       cache.set(addr.toLowerCase(), rec);
       return rec;
     } catch (e) {

@@ -76,10 +76,53 @@ function getV4PoolsForToken(token) {
   }
 }
 
+/**
+ * Discovery Bot's findings, newest first. Every opportunity the scanner both
+ * detected and screened is included - a failed screen is shown too (with its
+ * reason), never hidden, since "this pumped but looks like a trap" is useful
+ * information even when it's not buyable. Returns [] if the table doesn't
+ * exist (a keeper build that predates Discovery Bot) rather than throwing.
+ */
+function getOpportunities(limit = 50) {
+  const d = getDb();
+  if (!d) return [];
+  try {
+    return d.prepare(
+      `SELECT id, token, ts, price_move_pct, liq_growth_pct, liq_pls, buy_tax_bps, sell_tax_bps,
+              lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative
+       FROM opportunities ORDER BY ts DESC LIMIT ?`,
+    ).all(limit);
+  } catch {
+    return [];
+  }
+}
+
+/** What this vault has already done with each opportunity it's seen -
+ * "notified" or "bought" - keyed by opportunity_id, so the site can grey out
+ * a Buy Now button already acted on instead of re-offering it. */
+function getDiscoveryActionsForVault(vault) {
+  const d = getDb();
+  if (!d) return {};
+  try {
+    const rows = d.prepare(
+      `SELECT opportunity_id, action, tx_hash FROM discovery_actions WHERE vault = ?`,
+    ).all(vault.toLowerCase());
+    const out = {};
+    for (const r of rows) out[r.opportunity_id] = { action: r.action, txHash: r.tx_hash };
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 function resetForTests() {
   if (db) db.close();
   db = undefined;
   triedOpen = false;
 }
 
-module.exports = { getPositions, getRecentFires, getV4PoolsForToken, resetForTests, resolveDbPath };
+module.exports = {
+  getPositions, getRecentFires, getV4PoolsForToken,
+  getOpportunities, getDiscoveryActionsForVault,
+  resetForTests, resolveDbPath,
+};

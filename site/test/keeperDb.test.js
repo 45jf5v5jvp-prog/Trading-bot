@@ -49,6 +49,27 @@ const V4_TOKEN = "0x" + "d".repeat(40);
 setup.prepare(`INSERT INTO v4_pools (token,currency0,currency1,fee,tick_spacing,hooks,first_seen)
   VALUES (?,?,?,?,?,?,?)`).run(V4_TOKEN, V4_TOKEN, "0x" + "e".repeat(40), 3000, 60, "0x" + "0".repeat(40), 1000);
 
+// Same schema as keeper/src/db.ts's opportunities/discovery_actions tables.
+setup.exec(`
+  CREATE TABLE opportunities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT NOT NULL, ts INTEGER NOT NULL,
+    price_move_pct REAL NOT NULL, liq_growth_pct REAL NOT NULL, liq_pls REAL NOT NULL,
+    buy_tax_bps INTEGER, sell_tax_bps INTEGER, lp_locked_pct REAL, owner_renounced INTEGER,
+    sellable INTEGER NOT NULL, verdict TEXT NOT NULL, reason TEXT, narrative TEXT NOT NULL
+  );
+  CREATE TABLE discovery_actions (
+    vault TEXT NOT NULL, opportunity_id INTEGER NOT NULL, ts INTEGER NOT NULL,
+    action TEXT NOT NULL, tx_hash TEXT, PRIMARY KEY (vault, opportunity_id)
+  );
+`);
+const OPP_TOKEN = "0x" + "f".repeat(40);
+setup.prepare(`INSERT INTO opportunities
+  (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(OPP_TOKEN, 2000, 30, 20, 3000000, 100, 100, 100, 1, 1, "pass", "clear", "moved up 30%");
+setup.prepare(`INSERT INTO discovery_actions (vault,opportunity_id,ts,action,tx_hash) VALUES (?,?,?,?,?)`)
+  .run(VAULT, 1, 2001, "notified", null);
+
 setup.close();
 
 test("returns positions and fires for a vault that has real trading history", () => {
@@ -115,6 +136,42 @@ test("getV4PoolsForToken returns [] when the keeper.db predates V4 (no v4_pools 
   const { getV4PoolsForToken } = require("../lib/keeperDb");
   assert.deepEqual(getV4PoolsForToken(V4_TOKEN), []);
   fs.unlinkSync(NO_V4_DB);
+});
+
+test("getOpportunities returns Discovery Bot findings newest first", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getOpportunities } = require("../lib/keeperDb");
+  const rows = getOpportunities();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].token, OPP_TOKEN);
+  assert.equal(rows[0].verdict, "pass");
+  assert.equal(rows[0].narrative, "moved up 30%");
+});
+
+test("getOpportunities returns [] when the keeper.db predates Discovery Bot (no opportunities table)", () => {
+  const NO_DISCOVERY_DB = path.join(__dirname, "fake-keeper-no-discovery.db");
+  for (const p2 of [NO_DISCOVERY_DB, NO_DISCOVERY_DB + "-wal", NO_DISCOVERY_DB + "-shm"]) {
+    if (fs.existsSync(p2)) fs.unlinkSync(p2);
+  }
+  const noDiscovery = new Database(NO_DISCOVERY_DB);
+  noDiscovery.exec(`CREATE TABLE positions (id INTEGER PRIMARY KEY);`);
+  noDiscovery.close();
+  process.env.KEEPER_DB_PATH = NO_DISCOVERY_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getOpportunities, getDiscoveryActionsForVault } = require("../lib/keeperDb");
+  assert.deepEqual(getOpportunities(), []);
+  assert.deepEqual(getDiscoveryActionsForVault(VAULT), {});
+  fs.unlinkSync(NO_DISCOVERY_DB);
+});
+
+test("getDiscoveryActionsForVault keys this vault's actions by opportunity id, never leaking another vault's", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getDiscoveryActionsForVault } = require("../lib/keeperDb");
+  const actions = getDiscoveryActionsForVault(VAULT);
+  assert.deepEqual(actions, { 1: { action: "notified", txHash: null } });
+  assert.deepEqual(getDiscoveryActionsForVault(OTHER_VAULT), {});
 });
 
 test("the connection is opened read-only - a write attempt must fail", () => {

@@ -32,6 +32,12 @@ function buildCloseMessage(vaultAddress, positionId, timestampMs) {
   return `Icaria: close position ${positionId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape, for "buy this Discovery Bot opportunity now" - a distinct
+ * action string, same replay-prevention reasoning as buildCloseMessage. */
+function buildBuyOpportunityMessage(vaultAddress, opportunityId, timestampMs) {
+  return `Icaria: buy opportunity ${opportunityId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 function checkFresh(timestampMs) {
   if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
   const age = Date.now() - timestampMs;
@@ -87,7 +93,13 @@ async function authorizeClose({ vaultAddress, positionId, timestampMs, signature
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeBuyOpportunity({ vaultAddress, opportunityId, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildBuyOpportunityMessage(vaultAddress, opportunityId, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeVaultAction,
-  buildMessage, buildCloseMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, MESSAGE_MAX_AGE_MS,
 };

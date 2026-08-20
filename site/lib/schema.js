@@ -20,6 +20,19 @@ const DEFAULT_LAUNCH = {
 
 const DEFAULT_MAX_HOLDING_PCT = 40;
 
+// Discovery Bot: watches every token the keeper has ever seen for a price
+// move and a liquidity increase happening together over a fixed 60-minute
+// window, instead of reacting to one token the user named (a rule/limit
+// order) or a token being brand new (Launch Bot). Deployer-share is
+// deliberately absent here - see keeper/src/registry.ts's DiscoveryConfig
+// comment for why.
+const DEFAULT_DISCOVERY = {
+  enabled: false, mode: "notify", amountPls: 0, maxPerDay: 4,
+  minPriceMovePct: 20, minLiquidityGrowthPct: 15, minLiquidityPls: CHAIN.minLiquidityDefault,
+  takeProfitPct: 50, stopLossPct: 35, trailingStopPct: 0, timeExitMin: 60,
+  maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true, requireOwnerRenounced: false,
+};
+
 function isFiniteNumber(v) {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -135,6 +148,36 @@ function normalizeLaunch(l) {
   };
 }
 
+function normalizeDiscovery(d) {
+  const merged = { ...DEFAULT_DISCOVERY, ...(d ?? {}) };
+  if (merged.mode !== "notify" && merged.mode !== "autoBuy")
+    throw new Error(`discovery.mode must be "notify" or "autoBuy"`);
+  for (const field of [
+    "amountPls", "maxPerDay", "minPriceMovePct", "minLiquidityGrowthPct", "minLiquidityPls",
+    "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
+  ]) {
+    if (!isFiniteNumber(merged[field]) || merged[field] < 0)
+      throw new Error(`discovery.${field} must be a non-negative number`);
+  }
+  return {
+    enabled: Boolean(merged.enabled),
+    mode: merged.mode,
+    amountPls: merged.amountPls,
+    maxPerDay: merged.maxPerDay,
+    minPriceMovePct: merged.minPriceMovePct,
+    minLiquidityGrowthPct: merged.minLiquidityGrowthPct,
+    minLiquidityPls: merged.minLiquidityPls,
+    takeProfitPct: merged.takeProfitPct,
+    stopLossPct: merged.stopLossPct,
+    trailingStopPct: merged.trailingStopPct,
+    timeExitMin: merged.timeExitMin,
+    maxBuyTaxBps: merged.maxBuyTaxBps,
+    maxSellTaxBps: merged.maxSellTaxBps,
+    requireLpLock: Boolean(merged.requireLpLock),
+    requireOwnerRenounced: Boolean(merged.requireOwnerRenounced),
+  };
+}
+
 /**
  * Validates a whole config payload as submitted by a user. Throws Error with a
  * human-readable message on the first problem found - callers turn that into
@@ -155,14 +198,17 @@ function normalizeConfig(body) {
   if (limitOrdersIn.length > 50) throw new Error("too many limit orders (max 50)");
   const limitOrders = limitOrdersIn.map(normalizeLimitOrder);
   const launch = normalizeLaunch(body.launch);
-  return { launch, rules, snipes, limitOrders, maxHoldingPct };
+  const discovery = normalizeDiscovery(body.discovery);
+  return { launch, rules, snipes, limitOrders, discovery, maxHoldingPct };
 }
 
 function emptyConfig() {
   return {
     launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [],
-    maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+    discovery: { ...DEFAULT_DISCOVERY }, maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
   };
 }
 
-module.exports = { normalizeConfig, emptyConfig, DEFAULT_LAUNCH, DEFAULT_MAX_HOLDING_PCT };
+module.exports = {
+  normalizeConfig, emptyConfig, DEFAULT_LAUNCH, DEFAULT_DISCOVERY, DEFAULT_MAX_HOLDING_PCT,
+};

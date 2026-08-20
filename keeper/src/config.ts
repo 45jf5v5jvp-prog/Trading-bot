@@ -95,6 +95,10 @@ export const CFG = {
   positionCheckSec: num("POSITION_CHECK_SEC", "20"),
   pairScanSec: num("PAIR_SCAN_SEC", "15"),
   registryRefreshSec: num("REGISTRY_REFRESH_SEC", "300"),
+  // Not racing a launch - an anomaly worth flagging is, by definition, already
+  // a 60-minute-old trend, so this runs on the slower price-poll-ish cadence
+  // rather than the launch scanner's fast one.
+  discoveryScanSec: num("DISCOVERY_SCAN_SEC", "90"),
 
   simAddress: addr("SIM_ADDRESS", "0x1111111111111111111111111111111111111111"),
   simAmountEth: num("SIM_AMOUNT_ETH", "0.02"),

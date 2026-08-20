@@ -13,8 +13,8 @@ import { mapLimit } from "./concurrency.js";
 import { db, meta, v4Pools } from "./db.js";
 import { log } from "./log.js";
 
-/** WETH the vault currently holds, in whole PLS. */
-async function vaultWethBalance(vault: string): Promise<number> {
+/** WETH the vault currently holds, in whole ETH. */
+export async function vaultWethBalance(vault: string): Promise<number> {
   const weth = new Contract(CFG.weth, ERC20_ABI, provider) as Dyn;
   return Number(formatEther(await weth.balanceOf(vault)));
 }
@@ -105,6 +105,11 @@ function strictestOf(candidates: VaultRecord[]): ScreenLimits & { representative
 async function handleNewToken(token: string, txHash: string, discoveryBlock: number): Promise<void> {
   if (seen.has(token.toLowerCase())) return;
   seen.add(token.toLowerCase());
+  // Unconditional and independent of Launch Bot config or screening outcome -
+  // Discovery Bot needs price/liquidity history for every token this scanner
+  // ever sees, not just the ones some vault's Launch Bot happens to be
+  // watching for and that pass its screen. See prices.ts's ensureWatched.
+  await ensureWatched(token);
   await evaluateToken(token, txHash, discoveryBlock);
 }
 
@@ -143,8 +148,6 @@ async function evaluateToken(token: string, txHash: string, discoveryBlock: numb
   pendingRetry.delete(token.toLowerCase());
   log("info", "launch", `Screened ${token} via ${venue.kind}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
     `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} ETH`);
-
-  await ensureWatched(token);
 
   // Each candidate vault gets exactly one buy-or-skip decision here, and
   // vaults are independent, so this runs concurrently (bounded by

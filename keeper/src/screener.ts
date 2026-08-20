@@ -138,7 +138,7 @@ async function v3PriceImpactBps(token: string, fee: number, tradeSizeEth: number
 }
 
 /** Share of LP tokens that are burned or sitting in a known locker. */
-async function lpLockedPct(pair: string): Promise<number> {
+export async function lpLockedPct(pair: string): Promise<number> {
   const p = new Contract(pair, PAIR_ABI, provider) as Dyn;
   const total: bigint = await p.totalSupply();
   if (total === 0n) return 0;
@@ -214,7 +214,7 @@ async function findDeployBlock(token: string, atOrBeforeBlock: number): Promise<
  * function) is treated as permissive/unknown rather than blocked - this
  * check only bites tokens that DO have an owner and have not given it up.
  */
-async function checkOwnerRenounced(token: string): Promise<boolean> {
+export async function checkOwnerRenounced(token: string): Promise<boolean> {
   try {
     const t = new Contract(token, ERC20_ABI, provider) as Dyn;
     const owner: string = await t.owner();

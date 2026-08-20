@@ -47,3 +47,25 @@ Note: vault ownership is permanent and tied to whichever wallet called
 `createVault`. This vault belongs to Account 16 forever. When ready to use the
 bot for real, switch to the intended long-term wallet and call `createVault([])`
 again from that wallet to get a separate, real vault owned by it.
+
+---
+
+## v2 deployment — in progress (2026-08-20)
+
+Redeploying to fix two things found in review: the VaultFactory above still
+defaults every new vault's executor to the compromised wallet, and
+`BotVault.sol` picked up a `maxTradeSize` fix (owner's per-trade cap is now
+enforced in WPLS terms on both buy and sell, not raw token units - see git
+history on `contracts/BotVault.sol`, commit `869ecc1`).
+
+| Contract | Address | Status |
+| --- | --- | --- |
+| BotVault (implementation, v2) | `0x6bAd39Da9B4741bB34cd8474402AdD402665e110` | Deployed. **Not yet independently verified against scan.pulsechain.com by anyone other than the deployer's own report** - verify before trusting. |
+| VaultFactory (v2) | *(pending)* | Deploy next, with `_impl` = the address above and `_executor` = `0xA5519278B6be31545b0318B88e476Bdf13A1567e` (the current, non-compromised wallet). See constructor args in the "Next steps" message this replaces once deployed. |
+
+Once VaultFactory (v2) is deployed and verified, this section replaces the
+`VaultFactory` row above as the one to use, `keeper/.env`'s `VAULT_FACTORY=`
+moves to the new address, and the original VaultFactory
+(`0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295`) gets marked superseded here
+(not deleted - it's the historical record of the compromised-executor
+incident).

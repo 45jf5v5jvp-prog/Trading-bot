@@ -116,6 +116,24 @@ CREATE TABLE IF NOT EXISTS discovery_actions (
   }
 }
 
+// Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request
+// pipeline discovery.ts already built rather than duplicating it, tagged by
+// `source` and carrying its own indicator + AI-verdict columns alongside
+// discovery.ts's price/liquidity ones.
+{
+  const cols = db.prepare("PRAGMA table_info(opportunities)").all() as { name: string }[];
+  const add = (name: string, ddl: string) => {
+    if (!cols.some((c) => c.name === name)) db.exec(`ALTER TABLE opportunities ADD COLUMN ${ddl}`);
+  };
+  add("source", "source TEXT NOT NULL DEFAULT 'discovery'");
+  add("rsi", "rsi REAL");
+  add("macd_histogram", "macd_histogram REAL");
+  add("bollinger_percent_b", "bollinger_percent_b REAL");
+  add("ai_recommend", "ai_recommend INTEGER");
+  add("ai_confidence", "ai_confidence TEXT");
+  add("ai_reasoning", "ai_reasoning TEXT");
+}
+
 export const meta = {
   get(k: string, d = ""): string {
     const r = db.prepare("SELECT v FROM meta WHERE k=?").get(k) as { v: string } | undefined;

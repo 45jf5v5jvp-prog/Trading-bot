@@ -56,6 +56,12 @@ export const CFG = {
   simAmountPls: num("SIM_AMOUNT_PLS", "100000"),
   honeypotMaxLossBps: num("HONEYPOT_MAX_LOSS_BPS", "1200"),
 
+  // Empty by default, same "unset means off, not a fake default" rule as
+  // PROBE_ADDRESS. Hunter Bot's AI gate and Ask Icaria both no-op with a
+  // clear log line rather than guess when this is missing.
+  anthropicApiKey: opt("ANTHROPIC_API_KEY", ""),
+  anthropicModel: opt("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+
   dbPath: opt("DB_PATH", "./keeper.db"),
   logLevel: opt("LOG_LEVEL", "info"),
 };

@@ -57,7 +57,7 @@ setup.exec(`
     buy_tax_bps INTEGER, sell_tax_bps INTEGER, lp_locked_pct REAL, owner_renounced INTEGER,
     sellable INTEGER NOT NULL, verdict TEXT NOT NULL, reason TEXT, narrative TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'discovery', rsi REAL, macd_histogram REAL, bollinger_percent_b REAL,
-    ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT
+    ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT, ai_suggested_amount_pls REAL
   );
   CREATE TABLE discovery_actions (
     vault TEXT NOT NULL, opportunity_id INTEGER NOT NULL, ts INTEGER NOT NULL,

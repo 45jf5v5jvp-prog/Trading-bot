@@ -38,11 +38,11 @@ test("hunter settings default to off with AI approval required", () => {
 });
 
 test("hunter settings fill in defaults for missing fields, and validate the rest", () => {
-  const out = normalizeConfig({ hunter: { enabled: true, mode: "autoBuy", allocatedPls: 50000, perTradePls: 5000 } });
+  const out = normalizeConfig({ hunter: { enabled: true, mode: "autoBuy", allocatedPls: 50000, maxPerTradePls: 5000 } });
   assert.equal(out.hunter.enabled, true);
   assert.equal(out.hunter.mode, "autoBuy");
   assert.equal(out.hunter.allocatedPls, 50000);
-  assert.equal(out.hunter.perTradePls, 5000);
+  assert.equal(out.hunter.maxPerTradePls, 5000);
   assert.equal(out.hunter.rsiOversold, 30); // default filled in
   assert.equal(out.hunter.requireLpLock, true); // default filled in
 });
@@ -64,16 +64,16 @@ test("rejects a hunter bollingerPercentBMax outside 0-1", () => {
   assert.throws(() => normalizeConfig({ hunter: { bollingerPercentBMax: -0.1 } }), /bollingerPercentBMax/);
 });
 
-test("rejects a hunter perTradePls larger than its own allocatedPls", () => {
+test("rejects a hunter maxPerTradePls larger than its own allocatedPls", () => {
   assert.throws(
-    () => normalizeConfig({ hunter: { allocatedPls: 1000, perTradePls: 5000 } }),
-    /perTradePls/,
+    () => normalizeConfig({ hunter: { allocatedPls: 1000, maxPerTradePls: 5000 } }),
+    /maxPerTradePls/,
   );
 });
 
-test("allows hunter perTradePls larger than allocatedPls when allocatedPls is 0 (still disabled)", () => {
-  const out = normalizeConfig({ hunter: { allocatedPls: 0, perTradePls: 5000 } });
-  assert.equal(out.hunter.perTradePls, 5000);
+test("allows hunter maxPerTradePls larger than allocatedPls when allocatedPls is 0 (still disabled)", () => {
+  const out = normalizeConfig({ hunter: { allocatedPls: 0, maxPerTradePls: 5000 } });
+  assert.equal(out.hunter.maxPerTradePls, 5000);
 });
 
 test("accepts a minimal valid snipe target", () => {

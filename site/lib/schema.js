@@ -40,7 +40,7 @@ const DEFAULT_DISCOVERY = {
 // liquidity-coherence check (always on, not a setting here) that catches a
 // price crash caused by a liquidity pull before it's mistaken for a dip.
 const DEFAULT_HUNTER = {
-  enabled: false, mode: "notify", allocatedPls: 0, perTradePls: 0, maxPerDay: 3,
+  enabled: false, mode: "notify", allocatedPls: 0, maxPerTradePls: 0, maxPerDay: 3,
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
   minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
@@ -175,7 +175,7 @@ function normalizeHunter(h) {
   if (merged.minAiConfidence !== "low" && merged.minAiConfidence !== "medium" && merged.minAiConfidence !== "high")
     throw new Error(`hunter.minAiConfidence must be "low", "medium", or "high"`);
   for (const field of [
-    "allocatedPls", "perTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
+    "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
     "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
@@ -183,13 +183,13 @@ function normalizeHunter(h) {
   }
   if (!isFiniteNumber(merged.bollingerPercentBMax) || merged.bollingerPercentBMax < 0 || merged.bollingerPercentBMax > 1)
     throw new Error("hunter.bollingerPercentBMax must be between 0 and 1");
-  if (merged.perTradePls > merged.allocatedPls && merged.allocatedPls > 0)
-    throw new Error("hunter.perTradePls cannot exceed hunter.allocatedPls");
+  if (merged.maxPerTradePls > merged.allocatedPls && merged.allocatedPls > 0)
+    throw new Error("hunter.maxPerTradePls cannot exceed hunter.allocatedPls");
   return {
     enabled: Boolean(merged.enabled),
     mode: merged.mode,
     allocatedPls: merged.allocatedPls,
-    perTradePls: merged.perTradePls,
+    maxPerTradePls: merged.maxPerTradePls,
     maxPerDay: merged.maxPerDay,
     requireRsi: Boolean(merged.requireRsi),
     rsiOversold: merged.rsiOversold,

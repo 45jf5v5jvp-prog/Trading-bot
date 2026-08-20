@@ -46,6 +46,11 @@ interface Strictest {
   maxBuyTaxBps: number; maxSellTaxBps: number;
   requireLpLock: boolean; requireOwnerRenounced: boolean;
   anyRequireAi: boolean;
+  // The most generous per-trade ceiling among vaults that require AI
+  // approval - handed to assess() as the spending authority to size
+  // against. Each vault still clamps to its OWN (possibly stricter)
+  // ceiling at dispatch time - see sizeForVault().
+  aiCeilingPls: number;
 }
 
 async function vaultWplsPls(vault: string): Promise<number> {
@@ -93,13 +98,20 @@ function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, 
   return `${screened} AI take (${ai.confidence} confidence, ${ai.recommend ? "would buy" : "would not buy"}): ${ai.reasoning}`;
 }
 
-async function executeHunterBuy(v: VaultRecord, id: number, token: string): Promise<void> {
+/**
+ * `amountPls` is decided by the caller, not read from H.maxPerTradePls
+ * directly - when the AI sized the trade (see ai.ts's assess()), this is
+ * its suggested amount, clamped to this vault's own ceiling; otherwise it's
+ * the full ceiling. Either way `amountPls` here is the actual spend, never
+ * exceeding H.maxPerTradePls.
+ */
+async function executeHunterBuy(v: VaultRecord, id: number, token: string, amountPls: number): Promise<void> {
   const H = v.hunter;
-  if (H.perTradePls <= 0 || H.allocatedPls <= 0) return;
+  if (amountPls <= 0 || H.allocatedPls <= 0) return;
 
   const deployed = deployedPls(v.address);
-  if (deployed + H.perTradePls > H.allocatedPls) {
-    log("info", "hunter", `${v.address} ${token}: would exceed its ${H.allocatedPls} PLS allocation (${deployed} already deployed), skipping`);
+  if (deployed + amountPls > H.allocatedPls) {
+    log("info", "hunter", `${v.address} ${token}: ${amountPls} PLS would exceed its ${H.allocatedPls} PLS allocation (${deployed} already deployed), skipping`);
     return;
   }
 
@@ -108,12 +120,12 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string): Prom
   const { total: posValue, byToken } = await positionsValuePls(v.address);
   const totalValue = (await vaultWplsPls(v.address)) + posValue;
   const tokenNow = byToken.get(token.toLowerCase()) ?? 0;
-  if (exceedsHoldingCap(tokenNow + H.perTradePls, totalValue, v.maxHoldingPct)) {
+  if (exceedsHoldingCap(tokenNow + amountPls, totalValue, v.maxHoldingPct)) {
     log("info", "hunter", `${v.address} ${token}: holding cap ${v.maxHoldingPct}% would be exceeded, skipping buy`);
     return;
   }
 
-  const amountIn = parseEther(String(H.perTradePls));
+  const amountIn = parseEther(String(amountPls));
   const res = await executeSwap({
     vault: v.address, bot: "hunter", path: [CFG.wpls, token], amountIn, tokenLabel: token,
     slippageBps: Math.min(CFG.maxSlippageBps, 300),
@@ -122,14 +134,22 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string): Prom
   if (res.ok) {
     openPosition({
       vault: v.address, bot: "hunter", token,
-      spentPls: H.perTradePls, tokensOut: res.amountOut,
+      spentPls: amountPls, tokensOut: res.amountOut,
       tpPct: H.takeProfitPct, slPct: H.stopLossPct, trailPct: H.trailingStopPct, timeExitMin: H.timeExitMin,
     });
     discoveryActions.record(v.address, id, "bought", res.txHash);
-    log("info", "hunter", `${v.address} bought ${H.perTradePls} PLS of ${token} on opportunity #${id}`);
+    log("info", "hunter", `${v.address} bought ${amountPls} PLS of ${token} on opportunity #${id}`);
   } else {
     log("warn", "hunter", `${v.address} skipped opportunity #${id} (${token}): ${res.reason}`);
   }
+}
+
+/** How much to actually spend for this vault: the AI's own sizing when it
+ * gave one, clamped to this vault's ceiling (never more, even if the AI's
+ * ceiling at call time was a looser vault's), otherwise the full ceiling. */
+function sizeForVault(H: HunterConfig, ai: AiVerdict | null): number {
+  if (ai?.suggestedAmountPls) return Math.min(ai.suggestedAmountPls, H.maxPerTradePls);
+  return H.maxPerTradePls;
 }
 
 async function dispatch(
@@ -163,7 +183,7 @@ async function dispatch(
       }
     }
 
-    await executeHunterBuy(v, id, token);
+    await executeHunterBuy(v, id, token, sizeForVault(H, ai));
   });
 }
 
@@ -217,7 +237,7 @@ async function evaluateWatchedToken(
       macdBullishCross: snap.macd?.bullishCross ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
       narrative: `Technical setup: ${triggers.join("; ")}`,
     };
-    ai = await assess(profile);
+    ai = await assess(profile, strictest.aiCeilingPls > 0 ? strictest.aiCeilingPls : undefined);
   }
 
   const narrative = buildNarrative(w.symbol, triggers, s, ai);
@@ -228,6 +248,7 @@ async function evaluateWatchedToken(
     ownerRenounced: s.ownerRenounced, sellable: s.sellable, verdict: s.verdict, reason: s.reason, narrative,
     source: "hunter", rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
     aiRecommend: ai?.recommend ?? null, aiConfidence: ai?.confidence ?? null, aiReasoning: ai?.reasoning ?? null,
+    aiSuggestedAmountPls: ai?.suggestedAmountPls ?? null,
   });
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
@@ -243,7 +264,15 @@ async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void
       const opp = opportunities.get(id);
       if (!opp || opp.verdict !== "pass" || opp.source !== "hunter") continue;
       try {
-        await executeHunterBuy(v, id, opp.token);
+        // A manual "Buy Now" from notify mode has no fresh AI verdict of its
+        // own - reuse whatever the detector already computed (the AI's
+        // sizing shown in the Opportunities panel), clamped to this vault's
+        // own ceiling same as an autoBuy would be. Falls back to the full
+        // ceiling if no AI ran (requireAiApproval was off at detection time).
+        const amountPls = opp.aiSuggestedAmountPls
+          ? Math.min(opp.aiSuggestedAmountPls, v.hunter.maxPerTradePls)
+          : v.hunter.maxPerTradePls;
+        await executeHunterBuy(v, id, opp.token, amountPls);
       } catch (e) {
         log("error", "hunter", `${v.address} buy request for opportunity #${id}: ${(e as Error).message}`);
       }
@@ -259,6 +288,7 @@ export async function tick(): Promise<void> {
   // discovery.ts and launch.ts use for their own per-token checks.
   const rsiSubs = candidates.filter((c) => c.hunter.requireRsi);
   const bollSubs = candidates.filter((c) => c.hunter.requireBollinger);
+  const aiSubs = candidates.filter((c) => c.hunter.requireAiApproval);
   const strictest: Strictest = {
     requireRsi: rsiSubs.length > 0,
     rsiOversold: rsiSubs.length ? Math.max(...rsiSubs.map((c) => c.hunter.rsiOversold)) : 0,
@@ -270,7 +300,8 @@ export async function tick(): Promise<void> {
     maxSellTaxBps: Math.max(...candidates.map((c) => c.hunter.maxSellTaxBps)),
     requireLpLock: candidates.every((c) => c.hunter.requireLpLock),
     requireOwnerRenounced: candidates.every((c) => c.hunter.requireOwnerRenounced),
-    anyRequireAi: candidates.some((c) => c.hunter.requireAiApproval),
+    anyRequireAi: aiSubs.length > 0,
+    aiCeilingPls: aiSubs.length ? Math.max(...aiSubs.map((c) => c.hunter.maxPerTradePls)) : 0,
   };
 
   const from = Math.floor(Date.now() / 1000) - LOOKBACK_HOURS * 3600;

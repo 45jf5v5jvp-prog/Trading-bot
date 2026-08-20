@@ -92,7 +92,8 @@ function getOpportunities(limit = 50) {
     return d.prepare(
       `SELECT id, token, ts, price_move_pct, liq_growth_pct, liq_pls, buy_tax_bps, sell_tax_bps,
               lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative,
-              source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning
+              source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning,
+              ai_suggested_amount_pls
        FROM opportunities ORDER BY ts DESC LIMIT ?`,
     ).all(limit);
   } catch {

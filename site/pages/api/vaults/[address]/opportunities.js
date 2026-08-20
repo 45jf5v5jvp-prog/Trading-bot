@@ -45,6 +45,7 @@ export default async function handler(req, res) {
     aiRecommend: o.ai_recommend === null || o.ai_recommend === undefined ? null : Boolean(o.ai_recommend),
     aiConfidence: o.ai_confidence ?? null,
     aiReasoning: o.ai_reasoning ?? null,
+    aiSuggestedAmountPls: o.ai_suggested_amount_pls ?? null,
     action: actions[o.id]?.action ?? null,
     txHash: actions[o.id]?.txHash ?? null,
   }));

@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS discovery_actions (
   add("ai_recommend", "ai_recommend INTEGER");
   add("ai_confidence", "ai_confidence TEXT");
   add("ai_reasoning", "ai_reasoning TEXT");
+  add("ai_suggested_amount_pls", "ai_suggested_amount_pls REAL");
 }
 
 export const meta = {
@@ -234,6 +235,12 @@ export interface NewOpportunity {
   aiRecommend?: boolean | null;
   aiConfidence?: "low" | "medium" | "high" | null;
   aiReasoning?: string | null;
+  /** How much of Hunter Bot's per-trade ceiling the AI actually wants to
+   * spend - see ai.ts's assess()/AiVerdict.suggestedAmountPls. Used both
+   * for the initial autoBuy and for a later manual "Buy Now" on the same
+   * opportunity, so a human approving it spends what the AI sized, not the
+   * full ceiling by default. */
+  aiSuggestedAmountPls?: number | null;
 }
 export interface OpportunityRow extends NewOpportunity { id: number; ts: number; source: "discovery" | "hunter" }
 
@@ -246,14 +253,14 @@ export interface OpportunityRow extends NewOpportunity { id: number; ts: number;
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
       o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
       o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
       o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
-      o.aiConfidence ?? null, o.aiReasoning ?? null,
+      o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
     );
     return Number(info.lastInsertRowid);
   },
@@ -266,7 +273,23 @@ export const opportunities = {
     return Boolean(r);
   },
   get(id: number): OpportunityRow | undefined {
-    return db.prepare("SELECT * FROM opportunities WHERE id=?").get(id) as OpportunityRow | undefined;
+    const r = db.prepare(`
+      SELECT id, token, ts,
+             price_move_pct AS priceMovePct, liq_growth_pct AS liqGrowthPct, liq_pls AS liqPls,
+             buy_tax_bps AS buyTaxBps, sell_tax_bps AS sellTaxBps, lp_locked_pct AS lpLockedPct,
+             owner_renounced AS ownerRenounced, sellable, verdict, reason, narrative,
+             source, rsi, macd_histogram AS macdHistogram, bollinger_percent_b AS bollingerPercentB,
+             ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
+             ai_suggested_amount_pls AS aiSuggestedAmountPls
+      FROM opportunities WHERE id=?
+    `).get(id) as any;
+    if (!r) return undefined;
+    return {
+      ...r,
+      ownerRenounced: r.ownerRenounced === null ? null : Boolean(r.ownerRenounced),
+      sellable: Boolean(r.sellable),
+      aiRecommend: r.aiRecommend === null ? null : Boolean(r.aiRecommend),
+    } as OpportunityRow;
   },
 };
 

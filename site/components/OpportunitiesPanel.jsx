@@ -46,6 +46,9 @@ function OpportunityRow({ o, onBuy, buyState }) {
         {o.aiConfidence && (
           <p className="hint" style={{ margin: "4px 0 0", color: CONFIDENCE_COLOR[o.aiConfidence] }}>
             AI: {o.aiRecommend ? "would buy" : "would not buy"} ({o.aiConfidence} confidence)
+            {o.aiRecommend && o.aiSuggestedAmountPls
+              ? ` — sizing this at ${Math.round(o.aiSuggestedAmountPls).toLocaleString()} ${CHAIN.nativeSymbol}`
+              : ""}
           </p>
         )}
       </div>

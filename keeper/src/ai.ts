@@ -46,6 +46,12 @@ export interface AiVerdict {
   recommend: boolean;
   confidence: "low" | "medium" | "high";
   reasoning: string;
+  /** Only meaningful when assess() was called with a maxAmountPls - how
+   * much of that authorized ceiling the model actually wants to spend.
+   * Never exceeds maxAmountPls (clamped defensively even if the model
+   * ignores the instruction); undefined when assess() had no ceiling to
+   * size against. */
+  suggestedAmountPls?: number;
 }
 
 function describeProfile(p: TokenProfile): string {
@@ -79,21 +85,31 @@ const SYSTEM_PROMPT =
   "predicts nothing. Say so plainly when relevant. Never claim a trade is safe, only that it " +
   "looks reasonable or does not, and why.";
 
-const VERDICT_TOOL = {
-  name: "give_verdict",
-  description: "Report your trading assessment of this token.",
-  input_schema: {
-    type: "object",
-    properties: {
-      recommend: { type: "boolean", description: "Would you buy this, given only what's described?" },
-      confidence: { type: "string", enum: ["low", "medium", "high"] },
-      reasoning: { type: "string", description: "2-4 sentences, plain English, cite specific numbers from the profile." },
-    },
-    required: ["recommend", "confidence", "reasoning"],
-  },
-};
+function verdictTool(maxAmountPls?: number) {
+  const properties: Record<string, unknown> = {
+    recommend: { type: "boolean", description: "Would you buy this, given only what's described?" },
+    confidence: { type: "string", enum: ["low", "medium", "high"] },
+    reasoning: { type: "string", description: "2-4 sentences, plain English, cite specific numbers from the profile." },
+  };
+  const required = ["recommend", "confidence", "reasoning"];
+  if (maxAmountPls !== undefined) {
+    properties.suggestedAmountPls = {
+      type: "number",
+      description:
+        `If recommending a buy, how much PLS to actually spend, out of an authorized maximum of ` +
+        `${maxAmountPls} PLS. You do not have to use the full amount - spend less than the maximum ` +
+        `when your confidence is lower, or when the opportunity itself looks smaller than the ceiling ` +
+        `warrants. Never exceed ${maxAmountPls}. If not recommending a buy, omit this field.`,
+    };
+  }
+  return {
+    name: "give_verdict",
+    description: "Report your trading assessment of this token.",
+    input_schema: { type: "object", properties, required },
+  };
+}
 
-async function callClaude(userContent: string, forceTool: boolean): Promise<any | null> {
+async function callClaude(userContent: string, tool: ReturnType<typeof verdictTool> | null): Promise<any | null> {
   if (!CFG.anthropicApiKey) {
     log("warn", "ai", "ANTHROPIC_API_KEY not set - AI assessment skipped, treated as unavailable, never as approval");
     return null;
@@ -111,7 +127,7 @@ async function callClaude(userContent: string, forceTool: boolean): Promise<any 
         max_tokens: 512,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
-        ...(forceTool ? { tools: [VERDICT_TOOL], tool_choice: { type: "tool", name: "give_verdict" } } : {}),
+        ...(tool ? { tools: [tool], tool_choice: { type: "tool", name: "give_verdict" } } : {}),
       }),
     });
     if (!res.ok) {
@@ -125,12 +141,23 @@ async function callClaude(userContent: string, forceTool: boolean): Promise<any 
   }
 }
 
-/** Forced structured verdict - used before an auto-buy. Null means the AI
- * gate is unavailable (no key, or the call failed), never "approved." */
-export async function assess(profile: TokenProfile): Promise<AiVerdict | null> {
+/**
+ * Forced structured verdict - used before an auto-buy. Null means the AI
+ * gate is unavailable (no key, or the call failed), never "approved."
+ *
+ * `maxAmountPls`, when given, hands the model a spending ceiling and asks it
+ * to size the trade itself - full authority up to that number, not a fixed
+ * amount every time. A recommendation with no maxAmountPls (or one the
+ * model didn't size) still requires the caller to fall back to its own
+ * default sizing; this never fabricates a number the model didn't provide.
+ */
+export async function assess(profile: TokenProfile, maxAmountPls?: number): Promise<AiVerdict | null> {
+  const ceilingLine = maxAmountPls !== undefined
+    ? `\n\nYou are authorized to spend up to ${maxAmountPls} PLS on this - size the trade yourself, spending less than the maximum if your confidence is lower.`
+    : "";
   const data = await callClaude(
-    `${describeProfile(profile)}\n\nWould you buy this token? Report your verdict via give_verdict.`,
-    true,
+    `${describeProfile(profile)}\n\nWould you buy this token?${ceilingLine} Report your verdict via give_verdict.`,
+    verdictTool(maxAmountPls),
   );
   if (!data) return null;
   const toolUse = (data.content ?? []).find((b: any) => b.type === "tool_use" && b.name === "give_verdict");
@@ -140,11 +167,14 @@ export async function assess(profile: TokenProfile): Promise<AiVerdict | null> {
   }
   const input = toolUse.input as Partial<AiVerdict>;
   if (typeof input.recommend !== "boolean" || !input.reasoning) return null;
-  return {
+  const out: AiVerdict = {
     recommend: input.recommend,
     confidence: input.confidence === "high" || input.confidence === "medium" ? input.confidence : "low",
     reasoning: input.reasoning,
   };
+  if (maxAmountPls !== undefined && typeof input.suggestedAmountPls === "number" && input.suggestedAmountPls > 0)
+    out.suggestedAmountPls = Math.min(input.suggestedAmountPls, maxAmountPls);
+  return out;
 }
 
 /** Free-form answer for Ask Icaria - the user's own question, in their own
@@ -152,7 +182,7 @@ export async function assess(profile: TokenProfile): Promise<AiVerdict | null> {
 export async function answerQuestion(profile: TokenProfile, question: string): Promise<string | null> {
   const data = await callClaude(
     `${describeProfile(profile)}\n\nThe user asks: "${question}"\n\nAnswer directly and plainly, in a few sentences.`,
-    false,
+    null,
   );
   if (!data) return null;
   const textBlock = (data.content ?? []).find((b: any) => b.type === "text");

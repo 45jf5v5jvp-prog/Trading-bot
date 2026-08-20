@@ -43,8 +43,8 @@ export default function HunterSettings({ hunter, onChange }) {
       <div className="field-inline">
         <label>Allocated {CHAIN.nativeSymbol}</label>
         <input {...num("allocatedPls")} min="0" style={{ width: 110 }} />
-        <label>{CHAIN.nativeSymbol} per buy</label>
-        <input {...num("perTradePls")} min="0" style={{ width: 100 }} />
+        <label>Max {CHAIN.nativeSymbol} per buy</label>
+        <input {...num("maxPerTradePls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
         <input {...num("maxPerDay")} min="0" style={{ width: 80 }} />
       </div>
@@ -52,6 +52,9 @@ export default function HunterSettings({ hunter, onChange }) {
         Hunter Bot never has more than "Allocated" deployed at once across its own open positions -
         it's the amount you're choosing to risk on this bot specifically, separate from the rest of
         the vault. Freed back up as positions close, win or lose, so it can keep reusing that amount.
+        "Max per buy" is a ceiling, not a fixed size - with AI approval on, the AI decides how much
+        of that ceiling to actually spend on each buy (less when it's less confident), full authority
+        up to the number you set here, never more.
       </p>
 
       <div className="sub-label">Technical setup (at least one enabled trigger must fire)</div>

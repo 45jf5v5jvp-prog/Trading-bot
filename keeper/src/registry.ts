@@ -86,12 +86,19 @@ export interface DiscoveryConfig {
  * before an autoBuy fires. It never substitutes for the mechanical checks
  * above, and with no ANTHROPIC_API_KEY configured it fails safe - no
  * verdict means no auto-buy, never a silent bypass.
+ *
+ * `maxPerTradePls` is a ceiling, not a fixed size - full authority up to
+ * that amount, not "always spend exactly this." When requireAiApproval is
+ * on, the AI's own verdict decides how much of the ceiling to actually use
+ * (see ai.ts's assess()), spending less when its confidence is lower. With
+ * requireAiApproval off there is no sizing judgment to defer to, so the
+ * bot simply spends the full ceiling every time.
  */
 export interface HunterConfig {
   enabled: boolean;
   mode: "notify" | "autoBuy";
   allocatedPls: number;   // dedicated bankroll deployed at once. 0 disables.
-  perTradePls: number;
+  maxPerTradePls: number;
   maxPerDay: number;
 
   // At least one enabled trigger must fire for a candidate to qualify.
@@ -216,7 +223,7 @@ const DEFAULT_DISCOVERY: DiscoveryConfig = {
 };
 
 const DEFAULT_HUNTER: HunterConfig = {
-  enabled: false, mode: "notify", allocatedPls: 0, perTradePls: 0, maxPerDay: 3,
+  enabled: false, mode: "notify", allocatedPls: 0, maxPerTradePls: 0, maxPerDay: 3,
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
   minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,

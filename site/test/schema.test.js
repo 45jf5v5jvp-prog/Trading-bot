@@ -35,6 +35,29 @@ test("hunter settings default to off with AI approval required", () => {
   assert.equal(c.hunter.mode, "notify");
   assert.equal(c.hunter.requireAiApproval, true);
   assert.equal(c.hunter.minAiConfidence, "medium");
+  assert.equal(c.hunter.exitMode, "limited");
+});
+
+test("rejects a hunter exitMode that is not limited or full", () => {
+  assert.throws(() => normalizeConfig({ hunter: { exitMode: "yolo" } }), /exitMode/);
+});
+
+test("accepts exitMode full with a positive stopLossPct", () => {
+  const out = normalizeConfig({ hunter: { exitMode: "full", stopLossPct: 30 } });
+  assert.equal(out.hunter.exitMode, "full");
+  assert.equal(out.hunter.stopLossPct, 30);
+});
+
+test("rejects exitMode full with stopLossPct left at 0 - Auto Full still needs a mandatory floor", () => {
+  assert.throws(
+    () => normalizeConfig({ hunter: { exitMode: "full", stopLossPct: 0 } }),
+    /stopLossPct/,
+  );
+});
+
+test("allows exitMode limited with stopLossPct 0 (a limited-mode owner may legitimately disable it)", () => {
+  const out = normalizeConfig({ hunter: { exitMode: "limited", stopLossPct: 0 } });
+  assert.equal(out.hunter.stopLossPct, 0);
 });
 
 test("hunter settings fill in defaults for missing fields, and validate the rest", () => {

@@ -13,7 +13,7 @@ import { existsSync, rmSync } from "node:fs";
 for (const p of [process.env.DB_PATH, process.env.DB_PATH + "-wal", process.env.DB_PATH + "-shm"])
   if (existsSync(p)) rmSync(p);
 
-const { assess, answerQuestion } = await import("../src/ai.js");
+const { assess, answerQuestion, assessExit } = await import("../src/ai.js");
 
 const baseProfile = {
   symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
@@ -23,6 +23,12 @@ const baseProfile = {
   macdBullishCross: true, bollingerPercentB: 0.1,
 };
 
+const basePosition = {
+  symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
+  entryPrice: 1, currentPrice: 1.5, pnlPct: 50, peakPnlPct: 60, minutesHeld: 90,
+  rsi: 65, macdHistogram: 0.1, macdBullishCross: false, macdBearishCross: false, bollingerPercentB: 0.8,
+};
+
 test("assess() returns null with no API key set, never a fabricated approval", async () => {
   const v = await assess(baseProfile as any);
   assert.equal(v, null);
@@ -30,5 +36,10 @@ test("assess() returns null with no API key set, never a fabricated approval", a
 
 test("answerQuestion() returns null with no API key set", async () => {
   const v = await answerQuestion(baseProfile as any, "is this safe?");
+  assert.equal(v, null);
+});
+
+test("assessExit() returns null with no API key set, never a fabricated sell signal", async () => {
+  const v = await assessExit(basePosition as any);
   assert.equal(v, null);
 });

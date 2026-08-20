@@ -11,7 +11,7 @@ import { existsSync, rmSync } from "node:fs";
 for (const p of [process.env.DB_PATH, process.env.DB_PATH + "-wal", process.env.DB_PATH + "-shm"])
   if (existsSync(p)) rmSync(p);
 
-const { assess, answerQuestion } = await import("../src/ai.js");
+const { assess, answerQuestion, assessExit } = await import("../src/ai.js");
 
 const baseProfile = {
   symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
@@ -19,6 +19,12 @@ const baseProfile = {
   deployerPct: null, ownerRenounced: true, roundTripLossBps: 50,
   priceMovePct: 25, liqGrowthPct: 20, rsi: 28, macdHistogram: 0.4,
   macdBullishCross: true, bollingerPercentB: 0.1,
+};
+
+const basePosition = {
+  symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
+  entryPrice: 1, currentPrice: 1.5, pnlPct: 50, peakPnlPct: 60, minutesHeld: 90,
+  rsi: 65, macdHistogram: 0.1, macdBullishCross: false, macdBearishCross: false, bollingerPercentB: 0.8,
 };
 
 function mockFetch(impl: () => Promise<any>) {
@@ -88,5 +94,76 @@ test("answerQuestion() returns the model's text block", async () => {
   try {
     const v = await answerQuestion(baseProfile as any, "should I buy this?");
     assert.equal(v, "This looks reasonable but watch the tax.");
+  } finally { restore(); }
+});
+
+test("assess() clamps suggestedAmountPls to the given ceiling, even if the model ignores the instruction", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      content: [{ type: "tool_use", name: "give_verdict", input: { recommend: true, confidence: "high", reasoning: "Strong.", suggestedAmountPls: 999_999 } }],
+    }),
+  }));
+  try {
+    const v = await assess(baseProfile as any, 1000);
+    assert.equal(v?.suggestedAmountPls, 1000);
+  } finally { restore(); }
+});
+
+test("assess() passes through a suggestedAmountPls within the ceiling unchanged", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      content: [{ type: "tool_use", name: "give_verdict", input: { recommend: true, confidence: "low", reasoning: "Cautious.", suggestedAmountPls: 250 } }],
+    }),
+  }));
+  try {
+    const v = await assess(baseProfile as any, 1000);
+    assert.equal(v?.suggestedAmountPls, 250);
+  } finally { restore(); }
+});
+
+test("assess() has no suggestedAmountPls field when called with no ceiling", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      content: [{ type: "tool_use", name: "give_verdict", input: { recommend: true, confidence: "medium", reasoning: "Fine.", suggestedAmountPls: 500 } }],
+    }),
+  }));
+  try {
+    const v = await assess(baseProfile as any);
+    assert.equal(v?.suggestedAmountPls, undefined);
+  } finally { restore(); }
+});
+
+test("assessExit() parses a well-formed give_exit_verdict tool call", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      content: [{ type: "tool_use", name: "give_exit_verdict", input: { sell: true, reasoning: "RSI overbought, taking the win." } }],
+    }),
+  }));
+  try {
+    const v = await assessExit(basePosition as any);
+    assert.deepEqual(v, { sell: true, reasoning: "RSI overbought, taking the win." });
+  } finally { restore(); }
+});
+
+test("assessExit() returns null rather than guessing when the tool call is missing", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({ content: [{ type: "text", text: "I refuse to use the tool." }] }),
+  }));
+  try {
+    const v = await assessExit(basePosition as any);
+    assert.equal(v, null);
+  } finally { restore(); }
+});
+
+test("assessExit() returns null on a non-ok HTTP response rather than throwing", async () => {
+  const restore = mockFetch(async () => ({ ok: false, status: 500, text: async () => "server error" }));
+  try {
+    const v = await assessExit(basePosition as any);
+    assert.equal(v, null);
   } finally { restore(); }
 });

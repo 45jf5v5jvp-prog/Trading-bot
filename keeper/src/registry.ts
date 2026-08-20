@@ -93,6 +93,17 @@ export interface DiscoveryConfig {
  * (see ai.ts's assess()), spending less when its confidence is lower. With
  * requireAiApproval off there is no sizing judgment to defer to, so the
  * bot simply spends the full ceiling every time.
+ *
+ * `exitMode` chooses how a position this bot opens gets managed:
+ *   - "limited": takeProfitPct/stopLossPct/trailingStopPct/timeExitMin all
+ *     apply exactly as configured - the same fixed-target exit every other
+ *     bot in this codebase uses.
+ *   - "full": the AI periodically re-judges the open position (see ai.ts's
+ *     assessExit, hunter.ts's reviewFullModePositions) and decides when to
+ *     exit - it can ride a winner past what a fixed take-profit would have
+ *     locked in. takeProfitPct/trailingStopPct/timeExitMin are not applied
+ *     in this mode; stopLossPct still is, unconditionally, as a floor the
+ *     AI's judgment cannot override or remove.
  */
 export interface HunterConfig {
   enabled: boolean;
@@ -100,6 +111,7 @@ export interface HunterConfig {
   allocatedPls: number;   // dedicated bankroll deployed at once. 0 disables.
   maxPerTradePls: number;
   maxPerDay: number;
+  exitMode: "limited" | "full";
 
   // At least one enabled trigger must fire for a candidate to qualify.
   requireRsi: boolean;
@@ -224,6 +236,7 @@ const DEFAULT_DISCOVERY: DiscoveryConfig = {
 
 const DEFAULT_HUNTER: HunterConfig = {
   enabled: false, mode: "notify", allocatedPls: 0, maxPerTradePls: 0, maxPerDay: 3,
+  exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
   minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,

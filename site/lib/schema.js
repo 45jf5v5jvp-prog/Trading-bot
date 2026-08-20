@@ -41,6 +41,7 @@ const DEFAULT_DISCOVERY = {
 // price crash caused by a liquidity pull before it's mistaken for a dip.
 const DEFAULT_HUNTER = {
   enabled: false, mode: "notify", allocatedPls: 0, maxPerTradePls: 0, maxPerDay: 3,
+  exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
   minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
@@ -172,6 +173,8 @@ function normalizeHunter(h) {
   const merged = { ...DEFAULT_HUNTER, ...(h ?? {}) };
   if (merged.mode !== "notify" && merged.mode !== "autoBuy")
     throw new Error(`hunter.mode must be "notify" or "autoBuy"`);
+  if (merged.exitMode !== "limited" && merged.exitMode !== "full")
+    throw new Error(`hunter.exitMode must be "limited" or "full"`);
   if (merged.minAiConfidence !== "low" && merged.minAiConfidence !== "medium" && merged.minAiConfidence !== "high")
     throw new Error(`hunter.minAiConfidence must be "low", "medium", or "high"`);
   for (const field of [
@@ -185,12 +188,18 @@ function normalizeHunter(h) {
     throw new Error("hunter.bollingerPercentBMax must be between 0 and 1");
   if (merged.maxPerTradePls > merged.allocatedPls && merged.allocatedPls > 0)
     throw new Error("hunter.maxPerTradePls cannot exceed hunter.allocatedPls");
+  // Auto Full hands the AI ongoing exit authority - the stop-loss is the one
+  // thing that authority can never remove, so it must be a real number here,
+  // not left at the "disabled" 0 a limited-mode owner might reasonably use.
+  if (merged.exitMode === "full" && merged.stopLossPct <= 0)
+    throw new Error("hunter.stopLossPct must be greater than 0 when exitMode is \"full\" - Auto Full still needs a mandatory stop-loss");
   return {
     enabled: Boolean(merged.enabled),
     mode: merged.mode,
     allocatedPls: merged.allocatedPls,
     maxPerTradePls: merged.maxPerTradePls,
     maxPerDay: merged.maxPerDay,
+    exitMode: merged.exitMode,
     requireRsi: Boolean(merged.requireRsi),
     rsiOversold: merged.rsiOversold,
     requireMacdCross: Boolean(merged.requireMacdCross),

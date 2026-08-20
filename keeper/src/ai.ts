@@ -109,7 +109,9 @@ function verdictTool(maxAmountPls?: number) {
   };
 }
 
-async function callClaude(userContent: string, tool: ReturnType<typeof verdictTool> | null): Promise<any | null> {
+async function callClaude(
+  system: string, userContent: string, tool: { name: string } | null,
+): Promise<any | null> {
   if (!CFG.anthropicApiKey) {
     log("warn", "ai", "ANTHROPIC_API_KEY not set - AI assessment skipped, treated as unavailable, never as approval");
     return null;
@@ -125,9 +127,9 @@ async function callClaude(userContent: string, tool: ReturnType<typeof verdictTo
       body: JSON.stringify({
         model: CFG.anthropicModel,
         max_tokens: 512,
-        system: SYSTEM_PROMPT,
+        system,
         messages: [{ role: "user", content: userContent }],
-        ...(tool ? { tools: [tool], tool_choice: { type: "tool", name: "give_verdict" } } : {}),
+        ...(tool ? { tools: [tool], tool_choice: { type: "tool", name: tool.name } } : {}),
       }),
     });
     if (!res.ok) {
@@ -156,6 +158,7 @@ export async function assess(profile: TokenProfile, maxAmountPls?: number): Prom
     ? `\n\nYou are authorized to spend up to ${maxAmountPls} PLS on this - size the trade yourself, spending less than the maximum if your confidence is lower.`
     : "";
   const data = await callClaude(
+    SYSTEM_PROMPT,
     `${describeProfile(profile)}\n\nWould you buy this token?${ceilingLine} Report your verdict via give_verdict.`,
     verdictTool(maxAmountPls),
   );
@@ -177,10 +180,98 @@ export async function assess(profile: TokenProfile, maxAmountPls?: number): Prom
   return out;
 }
 
+export interface OpenPositionContext {
+  symbol: string;
+  token: string;
+  entryPrice: number;
+  currentPrice: number;
+  pnlPct: number;      // current gain/loss vs. entry, e.g. 42 means +42%
+  peakPnlPct: number;   // best gain/loss this position has ever seen
+  minutesHeld: number;
+  rsi: number | null;
+  macdHistogram: number | null;
+  macdBullishCross: boolean | null;
+  macdBearishCross: boolean | null;
+  bollingerPercentB: number | null;
+}
+
+export interface ExitVerdict {
+  sell: boolean;
+  reasoning: string;
+}
+
+const EXIT_TOOL = {
+  name: "give_exit_verdict",
+  description: "Decide whether to sell this open position right now, or keep holding it.",
+  input_schema: {
+    type: "object",
+    properties: {
+      sell: { type: "boolean", description: "true to sell now, false to keep holding." },
+      reasoning: { type: "string", description: "1-3 sentences, plain English, cite specific numbers." },
+    },
+    required: ["sell", "reasoning"],
+  },
+};
+
+function describePosition(p: OpenPositionContext): string {
+  const lines = [
+    `Token: ${p.symbol} (${p.token})`,
+    `Entry price: ${p.entryPrice}, current price: ${p.currentPrice}`,
+    `Current P&L: ${p.pnlPct >= 0 ? "+" : ""}${p.pnlPct.toFixed(1)}%`,
+    `Best P&L this position has ever reached: ${p.peakPnlPct >= 0 ? "+" : ""}${p.peakPnlPct.toFixed(1)}%`,
+    `Held for: ${Math.round(p.minutesHeld)} minutes`,
+  ];
+  if (p.rsi !== null) lines.push(`RSI(14): ${p.rsi.toFixed(0)} ${p.rsi < 30 ? "(oversold)" : p.rsi > 70 ? "(overbought)" : ""}`);
+  if (p.macdHistogram !== null) {
+    const cross = p.macdBullishCross ? " (bullish cross just occurred)" : p.macdBearishCross ? " (bearish cross just occurred)" : "";
+    lines.push(`MACD histogram: ${p.macdHistogram.toFixed(4)}${cross}`);
+  }
+  if (p.bollingerPercentB !== null) lines.push(`Bollinger %B: ${p.bollingerPercentB.toFixed(2)} (0 = lower band, 1 = upper band)`);
+  return lines.join("\n");
+}
+
+const EXIT_SYSTEM_PROMPT =
+  "You help decide whether to hold or sell an ALREADY-OPEN position in a PulseChain (PulseX) " +
+  "token, bought earlier by a trading bot on a technical dip-buying signal. A hard stop-loss " +
+  "protects the downside no matter what you decide - your job is purely about the upside: is " +
+  "there a real reason to think this still has room to run, or does the pattern suggest this is " +
+  "a good place to take the win (or cut a fading position) rather than give gains back? You have " +
+  "no special insight into the future - momentum can reverse in the next block, and a token that " +
+  "ran 50% can just as easily run 100% more or crash back to zero. When genuinely uncertain, " +
+  "there is nothing wrong with taking a solid profit rather than holding out for more. Be " +
+  "concrete: cite the specific numbers you're weighing.";
+
+/**
+ * Periodic re-judgment of an open position - used only by Hunter Bot's
+ * "Auto Full" exit mode (see registry.ts's HunterConfig.exitMode). Unlike
+ * assess(), a sell verdict here does not require a matching mechanical
+ * check the way a buy does; the mechanical safety net for an open position
+ * is the mandatory stop-loss that Auto Full still enforces regardless of
+ * what this returns (see hunter.ts). Null means unavailable - callers must
+ * treat that as "keep holding," never as a sell signal.
+ */
+export async function assessExit(position: OpenPositionContext): Promise<ExitVerdict | null> {
+  const data = await callClaude(
+    EXIT_SYSTEM_PROMPT,
+    `${describePosition(position)}\n\nHold or sell? Report your verdict via give_exit_verdict.`,
+    EXIT_TOOL,
+  );
+  if (!data) return null;
+  const toolUse = (data.content ?? []).find((b: any) => b.type === "tool_use" && b.name === "give_exit_verdict");
+  if (!toolUse) {
+    log("warn", "ai", "Claude did not return a give_exit_verdict tool call, treating as unavailable");
+    return null;
+  }
+  const input = toolUse.input as Partial<ExitVerdict>;
+  if (typeof input.sell !== "boolean" || !input.reasoning) return null;
+  return { sell: input.sell, reasoning: input.reasoning };
+}
+
 /** Free-form answer for Ask Icaria - the user's own question, in their own
  * words, alongside the token's profile. Null means unavailable. */
 export async function answerQuestion(profile: TokenProfile, question: string): Promise<string | null> {
   const data = await callClaude(
+    SYSTEM_PROMPT,
     `${describeProfile(profile)}\n\nThe user asks: "${question}"\n\nAnswer directly and plainly, in a few sentences.`,
     null,
   );

@@ -113,6 +113,12 @@ CREATE TABLE IF NOT EXISTS discovery_actions (
   tx_hash        TEXT,
   PRIMARY KEY (vault, opportunity_id)
 );
+
+CREATE TABLE IF NOT EXISTS ai_exit_requests (
+  position_id INTEGER PRIMARY KEY,
+  ts          INTEGER NOT NULL,
+  reason      TEXT NOT NULL
+);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -121,6 +127,12 @@ CREATE TABLE IF NOT EXISTS discovery_actions (
   const cols = db.prepare("PRAGMA table_info(positions)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "fail_count")) {
     db.exec("ALTER TABLE positions ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0");
+  }
+  // Set once at open time, not read live from the vault's current Hunter Bot
+  // config - so flipping the setting later never retroactively changes how
+  // an already-open position is managed. NULL for every non-Hunter position.
+  if (!cols.some((c) => c.name === "exit_mode")) {
+    db.exec("ALTER TABLE positions ADD COLUMN exit_mode TEXT");
   }
 }
 
@@ -208,6 +220,29 @@ export const askBuyFires = {
   record(vault: string, requestId: number, txHash?: string): void {
     db.prepare(`INSERT OR REPLACE INTO ask_buy_fires(vault,request_id,ts,tx_hash) VALUES(?,?,?,?)`)
       .run(vault.toLowerCase(), requestId, Math.floor(Date.now() / 1000), txHash ?? null);
+  },
+};
+
+/**
+ * Keeper-internal only, never touched by the site - Hunter Bot's "Auto
+ * Full" exit mode writes here when its periodic AI re-judgment decides an
+ * open position should be sold now (see hunter.ts's reviewFullModePositions
+ * and ai.ts's assessExit). positions.ts's tick() reads this the same way it
+ * reads the site's manual close-requests, treating a row here as an
+ * immediate forced exit - the mandatory stop-loss is still the safety net,
+ * this is just an earlier, judgment-based exit on top of it.
+ */
+export const aiExitRequests = {
+  request(positionId: number, reason: string): void {
+    db.prepare(`INSERT OR REPLACE INTO ai_exit_requests(position_id,ts,reason) VALUES(?,?,?)`)
+      .run(positionId, Math.floor(Date.now() / 1000), reason);
+  },
+  pendingIds(): Set<number> {
+    const rows = db.prepare("SELECT position_id FROM ai_exit_requests").all() as { position_id: number }[];
+    return new Set(rows.map((r) => r.position_id));
+  },
+  clear(positionId: number): void {
+    db.prepare("DELETE FROM ai_exit_requests WHERE position_id=?").run(positionId);
   },
 };
 

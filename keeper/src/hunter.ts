@@ -3,11 +3,11 @@ import { CFG } from "./config.js";
 import { provider, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
 import { registry, type VaultRecord, type HunterConfig } from "./registry.js";
-import { watched, opportunities, discoveryActions, db } from "./db.js";
+import { watched, opportunities, discoveryActions, aiExitRequests, prices, db } from "./db.js";
 import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./discovery.js";
 import { candlesForToken } from "./candles.js";
 import { snapshot, liquidityDropIsSuspicious } from "./indicators.js";
-import { assess, type TokenProfile, type AiVerdict } from "./ai.js";
+import { assess, assessExit, type TokenProfile, type AiVerdict, type OpenPositionContext } from "./ai.js";
 import { executeSwap } from "./executor.js";
 import { openPosition, positionsValuePls } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
@@ -35,6 +35,10 @@ const DEDUP_HOURS = 4;
 // Roughly the slow MACD(26) + signal(9) warm-up - fewer candles than this
 // and macd()/bollinger() come back null anyway, so there's nothing to check.
 const MIN_CANDLES = 36;
+// Auto Full's floor when stopLossPct was left at 0 - the AI's exit judgment
+// is never the ONLY thing standing between an open position and a total
+// loss, no matter what the owner set.
+const MANDATORY_MIN_STOP_LOSS_PCT = 50;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
@@ -132,10 +136,19 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
   });
 
   if (res.ok) {
+    // Auto Full: the AI takes over deciding when to exit (see
+    // reviewFullModePositions), so the fixed take-profit/trailing/time
+    // targets don't apply - only the mandatory stop-loss does, and it's
+    // never actually disabled even if stopLossPct was left at 0.
+    const slPct = H.exitMode === "full" ? (H.stopLossPct > 0 ? H.stopLossPct : MANDATORY_MIN_STOP_LOSS_PCT) : H.stopLossPct;
     openPosition({
       vault: v.address, bot: "hunter", token,
       spentPls: amountPls, tokensOut: res.amountOut,
-      tpPct: H.takeProfitPct, slPct: H.stopLossPct, trailPct: H.trailingStopPct, timeExitMin: H.timeExitMin,
+      tpPct: H.exitMode === "full" ? 0 : H.takeProfitPct,
+      slPct,
+      trailPct: H.exitMode === "full" ? 0 : H.trailingStopPct,
+      timeExitMin: H.exitMode === "full" ? 0 : H.timeExitMin,
+      exitMode: H.exitMode,
     });
     discoveryActions.record(v.address, id, "bought", res.txHash);
     log("info", "hunter", `${v.address} bought ${amountPls} PLS of ${token} on opportunity #${id}`);
@@ -256,6 +269,62 @@ async function evaluateWatchedToken(
   await dispatch(id, w.token, ai, s, candidates);
 }
 
+interface FullModeRow { id: number; vault: string; token: string; opened_at: number; entry_price: number; high_water: number }
+
+/**
+ * Auto Full's periodic re-judgment - every open Hunter position whose owner
+ * chose "full" exit authority gets asked, on the same cadence as detection,
+ * whether it's still worth holding. A "sell" verdict is recorded as an AI
+ * exit request (see db.ts's aiExitRequests); positions.ts's own tick()
+ * picks that up and executes the sell exactly like an owner-requested
+ * manual close, on its own faster cadence. Never the only thing standing
+ * between a position and ruin - the mandatory stop-loss set at buy time
+ * (see executeHunterBuy) still applies underneath this regardless of what
+ * the AI decides here.
+ */
+async function reviewFullModePositions(): Promise<void> {
+  const rows = db.prepare(
+    `SELECT id, vault, token, opened_at, entry_price, high_water FROM positions WHERE bot='hunter' AND status='open' AND exit_mode='full'`,
+  ).all() as FullModeRow[];
+  if (rows.length === 0) return;
+
+  const from = Math.floor(Date.now() / 1000) - LOOKBACK_HOURS * 3600;
+  const symbolByToken = new Map(watched.all().map((w) => [w.token, w.symbol]));
+
+  await mapLimit(rows, CFG.keeperConcurrency, async (r) => {
+    try {
+      const latest = prices.latest(r.token);
+      if (!latest || latest.price <= 0 || r.entry_price <= 0) return;
+
+      const candles = candlesForToken(r.token, from, CANDLE_MINUTES * 60);
+      const snap = candles.length ? snapshot(candles) : null;
+
+      const context: OpenPositionContext = {
+        symbol: symbolByToken.get(r.token) ?? r.token,
+        token: r.token,
+        entryPrice: r.entry_price,
+        currentPrice: latest.price,
+        pnlPct: ((latest.price - r.entry_price) / r.entry_price) * 100,
+        peakPnlPct: (r.high_water - 1) * 100, // high_water is a value/cost ratio - 1.0 is breakeven
+        minutesHeld: (Math.floor(Date.now() / 1000) - r.opened_at) / 60,
+        rsi: snap?.rsi ?? null,
+        macdHistogram: snap?.macd?.histogram ?? null,
+        macdBullishCross: snap?.macd?.bullishCross ?? null,
+        macdBearishCross: snap?.macd?.bearishCross ?? null,
+        bollingerPercentB: snap?.bollinger?.percentB ?? null,
+      };
+
+      const verdict = await assessExit(context);
+      if (verdict?.sell) {
+        aiExitRequests.request(r.id, verdict.reasoning);
+        log("info", "hunter", `Position #${r.id} (${context.symbol}): AI exit judgment - ${verdict.reasoning}`);
+      }
+    } catch (e) {
+      log("error", "hunter", `Exit review for position #${r.id}: ${(e as Error).message}`);
+    }
+  });
+}
+
 async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const ids = await fetchBuyRequests(v.address);
@@ -281,6 +350,12 @@ async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void
 }
 
 export async function tick(): Promise<void> {
+  // Independent of whether Hunter Bot is still enabled anywhere - an
+  // already-open Auto Full position stays actively managed even if the
+  // owner later turns the bot off, same as positions.ts's own tick()
+  // manages every open position regardless of any bot's current config.
+  await reviewFullModePositions();
+
   const candidates = registry.active().filter((v) => v.hunter.enabled);
   if (candidates.length === 0) return;
 

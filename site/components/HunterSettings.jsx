@@ -110,19 +110,48 @@ export default function HunterSettings({ hunter, onChange }) {
         you instead of buying, it never buys blind.
       </p>
 
-      <div className="field-inline">
-        <label>Take profit %</label>
-        <input {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
-        <label>Stop loss %</label>
-        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} />
-        <label>Time exit (min)</label>
-        <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
-      </div>
+      <div className="sub-label">Exits</div>
 
       <div className="field-inline">
-        <label>Trailing stop %</label>
-        <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+        <label>Exit mode</label>
+        <select
+          value={hunter.exitMode}
+          onChange={(e) => onChange({ ...hunter, exitMode: e.target.value })}
+          style={{ width: 160 }}
+        >
+          <option value="limited">Auto Limited</option>
+          <option value="full">Auto Full</option>
+        </select>
       </div>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        {hunter.exitMode === "full"
+          ? "Auto Full gives the AI ongoing authority to decide when to exit - it re-checks each open position and can ride a winner past what a fixed target would have locked in. The stop loss below still applies no matter what it decides; take profit, trailing stop, and time exit are not used in this mode."
+          : "Auto Limited exits at the fixed targets below, same as every other bot here. Switch to Auto Full to hand the AI ongoing authority over when to exit instead."}
+      </p>
+
+      <div className="field-inline">
+        {hunter.exitMode === "limited" && (
+          <>
+            <label>Take profit %</label>
+            <input {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
+          </>
+        )}
+        <label>Stop loss %{hunter.exitMode === "full" ? " (mandatory floor)" : ""}</label>
+        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} />
+        {hunter.exitMode === "limited" && (
+          <>
+            <label>Time exit (min)</label>
+            <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
+          </>
+        )}
+      </div>
+
+      {hunter.exitMode === "limited" && (
+        <div className="field-inline">
+          <label>Trailing stop %</label>
+          <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+        </div>
+      )}
 
       <div className="sub-label">Screening limits (a token failing any of these is never buyable, notify or auto-buy)</div>
 

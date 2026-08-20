@@ -6,6 +6,7 @@ import * as rules from "./rules.js";
 import * as launch from "./launch.js";
 import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
+import * as discovery from "./discovery.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
   // so the position-check cadence (already "how are my holdings doing?")
   // fits better than the launch scanner's fast pace.
   loop("limits", CFG.positionCheckSec, limits.tick);
+  loop("discovery", CFG.discoveryScanSec, discovery.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

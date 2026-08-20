@@ -21,17 +21,31 @@ function getDb() {
       requested_at INTEGER NOT NULL,
       PRIMARY KEY (vault, position_id)
     );
+    CREATE TABLE IF NOT EXISTS discovery_buy_requests (
+      vault          TEXT NOT NULL,
+      opportunity_id INTEGER NOT NULL,
+      requested_at   INTEGER NOT NULL,
+      PRIMARY KEY (vault, opportunity_id)
+    );
   `);
   return db;
 }
 
-/** Returns a vault's stored config, or the safe empty default if none is set yet. */
+/**
+ * Returns a vault's stored config, or the safe empty default if none is set
+ * yet. Merged over emptyConfig() rather than returned as-is: a config saved
+ * before a feature existed (discovery, at first save time) simply lacks that
+ * key in its stored JSON, and without this merge the client would crash
+ * reading e.g. config.discovery.enabled on undefined. A top-level merge is
+ * enough because normalizeConfig() always writes each section as a complete
+ * object, never a partial one, so there's nothing to merge within a section.
+ */
 function getConfig(vault) {
   const row = getDb()
     .prepare("SELECT config FROM vault_configs WHERE vault = ?")
     .get(vault.toLowerCase());
   if (!row) return emptyConfig();
-  return JSON.parse(row.config);
+  return { ...emptyConfig(), ...JSON.parse(row.config) };
 }
 
 /** Overwrites a vault's stored config. Caller is responsible for validating and authorizing first. */
@@ -67,8 +81,34 @@ function pendingCloseIds(vault) {
     .map((r) => r.position_id);
 }
 
+/**
+ * Records that the owner wants this Discovery Bot opportunity bought now.
+ * Same "site writes an intent, keeper executes" split as requestClose - only
+ * the keeper's key can call executeSwap, and the keeper only acts on an
+ * opportunity that already passed its screen (see keeper/src/discovery.ts's
+ * fetchBuyRequests/processBuyRequests).
+ */
+function requestDiscoveryBuy(vault, opportunityId, nowMs) {
+  getDb()
+    .prepare(`INSERT OR IGNORE INTO discovery_buy_requests (vault, opportunity_id, requested_at) VALUES (?, ?, ?)`)
+    .run(vault.toLowerCase(), opportunityId, nowMs);
+}
+
+/** Every opportunity ID this vault owner has asked to buy, handled or not -
+ * the keeper is responsible for only acting on ones not already bought. */
+function pendingDiscoveryBuyIds(vault) {
+  return getDb()
+    .prepare(`SELECT opportunity_id FROM discovery_buy_requests WHERE vault = ?`)
+    .all(vault.toLowerCase())
+    .map((r) => r.opportunity_id);
+}
+
 function resetForTests() {
   db = undefined;
 }
 
-module.exports = { getConfig, setConfig, requestClose, pendingCloseIds, resetForTests, DB_PATH };
+module.exports = {
+  getConfig, setConfig, requestClose, pendingCloseIds,
+  requestDiscoveryBuy, pendingDiscoveryBuyIds,
+  resetForTests, DB_PATH,
+};

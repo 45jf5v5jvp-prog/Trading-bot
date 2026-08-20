@@ -78,6 +78,33 @@ CREATE TABLE IF NOT EXISTS limit_fires (
   tx_hash  TEXT,
   PRIMARY KEY (vault, order_id)
 );
+
+CREATE TABLE IF NOT EXISTS opportunities (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  token           TEXT NOT NULL,
+  ts              INTEGER NOT NULL,
+  price_move_pct  REAL NOT NULL,
+  liq_growth_pct  REAL NOT NULL,
+  liq_pls         REAL NOT NULL,
+  buy_tax_bps     INTEGER,
+  sell_tax_bps    INTEGER,
+  lp_locked_pct   REAL,
+  owner_renounced INTEGER,
+  sellable        INTEGER NOT NULL,
+  verdict         TEXT NOT NULL,
+  reason          TEXT,
+  narrative       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS opportunities_token_ts ON opportunities(token, ts DESC);
+
+CREATE TABLE IF NOT EXISTS discovery_actions (
+  vault          TEXT NOT NULL,
+  opportunity_id INTEGER NOT NULL,
+  ts             INTEGER NOT NULL,
+  action         TEXT NOT NULL,
+  tx_hash        TEXT,
+  PRIMARY KEY (vault, opportunity_id)
+);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -149,5 +176,64 @@ export const watched = {
   },
   all(): { token: string; symbol: string; decimals: number; pair: string }[] {
     return db.prepare("SELECT token,symbol,decimals,pair FROM watched").all() as any;
+  },
+};
+
+export interface NewOpportunity {
+  token: string; priceMovePct: number; liqGrowthPct: number; liqPls: number;
+  buyTaxBps: number | null; sellTaxBps: number | null; lpLockedPct: number | null;
+  ownerRenounced: boolean | null; sellable: boolean; verdict: string; reason: string; narrative: string;
+}
+export interface OpportunityRow extends NewOpportunity { id: number; ts: number }
+
+/** Discovery Bot's findings - one row per anomaly the scanner both detected
+ * AND ran the full honeypot/tax/lock/renounce screen against (screened once,
+ * shared across every vault interested in it - see keeper/src/discovery.ts). */
+export const opportunities = {
+  insert(o: NewOpportunity): number {
+    const info = db.prepare(`INSERT INTO opportunities
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
+      o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
+      o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative,
+    );
+    return Number(info.lastInsertRowid);
+  },
+  /** True if this token already got a fresh opportunity row within the
+   * cooldown window - the dedup that stops the same anomaly re-flagging
+   * every scan pass while it's still ongoing. */
+  recentForToken(token: string, sinceTs: number): boolean {
+    const r = db.prepare("SELECT 1 FROM opportunities WHERE token=? AND ts>=? LIMIT 1")
+      .get(token.toLowerCase(), sinceTs);
+    return Boolean(r);
+  },
+  get(id: number): OpportunityRow | undefined {
+    return db.prepare("SELECT * FROM opportunities WHERE id=?").get(id) as OpportunityRow | undefined;
+  },
+};
+
+/** Per-vault record of what happened with one opportunity - notified,
+ * bought, or (not currently used, reserved) skipped. Keyed by
+ * (vault, opportunity_id) so the same anomaly is acted on at most once per
+ * vault; a genuinely new anomaly later gets its own opportunity row and can
+ * be acted on again. */
+export const discoveryActions = {
+  has(vault: string, opportunityId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM discovery_actions WHERE vault=? AND opportunity_id=?")
+      .get(vault.toLowerCase(), opportunityId);
+    return Boolean(r);
+  },
+  /** The action already recorded for this (vault, opportunity), if any -
+   * "notified" vs "bought" matters to a manual buy request: a token already
+   * notified is still buyable, one already bought is not (no double-buy). */
+  actionFor(vault: string, opportunityId: number): string | undefined {
+    const r = db.prepare("SELECT action FROM discovery_actions WHERE vault=? AND opportunity_id=?")
+      .get(vault.toLowerCase(), opportunityId) as { action: string } | undefined;
+    return r?.action;
+  },
+  record(vault: string, opportunityId: number, action: string, txHash?: string): void {
+    db.prepare(`INSERT OR REPLACE INTO discovery_actions(vault,opportunity_id,ts,action,tx_hash) VALUES(?,?,?,?,?)`)
+      .run(vault.toLowerCase(), opportunityId, Math.floor(Date.now() / 1000), action, txHash ?? null);
   },
 };

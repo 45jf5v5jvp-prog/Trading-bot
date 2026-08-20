@@ -3,7 +3,9 @@ import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
+import { loadOpportunities } from "../lib/loadOpportunities";
 import { closePosition } from "../lib/closePosition";
+import { buyOpportunity } from "../lib/buyOpportunity";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
@@ -11,6 +13,8 @@ import SnipesList from "../components/SnipesList";
 import PortfolioPanel from "../components/PortfolioPanel";
 import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
+import DiscoverySettings from "../components/DiscoverySettings";
+import OpportunitiesPanel from "../components/OpportunitiesPanel";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
@@ -38,12 +42,14 @@ export default function Dashboard() {
   const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState(null);
   const [portfolio, setPortfolio] = useState(null);
+  const [opportunities, setOpportunities] = useState(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
+  const [buyStates, setBuyStates] = useState({}); // { [opportunityId]: "pending" | "requested" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
 
@@ -93,6 +99,18 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
+  // Same polling idea for the Opportunities panel - Discovery Bot's findings
+  // are global (one scanner, shared across every vault), so this is a plain
+  // poll rather than tied to any config the owner set.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const refresh = () => loadOpportunities(vaultAddress).then((o) => { if (!cancelled) setOpportunities(o.opportunities); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [vaultAddress]);
+
   // Same idea for the vault's balance/paused state - previously this only
   // updated right after a deposit/withdraw/pause, so the balance would sit
   // stale until the user did something. Silent failures here (e.g. the
@@ -111,9 +129,12 @@ export default function Dashboard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const [, h, p] = await Promise.all([refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress)]);
+      const [, h, p, o] = await Promise.all([
+        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadOpportunities(vaultAddress),
+      ]);
       setHistory(h);
       setPortfolio(p.portfolio);
+      setOpportunities(o.opportunities);
     } catch (e) {
       setStatus(`Refresh failed: ${e.message}`);
     } finally {
@@ -224,6 +245,20 @@ export default function Dashboard() {
     } catch (e) {
       setCloseStates((s) => ({ ...s, [positionId]: "error" }));
       setStatus(`Close request failed: ${e.message}`);
+    }
+  }
+
+  /** Signs and submits a manual buy request for one Discovery Bot
+   * opportunity. Doesn't buy anything itself - the keeper does that on its
+   * next pass, see lib/buyOpportunity.js. */
+  async function handleBuyOpportunity(opportunityId) {
+    setBuyStates((s) => ({ ...s, [opportunityId]: "pending" }));
+    try {
+      await buyOpportunity(getProvider, vaultAddress, opportunityId);
+      setBuyStates((s) => ({ ...s, [opportunityId]: "requested" }));
+    } catch (e) {
+      setBuyStates((s) => ({ ...s, [opportunityId]: "error" }));
+      setStatus(`Buy request failed: ${e.message}`);
     }
   }
 
@@ -393,6 +428,21 @@ export default function Dashboard() {
                   <SnipesList
                     snipes={config.snipes ?? []}
                     onChange={(snipes) => updateConfig({ ...config, snipes })}
+                  />
+                </div>
+
+                <div className="panel">
+                  <DiscoverySettings
+                    discovery={config.discovery}
+                    onChange={(discovery) => updateConfig({ ...config, discovery })}
+                  />
+                </div>
+
+                <div className="panel">
+                  <OpportunitiesPanel
+                    opportunities={opportunities}
+                    onBuy={handleBuyOpportunity}
+                    buyStates={buyStates}
                   />
                 </div>
 

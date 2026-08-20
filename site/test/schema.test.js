@@ -8,6 +8,25 @@ test("emptyConfig is safe: launch disabled, no rules, no snipes", () => {
   assert.deepEqual(c.rules, []);
   assert.deepEqual(c.snipes, []);
   assert.equal(c.maxHoldingPct, 40);
+  assert.equal(c.discovery.enabled, false);
+  assert.equal(c.discovery.mode, "notify");
+});
+
+test("discovery settings fill in defaults for missing fields, and validate the rest", () => {
+  const out = normalizeConfig({ discovery: { enabled: true, mode: "autoBuy", amountPls: 500 } });
+  assert.equal(out.discovery.enabled, true);
+  assert.equal(out.discovery.mode, "autoBuy");
+  assert.equal(out.discovery.amountPls, 500);
+  assert.equal(out.discovery.minPriceMovePct, 20); // default filled in
+  assert.equal(out.discovery.requireLpLock, true); // default filled in
+});
+
+test("rejects a discovery mode that is not notify or autoBuy", () => {
+  assert.throws(() => normalizeConfig({ discovery: { mode: "yolo" } }), /mode/);
+});
+
+test("rejects a negative discovery threshold", () => {
+  assert.throws(() => normalizeConfig({ discovery: { minPriceMovePct: -5 } }), /minPriceMovePct/);
 });
 
 test("accepts a minimal valid snipe target", () => {

@@ -13,7 +13,7 @@ import { db, meta } from "./db.js";
 import { log } from "./log.js";
 
 /** WPLS the vault currently holds, in whole PLS. */
-async function vaultWplsPls(vault: string): Promise<number> {
+export async function vaultWplsPls(vault: string): Promise<number> {
   const wpls = new Contract(CFG.wpls, ERC20_ABI, provider) as Dyn;
   return Number(formatEther(await wpls.balanceOf(vault)));
 }
@@ -81,6 +81,11 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
   if (seen.has(token.toLowerCase())) return;
   seen.add(token.toLowerCase());
   log("info", "launch", `New pair ${pair} for token ${token}`);
+  // Unconditional and independent of Launch Bot config or screening outcome -
+  // Discovery Bot needs price/liquidity history for every token PulseX ever
+  // lists, not just the ones some vault's Launch Bot happens to be watching
+  // for and that pass its screen. See prices.ts's ensureWatched.
+  await ensureWatched(token);
   await evaluateToken(token, pair, txHash);
 }
 
@@ -113,8 +118,6 @@ async function evaluateToken(token: string, pair: string, txHash: string): Promi
   pendingRetry.delete(token.toLowerCase());
   log("info", "launch", `Screened ${token}: buyTax ${s.buyTaxBps}bps sellTax ${s.sellTaxBps}bps ` +
     `lp ${s.lpLockedPct.toFixed(0)}% deployer ${s.deployerPct.toFixed(0)}% liq ${Math.round(s.liqPls)} PLS`);
-
-  await ensureWatched(token);
 
   // Each candidate vault gets exactly one buy-or-skip decision here, and
   // vaults are independent, so this runs concurrently (bounded by

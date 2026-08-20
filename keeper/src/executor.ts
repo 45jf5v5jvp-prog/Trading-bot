@@ -7,7 +7,7 @@ import { log } from "./log.js";
 
 export interface SwapRequest {
   vault: string;
-  bot: "launch" | "trading";
+  bot: "launch" | "trading" | "snipe";
   path: string[];
   amountIn: bigint;
   tokenLabel: string;

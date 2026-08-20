@@ -4,6 +4,7 @@ import { refresh, registry } from "./registry.js";
 import { pollAll } from "./prices.js";
 import * as rules from "./rules.js";
 import * as launch from "./launch.js";
+import * as snipe from "./snipe.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -60,6 +61,10 @@ async function main(): Promise<void> {
   loop("registry", CFG.registryRefreshSec, async () => { await refresh(); });
   loop("prices", CFG.pricePollSec, pollAll);
   loop("launch", CFG.pairScanSec, launch.scan);
+  // Same cadence as the launch scanner - a target snipe is racing other
+  // buyers into a token the moment its pool exists, so it checks on every
+  // pass rather than a slower dedicated interval.
+  loop("snipe", CFG.pairScanSec, snipe.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

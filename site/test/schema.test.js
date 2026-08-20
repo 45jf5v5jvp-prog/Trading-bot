@@ -2,11 +2,41 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { normalizeConfig, emptyConfig } = require("../lib/schema");
 
-test("emptyConfig is safe: launch disabled, no rules", () => {
+test("emptyConfig is safe: launch disabled, no rules, no snipes", () => {
   const c = emptyConfig();
   assert.equal(c.launch.enabled, false);
   assert.deepEqual(c.rules, []);
+  assert.deepEqual(c.snipes, []);
   assert.equal(c.maxHoldingPct, 40);
+});
+
+test("accepts a minimal valid snipe target", () => {
+  const out = normalizeConfig({
+    snipes: [{ enabled: true, token: "0x" + "2".repeat(40), amountPls: 1000 }],
+  });
+  assert.equal(out.snipes.length, 1);
+  assert.equal(out.snipes[0].token, "0x" + "2".repeat(40));
+  assert.equal(out.snipes[0].amountPls, 1000);
+  assert.equal(out.snipes[0].tpPct, 0); // default filled in
+});
+
+test("rejects a snipe with a bad token address", () => {
+  assert.throws(() => normalizeConfig({
+    snipes: [{ enabled: true, token: "not-an-address", amountPls: 100 }],
+  }), /token/);
+});
+
+test("rejects a snipe with a negative amount", () => {
+  assert.throws(() => normalizeConfig({
+    snipes: [{ enabled: true, token: "0x" + "2".repeat(40), amountPls: -5 }],
+  }), /amountPls/);
+});
+
+test("rejects more than 50 snipe targets (sanity cap)", () => {
+  const snipes = Array.from({ length: 51 }, () => ({
+    enabled: true, token: "0x" + "2".repeat(40), amountPls: 100,
+  }));
+  assert.throws(() => normalizeConfig({ snipes }), /too many snipe targets/);
 });
 
 test("accepts a minimal valid config with one rule", () => {

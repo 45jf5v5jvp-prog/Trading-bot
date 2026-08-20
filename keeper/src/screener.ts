@@ -41,7 +41,7 @@ export interface ScreenLimits {
  * enable/disable flag, or a blacklist can pass here and turn hostile in the
  * next block. Screening reduces the failure rate. It does not make sniping safe.
  */
-async function simulate(token: string): Promise<{
+export async function simulate(token: string): Promise<{
   sellable: boolean; buyTaxBps: number; sellTaxBps: number; roundTripLossBps: number;
 } | null> {
   const probeAddr = process.env.PROBE_ADDRESS;

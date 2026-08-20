@@ -67,10 +67,17 @@ setup.exec(`
   );
 `);
 const OPP_TOKEN = "0x" + "f".repeat(40);
+const FAILED_OPP_TOKEN = "0x" + "9".repeat(40);
 setup.prepare(`INSERT INTO opportunities
   (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
   .run(OPP_TOKEN, 2000, 30, 20, 3000000, 100, 100, 100, 1, 1, "pass", "clear", "moved up 30%");
+// A failed screen that DID get found and recorded - stays in the raw table
+// (getOpportunities filters it out, tested below), never returned to the site.
+setup.prepare(`INSERT INTO opportunities
+  (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(FAILED_OPP_TOKEN, 2100, 40, -60, 500000, 100, 100, 0, 0, 0, "fail", "liquidity pulled", "moved up 40% but liquidity fell");
 setup.prepare(`INSERT INTO discovery_actions (vault,opportunity_id,ts,action,tx_hash) VALUES (?,?,?,?,?)`)
   .run(VAULT, 1, 2001, "notified", null);
 
@@ -157,7 +164,7 @@ test("getV4PoolsForToken returns [] when the keeper.db predates V4 (no v4_pools 
   fs.unlinkSync(NO_V4_DB);
 });
 
-test("getOpportunities returns Discovery Bot findings newest first", () => {
+test("getOpportunities returns Discovery Bot findings newest first, passed screens only", () => {
   process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
   delete require.cache[require.resolve("../lib/keeperDb")];
   const { getOpportunities } = require("../lib/keeperDb");
@@ -166,6 +173,7 @@ test("getOpportunities returns Discovery Bot findings newest first", () => {
   assert.equal(rows[0].token, OPP_TOKEN);
   assert.equal(rows[0].verdict, "pass");
   assert.equal(rows[0].narrative, "moved up 30%");
+  assert.ok(!rows.some((r) => r.token === FAILED_OPP_TOKEN), "a failed screen must never reach the site");
 });
 
 test("getOpportunities returns [] when the keeper.db predates Discovery Bot (no opportunities table)", () => {

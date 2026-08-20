@@ -90,12 +90,15 @@ function getV4PoolsForToken(token) {
 
 /**
  * Discovery Bot's and Hunter Bot's findings, newest first, in one shared
- * feed (see `source`). Every opportunity a detector both found and screened
- * is included - a failed screen is shown too (with its reason), never
- * hidden, since "this pumped but looks like a trap" (or "this looked
- * oversold but liquidity looks pulled") is useful information even when
- * it's not buyable. Returns [] if the table doesn't exist (a keeper build
- * that predates Discovery Bot) rather than throwing.
+ * feed (see `source`) - passed screens only. A failed screen (e.g. "this
+ * pumped but looks like a trap") is still recorded in the opportunities
+ * table for anyone reading the raw DB, but nobody visiting the dashboard
+ * wants to see a scrolling feed of tokens they can't buy; an alert worth
+ * acting on should be positive by the time it reaches a person. Filtered
+ * here, not just hidden client-side, so `limit` still returns that many
+ * REAL candidates instead of being padded out with rejects. Returns [] if
+ * the table doesn't exist (a keeper build that predates Discovery Bot)
+ * rather than throwing.
  */
 function getOpportunities(limit = 50) {
   const d = getDb();
@@ -106,7 +109,7 @@ function getOpportunities(limit = 50) {
               lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative,
               source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning,
               ai_suggested_amount_pls
-       FROM opportunities ORDER BY ts DESC LIMIT ?`,
+       FROM opportunities WHERE verdict = 'pass' ORDER BY ts DESC LIMIT ?`,
     ).all(limit);
   } catch {
     return [];

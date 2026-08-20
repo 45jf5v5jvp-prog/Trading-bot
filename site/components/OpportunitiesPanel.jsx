@@ -47,12 +47,13 @@ function CopyAddress({ address, onFallback }) {
 }
 
 /**
- * One opportunity Discovery Bot or Hunter Bot found and screened. A failed
- * screen is still shown - "this pumped but looks like a trap" (or "this
- * looked oversold but liquidity looks pulled") is useful even when it isn't
- * buyable - but only a passed one ever gets a Buy Now button. `action` is
- * this vault's own status for it ("notified", "bought", or none yet), read
- * from the keeper's discovery_actions table.
+ * One opportunity Discovery Bot or Hunter Bot found - always a passed screen
+ * (see keeperDb.js's getOpportunities: failed ones are filtered out before
+ * this ever reaches the site, nobody wants an alert feed full of tokens they
+ * can't buy). `passed` stays as a defensive check on the Buy Now button
+ * rather than trusting that filter blindly here too. `action` is this
+ * vault's own status for it ("notified", "bought", or none yet), read from
+ * the keeper's discovery_actions table.
  */
 function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
   const passed = o.verdict === "pass";
@@ -72,7 +73,6 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
             {isHunter ? "Hunter" : "Discovery"}
           </span>
           <span className="hint" style={{ margin: 0 }}>{fmtTs(o.ts)}</span>
-          {!passed && <span style={{ color: "var(--red, #c0392b)", fontSize: 12 }}>screen failed</span>}
         </div>
         <p className="hint" style={{ margin: "4px 0 0" }}>{o.narrative}</p>
         {o.aiConfidence && (

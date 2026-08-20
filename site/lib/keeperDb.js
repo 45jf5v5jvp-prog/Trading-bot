@@ -54,10 +54,32 @@ function getRecentFires(vault, limit = 25) {
   ).all(vault.toLowerCase(), limit);
 }
 
+/**
+ * Every V4 pool the keeper's scanner has recorded for a token. V4 has no
+ * on-chain "getPool(tokenA, tokenB, fee)" lookup the way V2/V3 do - a
+ * pool's full PoolKey (both currencies, fee, tickSpacing, hooks) IS its
+ * identity, discoverable only by having seen its Initialize event - so
+ * pricing a V4-only token from the site means reading the same table the
+ * keeper itself relies on (keeper/src/db.ts's v4Pools). Returns [] if the
+ * table doesn't exist (a PulseChain keeper.db, which has no V4 code at
+ * all) rather than throwing.
+ */
+function getV4PoolsForToken(token) {
+  const d = getDb();
+  if (!d) return [];
+  try {
+    return d.prepare(
+      `SELECT currency0, currency1, fee, tick_spacing, hooks FROM v4_pools WHERE token = ?`,
+    ).all(token.toLowerCase());
+  } catch {
+    return []; // no v4_pools table on this deployment - not an error
+  }
+}
+
 function resetForTests() {
   if (db) db.close();
   db = undefined;
   triedOpen = false;
 }
 
-module.exports = { getPositions, getRecentFires, resetForTests, resolveDbPath };
+module.exports = { getPositions, getRecentFires, getV4PoolsForToken, resetForTests, resolveDbPath };

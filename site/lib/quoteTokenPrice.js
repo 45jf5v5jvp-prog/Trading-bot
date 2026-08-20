@@ -1,25 +1,16 @@
-import { JsonRpcProvider, Contract, formatEther, parseUnits } from "ethers";
-import { RPC_URL, ROUTER, ROUTER_ABI, WRAPPED, ERC20_ABI } from "./contracts";
-
-let providerSingleton;
-function getProvider() {
-  if (!providerSingleton) providerSingleton = new JsonRpcProvider(RPC_URL);
-  return providerSingleton;
-}
-
 /**
- * Live price of one whole token in the chain's base currency, quoted
- * straight off the V2 router - a lightweight one-off read for the limit
- * order editor's "% from current price" mode, not a tracked/polled value.
- * Same V2-only limitation as the rest of this app's live-price plumbing
- * (lib/livePrice.js) - a token that's only ever traded on V3/V4 won't
- * price here. Throws on any failure; the caller decides how to show that.
+ * Live price of one whole token, in the chain's base currency - backs the
+ * Limit Order editor's "% from current" mode. Delegates to the server (see
+ * pages/api/tokens/[token]/price.js) rather than quoting from the browser
+ * directly: V4 pricing needs the keeper's own database (a V4 pool has no
+ * on-chain lookup-by-token address the way V2/V3 do), which only the server
+ * can reach, and doing it there means this one code path - not a
+ * browser-side copy of it - is what stays correct as venues are added.
  */
 export async function quoteTokenPrice(token) {
-  const provider = getProvider();
-  const erc = new Contract(token, ERC20_ABI, provider);
-  const router = new Contract(ROUTER, ROUTER_ABI, provider);
-  const decimals = await erc.decimals();
-  const amounts = await router.getAmountsOut(parseUnits("1", decimals), [token, WRAPPED]);
-  return Number(formatEther(amounts[amounts.length - 1]));
+  const res = await fetch(`/api/tokens/${token}/price`);
+  if (!res.ok) throw new Error(`could not fetch price (${res.status})`);
+  const { price } = await res.json();
+  if (price === null) throw new Error("no live price available for this token");
+  return price;
 }

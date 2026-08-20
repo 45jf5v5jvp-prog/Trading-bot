@@ -6,6 +6,7 @@ import { closePosition } from "../lib/closePosition";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
+import SnipesList from "../components/SnipesList";
 import LaunchSettings from "../components/LaunchSettings";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
@@ -369,6 +370,13 @@ export default function Dashboard() {
                   <LaunchSettings
                     launch={config.launch}
                     onChange={(launch) => updateConfig({ ...config, launch })}
+                  />
+                </div>
+
+                <div className="panel">
+                  <SnipesList
+                    snipes={config.snipes ?? []}
+                    onChange={(snipes) => updateConfig({ ...config, snipes })}
                   />
                 </div>
 

@@ -56,6 +56,30 @@ function normalizeRule(r, i) {
   };
 }
 
+/** Validates and normalizes one target snipe. Deliberately lighter than a
+ * rule: no direction/threshold/lookback, since a snipe isn't reacting to a
+ * price move - it's waiting for a specific address to become tradeable. */
+function normalizeSnipe(s, i) {
+  if (typeof s !== "object" || s === null) throw new Error(`snipes[${i}] must be an object`);
+  if (typeof s.token !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(s.token))
+    throw new Error(`snipes[${i}].token must be a 0x-address`);
+  if (!isFiniteNumber(s.amountPls) || s.amountPls < 0)
+    throw new Error(`snipes[${i}].amountPls must be a non-negative number`);
+  for (const field of ["tpPct", "slPct", "trailingStopPct", "timeExitMin"]) {
+    if (s[field] !== undefined && s[field] !== null && (!isFiniteNumber(s[field]) || s[field] < 0))
+      throw new Error(`snipes[${i}].${field} must be a non-negative number if present`);
+  }
+  return {
+    enabled: Boolean(s.enabled),
+    token: s.token.toLowerCase(),
+    amountPls: s.amountPls,
+    tpPct: s.tpPct ?? 0,
+    slPct: s.slPct ?? 0,
+    trailingStopPct: s.trailingStopPct ?? 0,
+    timeExitMin: s.timeExitMin ?? 0,
+  };
+}
+
 function normalizeLaunch(l) {
   const merged = { ...DEFAULT_LAUNCH, ...(l ?? {}) };
   for (const field of [
@@ -95,12 +119,15 @@ function normalizeConfig(body) {
   const rulesIn = Array.isArray(body.rules) ? body.rules : [];
   if (rulesIn.length > 50) throw new Error("too many rules (max 50)");
   const rules = rulesIn.map(normalizeRule);
+  const snipesIn = Array.isArray(body.snipes) ? body.snipes : [];
+  if (snipesIn.length > 50) throw new Error("too many snipe targets (max 50)");
+  const snipes = snipesIn.map(normalizeSnipe);
   const launch = normalizeLaunch(body.launch);
-  return { launch, rules, maxHoldingPct };
+  return { launch, rules, snipes, maxHoldingPct };
 }
 
 function emptyConfig() {
-  return { launch: { ...DEFAULT_LAUNCH }, rules: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT };
+  return { launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT };
 }
 
 module.exports = { normalizeConfig, emptyConfig, DEFAULT_LAUNCH, DEFAULT_MAX_HOLDING_PCT };

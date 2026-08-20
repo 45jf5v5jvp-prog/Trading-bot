@@ -52,7 +52,7 @@ export interface ScreenLimits {
  * enable/disable flag, or a blacklist can pass here and turn hostile in the
  * next block. Screening reduces the failure rate. It does not make sniping safe.
  */
-async function simulate(token: string): Promise<{
+export async function simulate(token: string): Promise<{
   sellable: boolean; buyTaxBps: number; sellTaxBps: number; roundTripLossBps: number;
 } | null> {
   const probeAddr = process.env.PROBE_ADDRESS;
@@ -83,7 +83,7 @@ async function simulate(token: string): Promise<{
 /** V3 equivalent of simulate() above - same reasoning, uses SwapProbeV3
  * against the specific fee-tier pool instead of SwapProbe against the V2 pair.
  * No buyTaxBps/sellTaxBps here - see SwapProbeV3.sol's top comment for why. */
-async function simulateV3(token: string, fee: number): Promise<{
+export async function simulateV3(token: string, fee: number): Promise<{
   sellable: boolean; roundTripLossBps: number;
 } | null> {
   const probeAddr = CFG.probeAddressV3;
@@ -362,7 +362,7 @@ export async function screenV3(
 
 /** V4 equivalent of simulateV3 - the probe runs a real buy+sell through the
  * pool (hook code included) under eth_call. See SwapProbeV4.sol. */
-async function simulateV4(key: V4PoolKey): Promise<{
+export async function simulateV4(key: V4PoolKey): Promise<{
   sellable: boolean; roundTripLossBps: number;
 } | null> {
   const probeAddr = CFG.probeAddressV4;

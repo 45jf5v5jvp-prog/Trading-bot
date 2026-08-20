@@ -8,7 +8,7 @@ import { log } from "./log.js";
 
 export interface SwapRequest {
   vault: string;
-  bot: "launch" | "trading";
+  bot: "launch" | "trading" | "snipe";
   path: string[];
   amountIn: bigint;
   tokenLabel: string;
@@ -180,7 +180,7 @@ export type TradeVenue =
 
 export interface MultiVenueSwapRequest {
   vault: string;
-  bot: "launch" | "trading";
+  bot: "launch" | "trading" | "snipe";
   venue: TradeVenue;
   amountIn: bigint;
   tokenLabel: string;

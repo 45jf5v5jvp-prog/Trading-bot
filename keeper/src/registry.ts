@@ -32,6 +32,28 @@ export interface LaunchConfig {
   requireOwnerRenounced: boolean;
 }
 
+/**
+ * A user-chosen contract address to buy the instant it becomes tradeable -
+ * for a token spotted before its liquidity goes live (a presale, a
+ * Telegram/Twitter tip), rather than one this bot discovered on its own.
+ * Deliberately screened far more lightly than a Launch Bot buy: the age,
+ * deployer-share, and liquidity-floor checks exist to judge a random
+ * anonymous token, and none of that applies when a human already decided
+ * to buy this specific address. The one gate that stays mandatory is the
+ * honeypot/sellability simulation - see snipe.ts - because "can this be
+ * sold at all" protects against a fat-fingered or malicious address
+ * regardless of how deliberately it was chosen.
+ */
+export interface TargetSnipe {
+  enabled: boolean;
+  token: string;
+  amountPls: number;
+  tpPct: number;
+  slPct: number;
+  trailingStopPct: number;
+  timeExitMin: number;
+}
+
 export interface TradingRule {
   enabled: boolean;
   token: string;
@@ -56,6 +78,7 @@ export interface VaultRecord {
   executorOk: boolean;
   launch: LaunchConfig;
   rules: TradingRule[];
+  snipes: TargetSnipe[];
   // Never let one token exceed this share of the vault's value. The single most
   // important safety setting: without it a dip-buying rule tips the whole vault
   // into one falling token. 0 disables (not recommended).
@@ -81,17 +104,20 @@ const DEFAULT_LAUNCH: LaunchConfig = {
 
 const cache = new Map<string, VaultRecord>();
 
-interface RawConfig { launch?: Partial<LaunchConfig>; rules?: TradingRule[]; maxHoldingPct?: number }
-type LoadedConfig = { launch: LaunchConfig; rules: TradingRule[]; maxHoldingPct: number };
+interface RawConfig {
+  launch?: Partial<LaunchConfig>; rules?: TradingRule[]; snipes?: TargetSnipe[]; maxHoldingPct?: number;
+}
+type LoadedConfig = { launch: LaunchConfig; rules: TradingRule[]; snipes: TargetSnipe[]; maxHoldingPct: number };
 
 const EMPTY: LoadedConfig = {
-  launch: { ...DEFAULT_LAUNCH }, rules: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+  launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
 };
 
 function shape(raw: RawConfig): LoadedConfig {
   return {
     launch: { ...DEFAULT_LAUNCH, ...(raw.launch ?? {}) },
     rules: (raw.rules ?? []).filter((r) => r.enabled),
+    snipes: (raw.snipes ?? []).filter((s) => s.enabled && s.amountPls > 0),
     maxHoldingPct: raw.maxHoldingPct ?? DEFAULT_MAX_HOLDING_PCT,
   };
 }
@@ -177,8 +203,8 @@ export async function refresh(): Promise<VaultRecord[]> {
       const [owner, executor, paused] = await Promise.all([v.owner(), v.executor(), v.paused()]);
       const executorOk =
         String(executor).toLowerCase() === (process.env.KEEPER_ADDRESS || "").toLowerCase();
-      const { launch, rules, maxHoldingPct } = await loadConfig(addr);
-      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, maxHoldingPct, kind };
+      const { launch, rules, snipes, maxHoldingPct } = await loadConfig(addr);
+      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, maxHoldingPct, kind };
       cache.set(addr.toLowerCase(), rec);
       return rec;
     } catch (e) {

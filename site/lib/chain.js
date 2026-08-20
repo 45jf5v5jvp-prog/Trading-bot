@@ -41,7 +41,11 @@ const PRESETS = {
     // (keeper/src/config.ts), reused here rather than re-verified fresh,
     // since it's already the live default this deployment trades through.
     factory: "0x29eA7545DEf87022BAdc76323F373EA1e707C523",
-    vaultFactory: "0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295",
+    // v2 factory, deployed 2026-08-20 to replace the original
+    // (0xf1971425f3F52f6E6e6058Ba7faB5eF446fc7295), which still defaulted
+    // every new vault's executor to a wallet whose key was exposed on
+    // 2026-08-14. See DEPLOYED-ADDRESSES.md for the full history.
+    vaultFactory: "0xf86d01b997CAFE018b72Ff0b7602240a099c1E11",
     multiVenueVaultFactory: "",
     // V3/V4 pricing addresses - PulseX has no V3 or V4 deployment, so these
     // stay empty like the keeper's own FACTORY_V3/POOL_MANAGER do. Empty

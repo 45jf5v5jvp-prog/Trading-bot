@@ -39,6 +39,33 @@ test("rejects more than 50 snipe targets (sanity cap)", () => {
   assert.throws(() => normalizeConfig({ snipes }), /too many snipe targets/);
 });
 
+test("accepts a minimal valid limit order", () => {
+  const out = normalizeConfig({
+    limitOrders: [{ id: "abc", enabled: true, token: "0x" + "3".repeat(40), side: "sell", targetPrice: 0.005, amount: 0, sellAll: true }],
+  });
+  assert.equal(out.limitOrders.length, 1);
+  assert.equal(out.limitOrders[0].side, "sell");
+  assert.equal(out.limitOrders[0].sellAll, true);
+});
+
+test("rejects a limit order missing an id", () => {
+  assert.throws(() => normalizeConfig({
+    limitOrders: [{ enabled: true, token: "0x" + "3".repeat(40), side: "sell", targetPrice: 0.005, amount: 0 }],
+  }), /id/);
+});
+
+test("rejects a limit order with a bad side", () => {
+  assert.throws(() => normalizeConfig({
+    limitOrders: [{ id: "abc", enabled: true, token: "0x" + "3".repeat(40), side: "sideways", targetPrice: 0.005, amount: 0 }],
+  }), /side/);
+});
+
+test("rejects a limit order with a non-positive target price", () => {
+  assert.throws(() => normalizeConfig({
+    limitOrders: [{ id: "abc", enabled: true, token: "0x" + "3".repeat(40), side: "buy", targetPrice: 0, amount: 10 }],
+  }), /targetPrice/);
+});
+
 test("accepts a minimal valid config with one rule", () => {
   const out = normalizeConfig({
     maxHoldingPct: 30,

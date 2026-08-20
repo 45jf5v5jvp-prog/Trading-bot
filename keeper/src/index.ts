@@ -5,6 +5,7 @@ import { pollAll } from "./prices.js";
 import * as rules from "./rules.js";
 import * as launch from "./launch.js";
 import * as snipe from "./snipe.js";
+import * as limits from "./limits.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -65,6 +66,10 @@ async function main(): Promise<void> {
   // buyers into a token the moment its pool exists, so it checks on every
   // pass rather than a slower dedicated interval.
   loop("snipe", CFG.pairScanSec, snipe.tick);
+  // Not racing anyone - a resting order fires whenever the price is right,
+  // so the position-check cadence (already "how are my holdings doing?")
+  // fits better than the launch scanner's fast pace.
+  loop("limits", CFG.positionCheckSec, limits.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

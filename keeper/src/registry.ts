@@ -54,6 +54,31 @@ export interface TargetSnipe {
   timeExitMin: number;
 }
 
+/**
+ * A resting order: buy or sell a specific held/watched token when its price
+ * crosses a target, instead of the bot's other trigger shapes (a % move
+ * from history, a token going live for the first time). Aimed at tokens the
+ * owner already holds or deposited themselves - HEX, INC, PLSX, whatever -
+ * not ones the bot discovered. `id` is stable across edits so a fill can be
+ * recorded against this exact order and never repeated, even if the vault
+ * has several orders on the same token (a buy target and a sell target, or
+ * two sell targets at different prices).
+ */
+export interface LimitOrder {
+  id: string;
+  enabled: boolean;
+  token: string;
+  side: "buy" | "sell";
+  // PLS per whole token. Buy fires when price <= this; sell fires when
+  // price >= this - the standard limit-order sense for each side.
+  targetPrice: number;
+  // side=buy: PLS to spend. side=sell: tokens to sell (ignored if sellAll).
+  amount: number;
+  // side=sell only: sell the vault's entire live balance of the token
+  // instead of a fixed amount - the common case ("just get me out").
+  sellAll: boolean;
+}
+
 export interface TradingRule {
   enabled: boolean;
   token: string;
@@ -79,6 +104,7 @@ export interface VaultRecord {
   launch: LaunchConfig;
   rules: TradingRule[];
   snipes: TargetSnipe[];
+  limitOrders: LimitOrder[];
   // Never let one token exceed this share of the vault's value. The single most
   // important safety setting: without it a dip-buying rule tips the whole vault
   // into one falling token. 0 disables (not recommended).
@@ -98,12 +124,16 @@ const DEFAULT_LAUNCH: LaunchConfig = {
 const cache = new Map<string, VaultRecord>();
 
 interface RawConfig {
-  launch?: Partial<LaunchConfig>; rules?: TradingRule[]; snipes?: TargetSnipe[]; maxHoldingPct?: number;
+  launch?: Partial<LaunchConfig>; rules?: TradingRule[]; snipes?: TargetSnipe[];
+  limitOrders?: LimitOrder[]; maxHoldingPct?: number;
 }
-type LoadedConfig = { launch: LaunchConfig; rules: TradingRule[]; snipes: TargetSnipe[]; maxHoldingPct: number };
+type LoadedConfig = {
+  launch: LaunchConfig; rules: TradingRule[]; snipes: TargetSnipe[];
+  limitOrders: LimitOrder[]; maxHoldingPct: number;
+};
 
 const EMPTY: LoadedConfig = {
-  launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
+  launch: { ...DEFAULT_LAUNCH }, rules: [], snipes: [], limitOrders: [], maxHoldingPct: DEFAULT_MAX_HOLDING_PCT,
 };
 
 function shape(raw: RawConfig): LoadedConfig {
@@ -111,6 +141,7 @@ function shape(raw: RawConfig): LoadedConfig {
     launch: { ...DEFAULT_LAUNCH, ...(raw.launch ?? {}) },
     rules: (raw.rules ?? []).filter((r) => r.enabled),
     snipes: (raw.snipes ?? []).filter((s) => s.enabled && s.amountPls > 0),
+    limitOrders: (raw.limitOrders ?? []).filter((o) => o.enabled && o.id),
     maxHoldingPct: raw.maxHoldingPct ?? DEFAULT_MAX_HOLDING_PCT,
   };
 }
@@ -182,8 +213,8 @@ export async function refresh(): Promise<VaultRecord[]> {
       const [owner, executor, paused] = await Promise.all([v.owner(), v.executor(), v.paused()]);
       const executorOk =
         String(executor).toLowerCase() === (process.env.KEEPER_ADDRESS || "").toLowerCase();
-      const { launch, rules, snipes, maxHoldingPct } = await loadConfig(addr);
-      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, maxHoldingPct };
+      const { launch, rules, snipes, limitOrders, maxHoldingPct } = await loadConfig(addr);
+      const rec: VaultRecord = { address: addr, owner, paused, executorOk, launch, rules, snipes, limitOrders, maxHoldingPct };
       cache.set(addr.toLowerCase(), rec);
       return rec;
     } catch (e) {

@@ -47,20 +47,26 @@ Those two addresses have no PulseChain contract behind them - pointing
 to v1 and the redeploy was redone on the correct network. Recorded here only
 so nobody mistakes those two addresses for real PulseChain contracts later.
 
-### Next steps
+### Droplet status: live on v2 (confirmed 2026-08-20T23:06 UTC)
+`keeper/.env` on the production droplet now has
+`VAULT_FACTORY=0x5B5d3B68814857695F3Fedfe0543F03166Bc73e0`, and `icaria-keeper`
+(pm2) restarted clean onto it - `[chain] Connected to PulseChain, router and
+factory`, then `[registry] 0 vaults, 0 active` (0 is correct: nothing has been
+created against this factory yet), `[main] All loops running`, no errors.
+(Earlier confusion during this rollout: a `pm2 env <id>` check doesn't show
+`dotenv`-loaded variables, only what pm2 itself injects at process launch -
+it's the wrong tool for checking this. Reading `keeper/.env` directly with
+`grep`/`cat` is the reliable way to confirm what's actually configured.)
+
+### Remaining next steps
 1. Verify both v2 contracts on https://scan.pulsechain.com (contract page,
    bytecode) as a second confirmation beyond the Remix checks above.
-2. Put the new VaultFactory address into `keeper/.env`:
-   `VAULT_FACTORY=0x5B5d3B68814857695F3Fedfe0543F03166Bc73e0`
-   (`PROBE_ADDRESS` is unchanged - SwapProbe wasn't redeployed.) Restart with
-   `pm2 restart icaria-keeper --update-env` (a plain `pm2 restart` reuses
-   pm2's cached environment snapshot rather than rereading `.env`).
-3. Call `createVault([])` on the new VaultFactory from your real long-term
+2. Call `createVault([])` on the new VaultFactory from your real long-term
    wallet, then `vaultOf(yourAddress)` to get its address. Confirm its
    `executor()` is already correct - no manual `setExecutor` call needed.
-4. Deposit a tiny amount into that vault and withdraw it back out before
+3. Deposit a tiny amount into that vault and withdraw it back out before
    trusting it with anything more (HANDOFF.md section 8).
-5. Once confirmed working, treat the v1 VaultFactory below as retired -
+4. Once confirmed working, treat the v1 VaultFactory below as retired -
    don't create new vaults against it.
 
 ---

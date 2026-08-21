@@ -66,7 +66,10 @@ async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
   let amountIn: bigint;
   let path: string[];
   if (o.side === "buy") {
-    if (o.amount <= 0) return;
+    if (o.amount <= 0) {
+      log("warn", "limits", `${v.address} buy order ${o.id} on ${token} hit its target price (${price} <= ${o.targetPrice}) but has 0 PLS to spend - fix the amount on the dashboard`);
+      return;
+    }
     amountIn = parseEther(String(o.amount));
     path = [CFG.wpls, token];
   } else {
@@ -76,7 +79,10 @@ async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
       raw = await erc.balanceOf(v.address).catch(() => 0n);
       if (raw === 0n) return; // nothing to sell
     } else {
-      if (o.amount <= 0) return;
+      if (o.amount <= 0) {
+        log("warn", "limits", `${v.address} sell order ${o.id} on ${token} hit its target price (${price} >= ${o.targetPrice}) but has 0 tokens to sell - fix the amount on the dashboard`);
+        return;
+      }
       raw = parseUnits(String(o.amount), decimals);
     }
     amountIn = raw;

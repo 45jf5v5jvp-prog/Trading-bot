@@ -20,6 +20,13 @@ import { quoteTokenPrice } from "../lib/quoteTokenPrice";
 export default function LimitOrderEditor({ order, onChange, onRemove }) {
   const num = (field) => numberFieldProps(order[field] ?? 0, (v) => onChange({ ...order, [field]: v }));
 
+  // Armed, but with nothing to actually trade - the order would sit here
+  // forever silently doing nothing even after the price condition is met
+  // (see keeper/src/limits.ts's `if (o.amount <= 0) return`). Surfaced here
+  // instead of just in keeper logs, since this is exactly the kind of thing
+  // that looks "on" in the UI while quietly never firing.
+  const needsAmount = order.enabled && (order.side === "sell" ? !order.sellAll && !(order.amount > 0) : !(order.amount > 0));
+
   const [mode, setMode] = useState("price"); // "price" | "percent" - editor-local, not saved
   const [percent, setPercent] = useState(order.side === "sell" ? 25 : -15);
   const [currentPrice, setCurrentPrice] = useState(null);
@@ -159,6 +166,13 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
           <label>{CHAIN.nativeSymbol} to spend</label>
           <input {...num("amount")} min="0" style={{ width: 160 }} />
         </div>
+      )}
+      {needsAmount && (
+        <p className="hint" style={{ color: "var(--bad)", marginTop: 6 }}>
+          Armed with no {order.side === "sell" ? "amount to sell" : `${CHAIN.nativeSymbol} to spend`} set - this
+          order will never fire, even after the price hits your target. Set an amount above 0
+          {order.side === "sell" ? ` or check "Sell the entire balance"` : ""} to actually arm it.
+        </p>
       )}
     </div>
   );

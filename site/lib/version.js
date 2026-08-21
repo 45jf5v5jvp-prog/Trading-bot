@@ -3,10 +3,11 @@
  * the header next to the BETA badge so it's obvious at a glance whether the
  * droplet is actually running what was just deployed.
  *
- * Convention: patch (x.x.N) for a normal round of fixes/features, minor
- * (x.N.0) for a larger feature set, major (N.0.0) only for something on the
- * scale of the BotVault/VaultFactory v2 redeploy this number started
- * counting from - PulseChain is on v2 of the contracts; Robinhood (a
- * separate deployment) is still on v1.
+ * Convention: two numbers, not three. Minor (3.N) for every normal round of
+ * fixes/features, however big or small - most releases. Major (N.0) only
+ * for something on the scale of the v3.0 redesign this number started
+ * counting from, or the BotVault/VaultFactory redeploy before that -
+ * PulseChain is on v2 of the contracts; Robinhood (a separate deployment)
+ * is still on v1.
  */
-export const APP_VERSION = "3.0.0";
+export const APP_VERSION = "3.1";

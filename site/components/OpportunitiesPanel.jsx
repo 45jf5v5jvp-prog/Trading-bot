@@ -24,13 +24,13 @@ const CONFIDENCE_COLOR = { high: "var(--green, #2e7d32)", medium: "#b8860b", low
  * self-reported word for it. One real signal is enough to count as a setup
  * at all (see keeper/src/hunter.ts's MIN_AGREEING_SIGNALS) - it doesn't
  * need multiple indicators agreeing with each other, it just needs to be
- * real data, not a blind buy. Confidence still scales with how many agree.
- * Null for Discovery Bot's rows, which have no technical signals at all. */
+ * real data, not a blind buy. Two or more agreeing signals bumps this to
+ * high confidence. Null for Discovery Bot's rows, which have no technical
+ * signals at all. */
 function technicalConfidence(signalCount) {
   if (signalCount === null || signalCount === undefined) return null;
-  if (signalCount >= 3) return { label: "High confidence", detail: "all 3 signals agree", color: CONFIDENCE_COLOR.high };
-  if (signalCount >= 2) return { label: "Confident", detail: `${signalCount} signals agree`, color: CONFIDENCE_COLOR.medium };
-  return { label: "Signal", detail: "1 technical signal", color: "var(--ash)" };
+  if (signalCount >= 2) return { label: "High confidence", detail: `${signalCount} signals agree`, color: CONFIDENCE_COLOR.high };
+  return { label: "Confident", detail: "1 technical signal", color: CONFIDENCE_COLOR.medium };
 }
 
 /**

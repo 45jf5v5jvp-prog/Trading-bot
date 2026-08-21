@@ -59,11 +59,11 @@ const MIN_AGREEING_SIGNALS = 1;
 
 /** Confidence grounded in something a person can verify - how many
  * independent technical signals actually agree - rather than only the AI's
- * own self-reported word for it. Never called below MIN_AGREEING_SIGNALS. */
-function technicalConfidence(signalCount: number): "signal" | "confident" | "high" {
-  if (signalCount >= 3) return "high";
-  if (signalCount >= 2) return "confident";
-  return "signal";
+ * own self-reported word for it. One reliable signal is enough to call it a
+ * real setup ("confident"); two or more agreeing is "high" confidence.
+ * Never called below MIN_AGREEING_SIGNALS. */
+function technicalConfidence(signalCount: number): "confident" | "high" {
+  return signalCount >= 2 ? "high" : "confident";
 }
 
 interface Strictest {
@@ -139,9 +139,7 @@ function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, 
     : "";
   const conf = technicalConfidence(triggers.length);
   const confidenceNote = conf === "high"
-    ? " All three technical signals agree - high confidence."
-    : conf === "confident"
-    ? " Two technical signals agree."
+    ? ` ${triggers.length} technical signals agree - high confidence.`
     : " One technical signal.";
   const base = `${symbol} looks oversold: ${triggers.join("; ")}.${confidenceNote}${volNote}`;
   if (s.verdict !== "pass") return `${base} Screen failed: ${s.reason}.`;

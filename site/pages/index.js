@@ -735,6 +735,17 @@ export default function Dashboard() {
                     onChange={(discovery) => updateConfig({ ...config, discovery })}
                     vaultBalance={Number(vaultInfo.baseBalance) || 0}
                   />
+                  {/* Discovery's own findings, kept inside its own card now
+                      that the standalone panel below the bots is Hunter IQ's
+                      home - Hunter's findings need no such queue, since a
+                      setup is either auto-bought outright or shown, already
+                      justified, in the trade feed below. */}
+                  <OpportunitiesPanel
+                    opportunities={(opportunities ?? []).filter((o) => (o.source ?? "discovery") !== "hunter")}
+                    onBuy={handleBuyOpportunity}
+                    buyStates={buyStates}
+                    onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}
+                  />
                 </BotCard>
 
                 <BotCard
@@ -756,7 +767,6 @@ export default function Dashboard() {
                     hunter={config.hunter}
                     onChange={(hunter) => updateConfig({ ...config, hunter })}
                   />
-                  <HunterIQPanel hunterIQ={hunterIQ} onSubmitFeedback={handleSubmitFeedback} />
                 </BotCard>
 
                 <BotCard
@@ -781,15 +791,7 @@ export default function Dashboard() {
                 </BotCard>
 
                 <div className="panel">
-                  {/* Hunter's own findings now live in its BotCard's Hunter IQ
-                      panel above, with the rationale that led to each trade -
-                      this stays Discovery-only, its manual notify/Buy Now flow. */}
-                  <OpportunitiesPanel
-                    opportunities={(opportunities ?? []).filter((o) => (o.source ?? "discovery") !== "hunter")}
-                    onBuy={handleBuyOpportunity}
-                    buyStates={buyStates}
-                    onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}
-                  />
+                  <HunterIQPanel hunterIQ={hunterIQ} onSubmitFeedback={handleSubmitFeedback} />
                 </div>
 
                 <div className="panel">

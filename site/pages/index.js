@@ -548,6 +548,10 @@ export default function Dashboard() {
               <HistoryPanel history={history} onClosePosition={handleClosePosition} closeStates={closeStates} />
             </div>
 
+            <div className="panel">
+              <PortfolioPanel portfolio={portfolio} />
+            </div>
+
             {config && (
               <>
                 {dirty && (
@@ -618,10 +622,6 @@ export default function Dashboard() {
 
                 <div className="panel">
                   <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
-                </div>
-
-                <div className="panel">
-                  <PortfolioPanel portfolio={portfolio} />
                 </div>
 
                 <div className="panel">

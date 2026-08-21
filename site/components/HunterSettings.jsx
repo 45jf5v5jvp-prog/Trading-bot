@@ -1,5 +1,6 @@
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
+import BotStatusBadge from "./BotStatusBadge";
 
 /**
  * Editor for Hunter Bot settings. Hunts RSI/MACD/Bollinger dip-buying setups
@@ -14,7 +15,7 @@ export default function HunterSettings({ hunter, onChange }) {
 
   return (
     <div>
-      <div className="section-label">Hunter Bot</div>
+      <div className="section-label">Hunter Bot <BotStatusBadge active={hunter.enabled} /></div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Hunts for oversold dip-buying setups on {CHAIN.dexName} using technical indicators (RSI,
         MACD, Bollinger Bands), instead of reacting to a new launch or a price/liquidity breakout.

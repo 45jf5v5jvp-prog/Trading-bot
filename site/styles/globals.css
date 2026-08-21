@@ -198,6 +198,11 @@ input::placeholder { color: #6b6c76; }
 }
 .badge-active { background: #123527; color: var(--good); }
 .badge-paused { background: #2a1012; color: var(--bad); }
+/* A bot's own on/off state, distinct from the vault-wide Active/Paused
+   badge above (see .badge-active/.badge-paused) - placed right next to each
+   bot's own section header so it reads at a glance while scrolling, instead
+   of being one more checkbox among a dozen others further down the panel. */
+.badge-off { background: var(--chip); color: var(--ash); }
 
 .status-msg { color: var(--text); background: var(--chip); border: 1px solid var(--edge); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
 .error-msg { color: var(--bad); background: #2a1012; border: 1px solid #4a2020; border-radius: 10px; padding: 12px 16px; font-size: 14px; }

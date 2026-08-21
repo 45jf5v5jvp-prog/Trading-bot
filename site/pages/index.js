@@ -42,7 +42,7 @@ function fmtBalance(v) {
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
-    connectInjected, connectWalletConnect, createVault, depositBase, withdrawBase, withdrawToken, setPaused, refreshVaultInfo, getProvider,
+    connectInjected, connectWalletConnect, createVault, depositBase, withdrawBase, withdrawToken, setPaused, revokeExecutor, refreshVaultInfo, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -300,6 +300,23 @@ export default function Dashboard() {
     }
   }
 
+  /** Unlike Pause (a toggle you can flip back yourself from this same page),
+   * getting the keeper trading again after this requires setExecutor() from
+   * outside this UI - so this is the "something is actually wrong, cut it
+   * off now" button, not the everyday one. */
+  async function handleRevokeExecutor() {
+    setTxBusy(true);
+    setStatus("");
+    try {
+      await revokeExecutor(setStatus);
+      setStatus("Executor revoked. The keeper can no longer trade this vault, regardless of whether it's running.");
+    } catch (e) {
+      setStatus(`Revoke executor failed: ${e.message}`);
+    } finally {
+      setTxBusy(false);
+    }
+  }
+
   /** Pulls the vault's entire balance of one token directly to the owner's
    * wallet. The escape hatch for a position the keeper isn't exiting on its
    * own - doesn't sell anything, just gets it out of the vault so it can be
@@ -486,13 +503,19 @@ export default function Dashboard() {
                   <button className="btn btn-small" onClick={handleTogglePause} disabled={txBusy}>
                     {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
                   </button>
+                  <button className="btn btn-small btn-danger" onClick={handleRevokeExecutor} disabled={txBusy}>
+                    {txBusy ? "Working..." : "Revoke Executor"}
+                  </button>
                 </div>
               </div>
               <p className="hint">
                 Balance and holdings update automatically every 20 seconds - use Refresh to update
-                immediately instead of waiting. Pausing stops the keeper from trading immediately.
-                It does not affect deposits or withdrawals, which always stay available to you as
-                the owner.
+                immediately instead of waiting. Pausing stops the keeper from trading immediately;
+                you can resume it yourself right here. Revoke Executor is more permanent - it strips
+                the keeper's ability to trade this vault at all, whether or not the keeper server is
+                even running, and getting it trading again requires a separate action outside this
+                page. Neither one affects deposits or withdrawals, which always stay available to you
+                as the owner.
               </p>
               {referred && (
                 <p className="hint" style={{ marginBottom: 0 }}>

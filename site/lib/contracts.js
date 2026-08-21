@@ -32,6 +32,7 @@ export const VAULT_ABI = [
   "function withdraw(address token, uint256 amount)",
   "function withdrawAll(address[] tokens)",
   "function setPaused(bool p)",
+  "function revokeExecutor()",
 ];
 
 export const ERC20_ABI = [

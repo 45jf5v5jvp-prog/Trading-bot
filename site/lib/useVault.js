@@ -326,9 +326,36 @@ export function useVault() {
     }
   }, [vaultAddress, getProvider, refreshVaultInfo]);
 
+  /**
+   * Permanently strips the keeper's ability to trade this vault - the
+   * escape hatch CLAUDE.md's invariants require to work regardless of
+   * whether the keeper server is even running, since the on-chain check is
+   * everything (see BotVault.sol's executor-gated executeSwap). Unlike
+   * setPaused (a toggle), this is one-way from the site's UI: getting the
+   * keeper trading again after this requires a fresh setExecutor() call,
+   * deliberately not exposed here - revoking should be the easy, fast path
+   * (one click, no second-guessing), re-granting should not be.
+   */
+  const revokeExecutor = useCallback(async (onProgress) => {
+    setError(null);
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      onProgress?.("Confirm the transaction in your wallet...");
+      const tx = await vault.revokeExecutor();
+      onProgress?.("Waiting for it to confirm on-chain...");
+      await waitForReceipt(tx.hash);
+      await refreshVaultInfo(vaultAddress);
+    } catch (e) {
+      setError(e.message || String(e));
+      throw e;
+    }
+  }, [vaultAddress, getProvider, refreshVaultInfo]);
+
   return {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
     connectInjected, connectWalletConnect, disconnect,
-    createVault, depositBase, withdrawBase, withdrawToken, setPaused, refreshVaultInfo, getProvider,
+    createVault, depositBase, withdrawBase, withdrawToken, setPaused, revokeExecutor, refreshVaultInfo, getProvider,
   };
 }

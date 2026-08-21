@@ -20,6 +20,8 @@ import LaunchSettings from "../components/LaunchSettings";
 import DiscoverySettings from "../components/DiscoverySettings";
 import HunterSettings from "../components/HunterSettings";
 import BotCard from "../components/BotCard";
+import InfoButton from "../components/InfoButton";
+import { TradingBotsIcon, LaunchIcon, SniperIcon, DiscoveryIcon, HunterIcon, LimitOrderIcon } from "../components/BotIcons";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
 import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
@@ -447,15 +449,17 @@ export default function Dashboard() {
 
         {account && (
           <div className="panel">
-            <div className="section-label">Referral Link</div>
-            <p className="hint" style={{ marginBottom: 14 }}>
-              Share this link. Anyone who creates a vault after visiting it is permanently credited
-              to you - you earn {"0.05%"} of everything their vault ever trades (the platform keeps
-              {" 0.20%"} instead of its usual {"0.25%"}; they never pay more for having been
-              referred). The link carries an opaque code, not your wallet address, so sharing it
-              never lets anyone trace it back to which address is yours. Earnings are tracked below
-              and paid into your own vault in batches, not automatically on every trade.
-            </p>
+            <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+              <div className="section-label" style={{ margin: 0 }}>Referral Link</div>
+              <InfoButton title="How the referral link works">
+                Share this link. Anyone who creates a vault after visiting it is permanently credited
+                to you - you earn 0.05% of everything their vault ever trades (the platform keeps
+                0.20% instead of its usual 0.25%; they never pay more for having been referred). The
+                link carries an opaque code, not your wallet address, so sharing it never lets anyone
+                trace it back to which address is yours. Earnings are tracked below and paid into
+                your own vault in batches, not automatically on every trade.
+              </InfoButton>
+            </div>
             <div className="field-inline">
               <input
                 type="text"
@@ -534,35 +538,35 @@ export default function Dashboard() {
 
         {account && vaultAddress && vaultInfo && (
           <div>
-            <div className="panel">
-              <p className="mono-addr" style={{ marginBottom: 4 }}>Connected: {account}</p>
-              <div className="section-label" style={{ marginTop: 18 }}>Your Vault</div>
-              <p className="mono-addr" style={{ marginBottom: 4 }}>{vaultAddress}</p>
-              <p className="hint" style={{ marginBottom: 14 }}>
-                {vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
-              </p>
+            <p className="mono-addr" style={{ marginBottom: 4 }}>Connected: {account}</p>
 
-              <div className="row-between">
-                <div>
-                  <span className="num" style={{ fontSize: 28 }}>{fmtBalance(vaultInfo.baseBalance)}</span>
-                  <span style={{ color: "var(--ash)", marginLeft: 8, fontSize: 13 }}>{CHAIN.baseSymbol}</span>
-                </div>
-                <div className="row">
-                  <span className={vaultInfo.paused ? "badge badge-paused" : "badge badge-active"}>
-                    {vaultInfo.paused ? "Paused" : "Active"}
-                  </span>
-                  <button className="btn btn-small" onClick={handleRefresh} disabled={refreshing}>
-                    {refreshing ? "Refreshing..." : "Refresh"}
-                  </button>
-                  <button className="btn btn-small" onClick={handleTogglePause} disabled={txBusy}>
-                    {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
-                  </button>
-                  <button className="btn btn-small btn-danger" onClick={handleRevokeExecutor} disabled={txBusy}>
-                    {txBusy ? "Working..." : "Revoke Executor"}
-                  </button>
-                </div>
+            <div className="hero">
+              <div className="hero-top">
+                <span className="hero-label">
+                  Your Vault &middot; {vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
+                </span>
+                <span className={vaultInfo.paused ? "status-pill is-paused" : "status-pill"}>
+                  <span className={vaultInfo.paused ? "dot" : "dot pulse"} />
+                  {vaultInfo.paused ? "Paused" : "Active"}
+                </span>
               </div>
-              <p className="hint">
+              <div className="hero-balance">
+                <span className="n num">{fmtBalance(vaultInfo.baseBalance)}</span>
+                <span className="u">{CHAIN.baseSymbol}</span>
+              </div>
+              <p className="hero-sub mono-addr">{vaultAddress}</p>
+              <div className="hero-actions">
+                <button className="btn btn-small" onClick={handleRefresh} disabled={refreshing}>
+                  {refreshing ? "Refreshing..." : "Refresh"}
+                </button>
+                <button className="btn btn-small" onClick={handleTogglePause} disabled={txBusy}>
+                  {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
+                </button>
+                <button className="btn btn-small btn-danger" onClick={handleRevokeExecutor} disabled={txBusy}>
+                  {txBusy ? "Working..." : "Revoke Executor"}
+                </button>
+              </div>
+              <p className="hint" style={{ marginTop: 14, marginBottom: 0 }}>
                 Balance and holdings update automatically every 20 seconds - use Refresh to update
                 immediately instead of waiting. Pausing stops the keeper from trading immediately;
                 you can resume it yourself right here. Revoke Executor is more permanent - it strips
@@ -600,24 +604,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="panel">
-              <div className="section-label">Emergency: Withdraw a Token Directly</div>
-              <p className="hint" style={{ marginBottom: 14 }}>
-                If a position won't close through the normal Close Position button, this pulls the
-                vault's entire balance of that token straight to your own wallet - it doesn't sell it,
-                just gets it out so you can sell it yourself.
-              </p>
-              <div className="field-inline">
-                <label>Token address</label>
-                <input type="text" placeholder="0x..." value={tokenWithdrawAddr}
-                  onChange={(e) => setTokenWithdrawAddr(e.target.value)} style={{ width: 340 }} />
-              </div>
-              <button className="btn btn-danger" onClick={handleWithdrawToken} disabled={tokenWithdrawBusy || !tokenWithdrawAddr}>
-                {tokenWithdrawBusy ? "Working..." : "Withdraw This Token"}
-              </button>
-            </div>
-
-            <div className="panel">
+            <div className="hero">
               <PnlSnapshot history={history} />
             </div>
 
@@ -641,22 +628,9 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                <div className="panel">
-                  <div className="section-label">Safety</div>
-                  <div className="field-inline">
-                    <label>Never let one token exceed</label>
-                    <input {...numberFieldProps(config.maxHoldingPct, (v) => updateConfig({ ...config, maxHoldingPct: v }))}
-                      min="0" max="100" style={{ width: 70 }} />
-                    <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>
-                  </div>
-                  <p className="hint">
-                    The most important safety setting. Stops one bad bot from putting the whole
-                    vault into one falling token.
-                  </p>
-                </div>
-
                 <BotCard
                   title="Trading Bots"
+                  icon={<TradingBotsIcon />}
                   active={(config.rules ?? []).some((r) => r.enabled)}
                   statLine={botStatLine(history, "trading")}
                   perfDetail={botPerfDetail(history, "trading")}
@@ -676,6 +650,7 @@ export default function Dashboard() {
 
                 <BotCard
                   title="Launch Bot"
+                  icon={<LaunchIcon />}
                   active={config.launch.enabled}
                   statLine={botStatLine(history, "launch")}
                   perfDetail={botPerfDetail(history, "launch")}
@@ -697,6 +672,7 @@ export default function Dashboard() {
 
                 <BotCard
                   title="Sniper Bot"
+                  icon={<SniperIcon />}
                   active={(config.snipes ?? []).some((s) => s.enabled)}
                   statLine={botStatLine(history, "snipe")}
                   perfDetail={botPerfDetail(history, "snipe")}
@@ -716,6 +692,7 @@ export default function Dashboard() {
 
                 <BotCard
                   title="Discovery Bot"
+                  icon={<DiscoveryIcon />}
                   active={config.discovery.enabled}
                   statLine={botStatLine(history, "discovery")}
                   perfDetail={botPerfDetail(history, "discovery")}
@@ -737,6 +714,7 @@ export default function Dashboard() {
 
                 <BotCard
                   title="Hunter Bot"
+                  icon={<HunterIcon />}
                   active={config.hunter.enabled}
                   statLine={botStatLine(history, "hunter")}
                   perfDetail={botPerfDetail(history, "hunter")}
@@ -770,6 +748,7 @@ export default function Dashboard() {
 
                 <BotCard
                   title="Limit Order Bot"
+                  icon={<LimitOrderIcon />}
                   active={(config.limitOrders ?? []).some((o) => o.enabled)}
                   statLine={botStatLine(history, "limit")}
                   perfDetail={botPerfDetail(history, "limit")}
@@ -787,6 +766,20 @@ export default function Dashboard() {
                     onChange={(limitOrders) => updateConfig({ ...config, limitOrders })}
                   />
                 </BotCard>
+
+                <div className="panel">
+                  <div className="section-label">Safety</div>
+                  <div className="field-inline">
+                    <label>Never let one token exceed</label>
+                    <input {...numberFieldProps(config.maxHoldingPct, (v) => updateConfig({ ...config, maxHoldingPct: v }))}
+                      min="0" max="100" style={{ width: 70 }} />
+                    <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>
+                  </div>
+                  <p className="hint">
+                    The most important safety setting. Stops one bad bot from putting the whole
+                    vault into one falling token.
+                  </p>
+                </div>
 
                 <button className={dirty ? "btn btn-primary" : "btn"} onClick={handleSave} disabled={saving}>
                   {saving ? "Saving..." : dirty ? "Save All Settings (unsaved changes)" : "Save All Settings"}
@@ -809,6 +802,23 @@ export default function Dashboard() {
                 )}
               </>
             )}
+
+            <div className="panel">
+              <div className="section-label">Emergency: Withdraw a Token Directly</div>
+              <p className="hint" style={{ marginBottom: 14 }}>
+                If a position won't close through the normal Close Position button, this pulls the
+                vault's entire balance of that token straight to your own wallet - it doesn't sell it,
+                just gets it out so you can sell it yourself.
+              </p>
+              <div className="field-inline">
+                <label>Token address</label>
+                <input type="text" placeholder="0x..." value={tokenWithdrawAddr}
+                  onChange={(e) => setTokenWithdrawAddr(e.target.value)} style={{ width: 340 }} />
+              </div>
+              <button className="btn btn-danger" onClick={handleWithdrawToken} disabled={tokenWithdrawBusy || !tokenWithdrawAddr}>
+                {tokenWithdrawBusy ? "Working..." : "Withdraw This Token"}
+              </button>
+            </div>
           </div>
         )}
 

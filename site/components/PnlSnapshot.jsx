@@ -55,7 +55,7 @@ export default function PnlSnapshot({ history }) {
         </p>
       ) : (
         <>
-          <div className={`num ${pnlClass(totalPls)}`} style={{ fontSize: 26 }}>{fmtPls(totalPls, unit)}</div>
+          <div className={`num ${pnlClass(totalPls)}`} style={{ fontSize: 34, fontWeight: 700 }}>{fmtPls(totalPls, unit)}</div>
           <p className="hint" style={{ marginTop: 4, marginBottom: 0 }}>
             {fmtPls(realizedPls, unit)} realized, {fmtPls(unrealizedPls, unit)} unrealized, from {tradeCount}{" "}
             {tradeCount === 1 ? "position" : "positions"}{w.hours === null ? " overall" : ` opened or closed in the last ${w.label.toLowerCase()}`}.

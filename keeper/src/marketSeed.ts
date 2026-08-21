@@ -2,7 +2,7 @@ import { Contract, formatEther } from "ethers";
 import { CFG } from "./config.js";
 import { provider, factory, type Dyn } from "./chain.js";
 import { PAIR_ABI } from "./abis.js";
-import { watched } from "./db.js";
+import { watched, meta, wplsPairs } from "./db.js";
 import { ensureWatched } from "./prices.js";
 import { plsUsd } from "./plsPrice.js";
 import { mapLimit } from "./concurrency.js";
@@ -16,18 +16,40 @@ import { log } from "./log.js";
  * tokens that launched before the keeper started watching - HEX, INC, PLSX,
  * whatever's actually trading - never made it in.
  *
- * This walks PulseX's entire pair list once per pass and adds every WPLS
- * pair above a $ liquidity floor, so both bots' candidate pool becomes the
- * whole tradeable market instead of only recent launches. It runs
- * periodically, not just once, because a token's liquidity can cross the
- * floor well after it first launched.
+ * This adds every WPLS pair above a $ liquidity floor into watched, so both
+ * bots' candidate pool becomes the whole tradeable market instead of only
+ * recent launches. It runs periodically, not just once, because a token's
+ * liquidity can cross the floor well after it first launched.
  *
- * Read-only and idempotent - ensureWatched no-ops for anything already
- * watched, so a repeat pass costs one cheap on-chain read per still-unwatched
- * pair and nothing at all for pairs it's already added.
+ * PulseX's factory pair list runs into the hundreds of thousands, most of it
+ * dead/abandoned launches - re-walking all of it every pass would make this
+ * a multi-hour job forever. A pair's token0/token1 never change once
+ * created, so which side (if either) is WPLS is a permanent fact: it only
+ * needs discovering once per pair index (see db.ts's wpls_pairs table and
+ * meta's marketSeedClassifiedUpTo checkpoint). Every pass after the first
+ * only re-checks LIQUIDITY on the much smaller already-known-WPLS set, plus
+ * classifies whatever pair indices are new since the last pass.
  */
 
-async function pairLiquidityUsd(pairAddr: string, usdPerPls: number): Promise<{ liqUsd: number; token: string } | null> {
+/** Only the reserve read - use once a pair is already known to be a WPLS pair. */
+async function pairReserveUsd(pairAddr: string, plsFirst: boolean, usdPerPls: number): Promise<number | null> {
+  try {
+    const p = new Contract(pairAddr, PAIR_ABI, provider) as Dyn;
+    const reserves = await p.getReserves();
+    const plsRes = BigInt(plsFirst ? reserves[0] : reserves[1]);
+    if (plsRes === 0n) return null;
+    const pls = Number(formatEther(plsRes));
+    // A constant-product pool holds equal USD value on both sides, so total
+    // pool value is roughly double the WPLS-side reserve alone - close
+    // enough for a screening floor, not a trade-sizing number.
+    return pls * 2 * usdPerPls;
+  } catch {
+    return null;
+  }
+}
+
+/** Full classification (token0/token1 + reserves) - only for a pair whose WPLS-ness isn't known yet. */
+async function classifyPair(pairAddr: string, usdPerPls: number): Promise<{ liqUsd: number; token: string; plsFirst: boolean } | null> {
   try {
     const p = new Contract(pairAddr, PAIR_ABI, provider) as Dyn;
     const [t0, t1, reserves] = await Promise.all([p.token0(), p.token1(), p.getReserves()]);
@@ -37,14 +59,10 @@ async function pairLiquidityUsd(pairAddr: string, usdPerPls: number): Promise<{ 
     if (t0l !== wpls && t1l !== wpls) return null; // not a WPLS pair at all
     const plsFirst = t0l === wpls;
     const plsRes = BigInt(plsFirst ? reserves[0] : reserves[1]);
-    if (plsRes === 0n) return null;
     const pls = Number(formatEther(plsRes));
-    // A constant-product pool holds equal USD value on both sides, so total
-    // pool value is roughly double the WPLS-side reserve alone - close
-    // enough for a screening floor, not a trade-sizing number.
     const liqUsd = pls * 2 * usdPerPls;
     const token = plsFirst ? t1l : t0l;
-    return { liqUsd, token };
+    return { liqUsd, token, plsFirst };
   } catch {
     return null;
   }
@@ -56,27 +74,54 @@ export async function seedMarket(): Promise<void> {
 
   const usdPerPls = await plsUsd();
   const floor = CFG.minSeedLiquidityUsd;
-  log("info", "marketSeed", `Scanning ${total} PulseX pairs for WPLS pairs >= $${floor.toLocaleString()} liquidity (PLS/USD ~$${usdPerPls})`);
-
   const alreadyWatched = new Set(watched.all().map((w) => w.token));
-  const indices = Array.from({ length: total }, (_, i) => i);
-
-  let checked = 0;
   let added = 0;
-  await mapLimit(indices, CFG.keeperConcurrency, async (i) => {
-    try {
-      const pairAddr: string = await factory.allPairs(i);
-      const info = await pairLiquidityUsd(pairAddr, usdPerPls);
-      checked++;
-      if (checked % 2000 === 0) log("debug", "marketSeed", `Checked ${checked}/${total} pairs, ${added} added so far`);
-      if (!info) return;
-      if (alreadyWatched.has(info.token)) return;
-      if (info.liqUsd < floor) return;
-      if (await ensureWatched(info.token)) added++;
-    } catch {
-      // one bad pair index shouldn't stop the sweep
-    }
-  });
 
-  log("info", "marketSeed", `Market seed pass done: checked ${checked}/${total} pairs, added ${added} new tokens above $${floor.toLocaleString()} liquidity`);
+  // Re-check liquidity on every already-known WPLS pair - the only part of
+  // a repeat pass that can actually change.
+  const known = wplsPairs.all();
+  if (known.length > 0) {
+    await mapLimit(known, CFG.keeperConcurrency, async (row) => {
+      if (alreadyWatched.has(row.token)) return;
+      const liqUsd = await pairReserveUsd(row.pair, row.plsFirst, usdPerPls);
+      if (liqUsd === null || liqUsd < floor) return;
+      if (await ensureWatched(row.token)) added++;
+    });
+  }
+
+  // Classify whatever pair indices are new since the last pass. New pairs
+  // are already caught immediately by launch.ts - this is a completeness
+  // backstop, and after the first run it's normally a small, fast increment.
+  const classifiedUpTo = Number(meta.get("marketSeedClassifiedUpTo", "0"));
+  if (classifiedUpTo < total) {
+    const toClassify = total - classifiedUpTo;
+    log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; classifying ${toClassify} new pair(s) (index ${classifiedUpTo}..${total - 1}) for liquidity >= $${floor.toLocaleString()} (PLS/USD ~$${usdPerPls})`);
+    const indices = Array.from({ length: toClassify }, (_, k) => classifiedUpTo + k);
+    let checked = 0;
+    let newWplsPairs = 0;
+    await mapLimit(indices, CFG.keeperConcurrency, async (i) => {
+      try {
+        const pairAddr: string = await factory.allPairs(i);
+        const info = await classifyPair(pairAddr, usdPerPls);
+        checked++;
+        if (checked % 2000 === 0) log("debug", "marketSeed", `Classified ${checked}/${toClassify} new pairs, ${added} tokens added so far`);
+        if (!info) return; // not a WPLS pair - never re-checked again
+        wplsPairs.insert(i, pairAddr, info.token, info.plsFirst);
+        newWplsPairs++;
+        if (alreadyWatched.has(info.token)) return;
+        if (info.liqUsd < floor) return;
+        if (await ensureWatched(info.token)) added++;
+      } catch {
+        // One bad pair index (a transient RPC error, a malformed pair
+        // contract) shouldn't stop the sweep. It's not retried - the
+        // checkpoint advances past it below regardless - but a token missed
+        // this way still gets caught by launch.ts if it's a new pair, or by
+        // a rule/snipe/Ask Icaria lookup if a user points at it directly.
+      }
+    });
+    meta.set("marketSeedClassifiedUpTo", String(total));
+    log("info", "marketSeed", `Market seed pass done: ${added} token(s) added/still above $${floor.toLocaleString()} liquidity, ${known.length + newWplsPairs} WPLS pairs known total`);
+  } else {
+    log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; no new pairs since the last classification pass. ${added} token(s) added/still above $${floor.toLocaleString()} liquidity`);
+  }
 }

@@ -83,6 +83,18 @@ CREATE INDEX IF NOT EXISTS fires_vault_ts ON fires(vault, ts DESC);
 
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
+-- Which PulseX factory pair indices are a WPLS pair, and which side WPLS is
+-- on. A pair's token0/token1 never change once created, so this is a
+-- permanent classification - see marketSeed.ts. Lets a repeat market-seed
+-- pass skip the token0/token1 lookup entirely for every already-classified
+-- index and only re-check the (much smaller) known-WPLS set's liquidity.
+CREATE TABLE IF NOT EXISTS wpls_pairs (
+  idx       INTEGER PRIMARY KEY,
+  pair      TEXT NOT NULL,
+  token     TEXT NOT NULL,
+  pls_first INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS limit_fires (
   vault    TEXT NOT NULL,
   order_id TEXT NOT NULL,
@@ -223,6 +235,20 @@ export const meta = {
   },
   set(k: string, v: string): void {
     db.prepare("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(k, v);
+  },
+};
+
+export interface WplsPairRow { idx: number; pair: string; token: string; plsFirst: boolean }
+
+export const wplsPairs = {
+  insert(idx: number, pair: string, token: string, plsFirst: boolean): void {
+    db.prepare("INSERT OR REPLACE INTO wpls_pairs(idx,pair,token,pls_first) VALUES(?,?,?,?)")
+      .run(idx, pair.toLowerCase(), token.toLowerCase(), plsFirst ? 1 : 0);
+  },
+  all(): WplsPairRow[] {
+    return (db.prepare("SELECT idx, pair, token, pls_first FROM wpls_pairs").all() as
+      { idx: number; pair: string; token: string; pls_first: number }[])
+      .map((r) => ({ idx: r.idx, pair: r.pair, token: r.token, plsFirst: r.pls_first === 1 }));
   },
 };
 

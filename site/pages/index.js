@@ -738,19 +738,6 @@ export default function Dashboard() {
                   />
                 </BotCard>
 
-                <div className="panel">
-                  <OpportunitiesPanel
-                    opportunities={opportunities}
-                    onBuy={handleBuyOpportunity}
-                    buyStates={buyStates}
-                    onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}
-                  />
-                </div>
-
-                <div className="panel">
-                  <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
-                </div>
-
                 <BotCard
                   title="Limit Order Bot"
                   icon={<LimitOrderIcon />}
@@ -771,6 +758,19 @@ export default function Dashboard() {
                     onChange={(limitOrders) => updateConfig({ ...config, limitOrders })}
                   />
                 </BotCard>
+
+                <div className="panel">
+                  <OpportunitiesPanel
+                    opportunities={opportunities}
+                    onBuy={handleBuyOpportunity}
+                    buyStates={buyStates}
+                    onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}
+                  />
+                </div>
+
+                <div className="panel">
+                  <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
+                </div>
 
                 <div className="panel">
                   <div className="section-label">Safety</div>

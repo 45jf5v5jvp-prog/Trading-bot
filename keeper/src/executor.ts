@@ -75,6 +75,18 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
     return { ok: false, amountOut: 0n, reason: "global trade rate limit reached, skipped for safety" };
   }
 
+  // Sanity-check the RPC's own gas price reading before it can influence
+  // anything downstream. A single bad read here (seen in production: a
+  // reading that implied roughly 10 million gwei, three times above this
+  // cap) otherwise flows straight into the share-of-trade check below,
+  // which positions.ts treats as a STRUCTURAL failure - permanently
+  // retiring an otherwise-sellable position after only 5 retries (about
+  // 100 seconds at the default check interval). Catching it here instead
+  // returns "gas price above cap", which positions.ts correctly treats as
+  // transient and keeps retrying forever. Applies in dry run too so a bad
+  // reading shows up in logs rather than only in a live trade.
+  if (!(await gasOk())) return { ok: false, amountOut: 0n, reason: "gas price above cap" };
+
   // The vault takes our fee off the input before swapping, so quote net of it.
   const afterFee = (req.amountIn * BigInt(10_000 - CFG.feeBps)) / 10_000n;
   let quoted: bigint;
@@ -139,7 +151,6 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
       `minOut=${minOut} gasFee=${formatEther(gasFee)} PLS`);
     return { ok: true, amountOut: quoted };
   }
-  if (!(await gasOk())) return { ok: false, amountOut: 0n, reason: "gas price above cap" };
 
   return txQueue.run(`${req.bot}:${req.vault}`, async () => {
     try {

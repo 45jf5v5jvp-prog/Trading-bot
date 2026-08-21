@@ -11,6 +11,7 @@ import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } fro
 import { APP_VERSION } from "../lib/version";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
+import { pnlForWindow } from "../lib/pnl";
 import RulesList from "../components/RulesList";
 import SnipesList from "../components/SnipesList";
 import PortfolioPanel from "../components/PortfolioPanel";
@@ -18,6 +19,7 @@ import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
 import DiscoverySettings from "../components/DiscoverySettings";
 import HunterSettings from "../components/HunterSettings";
+import BotCard from "../components/BotCard";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
 import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
@@ -38,6 +40,35 @@ function fmtBalance(v) {
   const scale = 10 ** CHAIN.balanceMaxDecimals;
   const floored = Math.floor(n * scale) / scale;
   return floored.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: CHAIN.balanceMaxDecimals });
+}
+
+/** One line of context for a bot's collapsed BotCard header - lifetime P&L
+ * and how many trades it's actually made, so "how's Hunter doing" is
+ * answered before you even tap the card open. Null history (still loading,
+ * or no keeper.db reachable yet) shows nothing rather than a misleading 0. */
+function botStatLine(history, botKey) {
+  if (!history) return null;
+  const { totalPls, tradeCount } = pnlForWindow(history, null, botKey);
+  if (tradeCount === 0) return "No trades yet";
+  const sign = totalPls > 0 ? "+" : "";
+  const amount = `${sign}${totalPls.toLocaleString(undefined, { maximumFractionDigits: CHAIN.valueMaxDecimals })} ${CHAIN.nativeSymbol}`;
+  return `${amount} lifetime · ${tradeCount} trade${tradeCount === 1 ? "" : "s"}`;
+}
+
+/** Fuller breakdown shown once a BotCard is actually opened - realized vs
+ * unrealized, and how many positions are open right now. */
+function botPerfDetail(history, botKey) {
+  if (!history) return null;
+  const { realizedPls, unrealizedPls, tradeCount } = pnlForWindow(history, null, botKey);
+  if (tradeCount === 0) return null;
+  const openCount = history.positions.open.filter((p) => p.bot === botKey).length;
+  const unit = CHAIN.nativeSymbol;
+  const fmt = (v) => `${v > 0 ? "+" : ""}${v.toLocaleString(undefined, { maximumFractionDigits: CHAIN.valueMaxDecimals })} ${unit}`;
+  return (
+    <p className="hint" style={{ marginBottom: 0 }}>
+      {fmt(realizedPls)} realized, {fmt(unrealizedPls)} unrealized &middot; {openCount} open position{openCount === 1 ? "" : "s"}
+    </p>
+  );
 }
 
 export default function Dashboard() {
@@ -608,12 +639,17 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <div className="panel">
+                <BotCard
+                  title="Launch Bot"
+                  active={config.launch.enabled}
+                  statLine={botStatLine(history, "launch")}
+                  perfDetail={botPerfDetail(history, "launch")}
+                >
                   <LaunchSettings
                     launch={config.launch}
                     onChange={(launch) => updateConfig({ ...config, launch })}
                   />
-                </div>
+                </BotCard>
 
                 <div className="panel">
                   <SnipesList
@@ -622,20 +658,30 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <div className="panel">
+                <BotCard
+                  title="Discovery Bot"
+                  active={config.discovery.enabled}
+                  statLine={botStatLine(history, "discovery")}
+                  perfDetail={botPerfDetail(history, "discovery")}
+                >
                   <DiscoverySettings
                     discovery={config.discovery}
                     onChange={(discovery) => updateConfig({ ...config, discovery })}
                     vaultBalance={Number(vaultInfo.baseBalance) || 0}
                   />
-                </div>
+                </BotCard>
 
-                <div className="panel">
+                <BotCard
+                  title="Hunter Bot"
+                  active={config.hunter.enabled}
+                  statLine={botStatLine(history, "hunter")}
+                  perfDetail={botPerfDetail(history, "hunter")}
+                >
                   <HunterSettings
                     hunter={config.hunter}
                     onChange={(hunter) => updateConfig({ ...config, hunter })}
                   />
-                </div>
+                </BotCard>
 
                 <div className="panel">
                   <OpportunitiesPanel

@@ -1,6 +1,5 @@
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
-import BotStatusBadge from "./BotStatusBadge";
 
 /** Plain-language description of what a given "max deployer holding %"
  * setting actually does, since the raw number alone ("75%") doesn't convey
@@ -22,7 +21,6 @@ export default function LaunchSettings({ launch, onChange }) {
 
   return (
     <div>
-      <div className="section-label">Launch Bot <BotStatusBadge active={launch.enabled} /></div>
       <p className="hint" style={{ marginBottom: 14 }}>Buys brand-new {CHAIN.dexName} pairs on {CHAIN.chainName} the moment they open.</p>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>

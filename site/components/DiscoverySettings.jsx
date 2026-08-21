@@ -182,7 +182,6 @@ export default function DiscoverySettings({ discovery, onChange, vaultBalance = 
 
   return (
     <div>
-      <div className="section-label">Discovery Bot <BotStatusBadge active={discovery.enabled} /></div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Scans all of {CHAIN.dexName} on {CHAIN.chainName} - not just new launches - for tokens whose price
         and liquidity are both climbing together over the last hour. Notify mode shows them in the

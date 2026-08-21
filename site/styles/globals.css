@@ -230,6 +230,36 @@ input::placeholder { color: #6b6c76; }
 .rule-panel { background: var(--chip); border: 1px solid var(--edge); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
 .rule-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 
+/* Collapsible bot-card shell (v3.0) - collapsed shows status + a one-line
+   performance summary; expanding reveals that in full plus a nested
+   Settings disclosure, so the config fields stay out of the way until
+   someone actually wants to change something. */
+.bot-card { background: var(--panel); border: 1px solid var(--edge); border-radius: 16px; margin-bottom: 10px; overflow: hidden; }
+.bot-card.is-open { border-color: #3a3226; }
+.bot-card-head {
+  display: flex; align-items: center; gap: 12px; padding: 16px 18px; cursor: pointer;
+}
+.bot-card-head:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+.bot-card-titles { flex: 1; min-width: 0; }
+.bot-card-title { font-size: 14.5px; font-weight: 700; }
+.bot-card-stat { font-size: 12.5px; color: var(--ash); margin-top: 3px; }
+.bot-card-chevron { width: 18px; height: 18px; flex-shrink: 0; color: var(--ash); transition: transform 0.25s ease; }
+.bot-card.is-open .bot-card-chevron { transform: rotate(180deg); color: var(--amber); }
+.bot-card-body { padding: 0 18px 18px; border-top: 1px solid var(--edge); }
+@media (prefers-reduced-motion: reduce) { .bot-card-chevron { transition: none; } }
+
+.settings-disclosure {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; border-top: 1px solid var(--edge);
+  color: var(--ash); font: inherit; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.1em; font-weight: 600; cursor: pointer; padding: 14px 0 0; margin-top: 14px;
+}
+.settings-disclosure svg { width: 13px; height: 13px; transition: transform 0.2s ease; }
+.settings-disclosure.is-open svg { transform: rotate(180deg); }
+.settings-disclosure:hover { color: var(--text); }
+.bot-card-settings { padding-top: 14px; }
+@media (prefers-reduced-motion: reduce) { .settings-disclosure svg { transition: none; } }
+
 .sub-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ash); margin: 14px 0 8px; }
 
 .pnl-pos { color: var(--good); font-weight: 600; }

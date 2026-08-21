@@ -474,12 +474,16 @@ export default function Dashboard() {
               </button>
             </div>
             {referralEarnings && (
-              <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
-                Referral fees: {referralEarnings.referredVaultCount} vault
-                {referralEarnings.referredVaultCount === 1 ? "" : "s"} referred, earned{" "}
-                {fmtBalance(referralEarnings.totalEarnedPls)} {CHAIN.baseSymbol} total,{" "}
-                {fmtBalance(referralEarnings.pendingPls)} {CHAIN.baseSymbol} not yet paid out.
-              </p>
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--edge-soft)" }}>
+                <div className="hero-balance" style={{ margin: "0 0 2px" }}>
+                  <span className="n num" style={{ fontSize: 28 }}>{fmtBalance(referralEarnings.totalEarnedPls)}</span>
+                  <span className="u">{CHAIN.baseSymbol} earned</span>
+                </div>
+                <p className="hint" style={{ margin: 0 }}>
+                  {referralEarnings.referredVaultCount} vault{referralEarnings.referredVaultCount === 1 ? "" : "s"} referred
+                  &middot; {fmtBalance(referralEarnings.pendingPls)} {CHAIN.baseSymbol} not yet paid out
+                </p>
+              </div>
             )}
           </div>
         )}

@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -148,32 +148,36 @@ test("getReferrer is null for a vault with no referral on record", () => {
 
 test("setReferrer then getReferrer round-trips, stored lowercase", () => {
   const vault = "0x" + "11".repeat(20);
+  const owner = "0x" + "aa".repeat(20);
   const referrer = ("0x" + "12".repeat(20)).toUpperCase();
-  setReferrer(vault, referrer, Date.now());
+  setReferrer(vault, referrer, Date.now(), owner);
   assert.equal(getReferrer(vault), referrer.toLowerCase());
 });
 
-test("setReferrer rejects a vault referring itself", () => {
+test("setReferrer rejects the vault's owner referring themselves", () => {
   const vault = "0x" + "13".repeat(20);
-  assert.throws(() => setReferrer(vault, vault, Date.now()), /cannot refer itself/);
+  const owner = "0x" + "ab".repeat(20);
+  assert.throws(() => setReferrer(vault, owner, Date.now(), owner), /cannot refer itself/);
   assert.equal(getReferrer(vault), null);
 });
 
 test("setReferrer re-submitting the SAME referrer is a harmless no-op", () => {
   const vault = "0x" + "14".repeat(20);
+  const owner = "0x" + "ac".repeat(20);
   const referrer = "0x" + "15".repeat(20);
-  setReferrer(vault, referrer, Date.now());
-  assert.doesNotThrow(() => setReferrer(vault, referrer, Date.now()));
+  setReferrer(vault, referrer, Date.now(), owner);
+  assert.doesNotThrow(() => setReferrer(vault, referrer, Date.now(), owner));
   assert.equal(getReferrer(vault), referrer);
 });
 
-test("setReferrer rejects trying to change an already-bound referrer", () => {
+test("setReferrer silently keeps the ORIGINAL referrer when a different one is submitted for an already-bound vault (Referral Protections)", () => {
   const vault = "0x" + "16".repeat(20);
+  const owner = "0x" + "ad".repeat(20);
   const first = "0x" + "17".repeat(20);
   const second = "0x" + "18".repeat(20);
-  setReferrer(vault, first, Date.now());
-  assert.throws(() => setReferrer(vault, second, Date.now()), /already has a different referrer/);
-  assert.equal(getReferrer(vault), first); // unchanged
+  setReferrer(vault, first, Date.now(), owner);
+  assert.doesNotThrow(() => setReferrer(vault, second, Date.now(), owner));
+  assert.equal(getReferrer(vault), first); // unchanged - never redirects an already-earned credit
 });
 
 test("getReferredVaults lists every vault credited to a referrer, and none belonging to someone else", () => {
@@ -182,14 +186,53 @@ test("getReferredVaults lists every vault credited to a referrer, and none belon
   const vaultA = "0x" + "21".repeat(20);
   const vaultB = "0x" + "22".repeat(20);
   const vaultC = "0x" + "23".repeat(20);
-  setReferrer(vaultA, referrer, Date.now());
-  setReferrer(vaultB, referrer, Date.now());
-  setReferrer(vaultC, other, Date.now());
+  const ownerA = "0x" + "ae".repeat(20);
+  const ownerB = "0x" + "af".repeat(20);
+  const ownerC = "0x" + "b0".repeat(20);
+  setReferrer(vaultA, referrer, Date.now(), ownerA);
+  setReferrer(vaultB, referrer, Date.now(), ownerB);
+  setReferrer(vaultC, other, Date.now(), ownerC);
   const referred = getReferredVaults(referrer);
   assert.equal(referred.length, 2);
   assert.ok(referred.includes(vaultA));
   assert.ok(referred.includes(vaultB));
   assert.ok(!referred.includes(vaultC));
+});
+
+test("Referral Protections: a second vault from an already-referred owner is credited to the SAME referrer, even with a different code submitted", () => {
+  const owner = "0x" + "c1".repeat(20);
+  const originalReferrer = "0x" + "c2".repeat(20);
+  const selfReferralAttempt = "0x" + "c3".repeat(20);
+  const vault1 = "0x" + "c4".repeat(20);
+  const vault2 = "0x" + "c5".repeat(20);
+
+  setReferrer(vault1, originalReferrer, Date.now(), owner);
+  assert.equal(getReferrer(vault1), originalReferrer);
+
+  // Same owner, second vault, tries to bind a DIFFERENT referrer (the
+  // exploit: self-referring on vault #2 to dodge crediting vault #1's
+  // referrer). Must silently land on the original referrer instead.
+  setReferrer(vault2, selfReferralAttempt, Date.now(), owner);
+  assert.equal(getReferrer(vault2), originalReferrer);
+  assert.equal(getWalletReferrer(owner), originalReferrer);
+});
+
+test("Referral Protections: a wallet's first-ever binding locks it for every vault after", () => {
+  const owner = "0x" + "d1".repeat(20);
+  const referrer = "0x" + "d2".repeat(20);
+  const vault1 = "0x" + "d3".repeat(20);
+  assert.equal(getWalletReferrer(owner), null);
+  setReferrer(vault1, referrer, Date.now(), owner);
+  assert.equal(getWalletReferrer(owner), referrer);
+});
+
+test("lockWalletReferrer is first-write-wins - a later different referrer is ignored", () => {
+  const owner = "0x" + "e1".repeat(20);
+  const first = "0x" + "e2".repeat(20);
+  const second = "0x" + "e3".repeat(20);
+  lockWalletReferrer(owner, first, Date.now());
+  lockWalletReferrer(owner, second, Date.now());
+  assert.equal(getWalletReferrer(owner), first);
 });
 
 test("getReferralPaidTotal is 0 for a referrer with no payouts yet", () => {

@@ -52,6 +52,11 @@ function getDb() {
       referrer   TEXT NOT NULL UNIQUE,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS wallet_referrers (
+      owner      TEXT PRIMARY KEY,
+      referrer   TEXT NOT NULL,
+      locked_at  INTEGER NOT NULL
+    );
   `);
 
   // Additive migration: databases created before "Buy Now" let someone type
@@ -187,24 +192,68 @@ function getReferrer(vault) {
 }
 
 /**
- * Binds vault -> referrer, once. Re-submitting the SAME referrer is a
- * harmless no-op (the "I already have a vault, retry the request" case);
- * submitting a DIFFERENT one throws, since silently letting a binding move
- * would let someone redirect another wallet's already-earned referral credit
- * after the fact. Self-referral is rejected outright.
+ * Referral Protections: a WALLET's referrer, not just a vault's, decided
+ * once and permanent from then on. Without this, someone could accept a
+ * real referral on their first vault, then open a second vault under their
+ * own referral code (or no code at all) and just trade there instead - the
+ * original referrer did the actual work of sending them here and would
+ * never see a cent. Locking at the wallet level means every vault that
+ * wallet EVER creates is credited to the same referrer it was first
+ * credited to, no matter what code shows up on a later vault.
  */
-function setReferrer(vault, referrer, nowMs) {
+function getWalletReferrer(owner) {
+  const row = getDb()
+    .prepare("SELECT referrer FROM wallet_referrers WHERE owner = ?")
+    .get(owner.toLowerCase());
+  return row ? row.referrer : null;
+}
+
+/** First write wins, permanently - same "no changing your mind later" rule
+ * as everything else in this program. Re-locking to the SAME referrer is a
+ * harmless no-op; the point is nothing can ever move it to a different one. */
+function lockWalletReferrer(owner, referrer, nowMs) {
+  getDb()
+    .prepare("INSERT OR IGNORE INTO wallet_referrers (owner, referrer, locked_at) VALUES (?, ?, ?)")
+    .run(owner.toLowerCase(), referrer.toLowerCase(), nowMs);
+}
+
+/**
+ * Binds vault -> referrer, once - except the referrer actually recorded is
+ * never just whatever was submitted. `owner` is the vault's on-chain owner
+ * (verified by signature before this is ever called - see lib/auth.js), and
+ * the real source of truth is that OWNER's wallet-level lock (see
+ * getWalletReferrer/lockWalletReferrer above): if this owner already has a
+ * locked referrer - from this vault or from a completely different one -
+ * that locked referrer wins, silently, no matter what code this call was
+ * given (never throws over a mismatch; it just keeps the one already on
+ * record). Only a wallet's truly first-ever binding (no vault-level record,
+ * no wallet-level lock yet) actually sets the referrer, and that act is
+ * exactly what locks the wallet going forward. Self-referral is rejected
+ * outright - compared against the OWNER, not the vault address, since a
+ * vault contract's own address is never equal to any wallet's anyway.
+ */
+function setReferrer(vault, referrer, nowMs, owner) {
   vault = vault.toLowerCase();
   referrer = referrer.toLowerCase();
-  if (vault === referrer) throw new Error("a vault cannot refer itself");
-  const existing = getReferrer(vault);
-  if (existing) {
-    if (existing !== referrer) throw new Error("this vault already has a different referrer on record");
-    return;
+  owner = owner.toLowerCase();
+  if (owner === referrer) throw new Error("a wallet cannot refer itself");
+
+  const existingVaultReferrer = getReferrer(vault);
+  const existingWalletReferrer = getWalletReferrer(owner);
+  // Whichever of these is already on record wins outright - an existing
+  // vault-level binding first (this exact vault already has its answer),
+  // then the wallet-level lock (a different vault already decided it for
+  // this whole wallet). Only when NEITHER exists yet does the freshly
+  // submitted referrer actually count, and that's the act that creates
+  // both records at once.
+  const lockedReferrer = existingVaultReferrer || existingWalletReferrer || referrer;
+
+  if (!existingVaultReferrer) {
+    getDb()
+      .prepare("INSERT INTO referrals (vault, referrer, bound_at) VALUES (?, ?, ?)")
+      .run(vault, lockedReferrer, nowMs);
   }
-  getDb()
-    .prepare("INSERT INTO referrals (vault, referrer, bound_at) VALUES (?, ?, ?)")
-    .run(vault, referrer, nowMs);
+  lockWalletReferrer(owner, lockedReferrer, nowMs);
 }
 
 /** Every vault this wallet is credited as the referrer for. */
@@ -285,7 +334,8 @@ module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
   requestDiscoveryBuy, pendingDiscoveryBuyRequests,
   requestAskBuy, pendingAskBuyRequests,
-  getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout,
+  getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer,
+  getReferredVaults, getReferralPaidTotal, recordReferralPayout,
   getOrCreateReferralCode, resolveReferralCode,
   resetForTests, DB_PATH,
 };

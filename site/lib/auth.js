@@ -137,4 +137,5 @@ async function authorizeReferral({ vaultAddress, code, timestampMs, signature, r
 module.exports = {
   authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeVaultAction,
   buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, MESSAGE_MAX_AGE_MS,
+  defaultReadOwner,
 };

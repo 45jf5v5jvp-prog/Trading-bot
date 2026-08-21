@@ -567,18 +567,12 @@ export default function Dashboard() {
                 <button className="btn btn-small" onClick={handleTogglePause} disabled={txBusy}>
                   {txBusy ? "Working..." : vaultInfo.paused ? "Resume Bot" : "Pause Bot"}
                 </button>
-                <button className="btn btn-small btn-danger" onClick={handleRevokeExecutor} disabled={txBusy}>
-                  {txBusy ? "Working..." : "Revoke Executor"}
-                </button>
               </div>
               <p className="hint" style={{ marginTop: 14, marginBottom: 0 }}>
                 Balance and holdings update automatically every 20 seconds - use Refresh to update
                 immediately instead of waiting. Pausing stops the keeper from trading immediately;
-                you can resume it yourself right here. Revoke Executor is more permanent - it strips
-                the keeper's ability to trade this vault at all, whether or not the keeper server is
-                even running, and getting it trading again requires a separate action outside this
-                page. Neither one affects deposits or withdrawals, which always stay available to you
-                as the owner.
+                you can resume it yourself right here. Neither one affects deposits or withdrawals,
+                which always stay available to you as the owner.
               </p>
               {referred && (
                 <p className="hint" style={{ marginBottom: 0 }}>
@@ -822,6 +816,19 @@ export default function Dashboard() {
               </div>
               <button className="btn btn-danger" onClick={handleWithdrawToken} disabled={tokenWithdrawBusy || !tokenWithdrawAddr}>
                 {tokenWithdrawBusy ? "Working..." : "Withdraw This Token"}
+              </button>
+            </div>
+
+            <div className="panel">
+              <div className="section-label">Emergency: Revoke Executor</div>
+              <p className="hint" style={{ marginBottom: 14 }}>
+                Strips the keeper's ability to trade this vault at all, permanently, whether or not
+                the keeper server is even running - the strongest stop there is. Getting it trading
+                again afterward requires a separate action outside this page. This never affects
+                deposits or withdrawals, which always stay available to you as the owner.
+              </p>
+              <button className="btn btn-danger" onClick={handleRevokeExecutor} disabled={txBusy}>
+                {txBusy ? "Working..." : "Revoke Executor"}
               </button>
             </div>
           </div>

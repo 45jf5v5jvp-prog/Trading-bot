@@ -17,6 +17,20 @@ function fmtTs(unixSeconds) {
 
 const CONFIDENCE_COLOR = { high: "var(--green, #2e7d32)", medium: "#b8860b", low: "var(--red, #c0392b)" };
 
+/** Confidence grounded in something checkable - how many of Hunter Bot's
+ * independent technical signals (RSI oversold, bullish MACD cross, Bollinger
+ * lower band) actually agree on this token - rather than only the AI's own
+ * self-reported word for it. An opportunity never reaches the site at all
+ * below 2 agreeing signals (see keeper/src/hunter.ts's MIN_AGREEING_SIGNALS),
+ * so this is either "Confident" (2 agree) or "High confidence" (all 3 do).
+ * Null for Discovery Bot's rows, which have no technical signals at all. */
+function technicalConfidence(signalCount) {
+  if (signalCount === null || signalCount === undefined) return null;
+  return signalCount >= 3
+    ? { label: "High confidence", detail: `all 3 signals agree`, color: CONFIDENCE_COLOR.high }
+    : { label: "Confident", detail: `${signalCount} signals agree`, color: CONFIDENCE_COLOR.medium };
+}
+
 /**
  * Shortened address plus a one-tap copy of the FULL address - the short
  * form is unique enough to recognize at a glance, but pasting it into an
@@ -86,6 +100,7 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
   // rather than being locked to whatever the bot would have spent.
   const [amount, setAmount] = useState(o.aiSuggestedAmountPls ? String(Math.round(o.aiSuggestedAmountPls)) : "");
   const amountValid = Number(amount) > 0;
+  const tech = technicalConfidence(o.signalCount);
 
   return (
     <div className="row-between dead-position-row">
@@ -112,17 +127,23 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
             className="hint"
             style={{ margin: "4px 0 0 22px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >
+            {tech && <span style={{ color: tech.color, fontWeight: 700 }}>{tech.label} — </span>}
             {firstSentence(o.narrative)}
-            {o.aiConfidence && <span style={{ color: CONFIDENCE_COLOR[o.aiConfidence] }}> — AI would buy ({o.aiConfidence})</span>}
+            {o.aiConfidence && <span style={{ color: CONFIDENCE_COLOR[o.aiConfidence] }}> — AI would buy</span>}
             {o.stale && !bought && <span style={{ color: "var(--red, #c0392b)" }}> — Expired</span>}
           </p>
         )}
         {expanded && (
           <div style={{ marginLeft: 22 }}>
             <p className="hint" style={{ margin: "4px 0 0" }}>{o.narrative}</p>
+            {tech && (
+              <p className="hint" style={{ margin: "4px 0 0", color: tech.color, fontWeight: 600 }}>
+                {tech.label} — {tech.detail}, not just one indicator alone.
+              </p>
+            )}
             {o.aiConfidence && (
               <p className="hint" style={{ margin: "4px 0 0", color: CONFIDENCE_COLOR[o.aiConfidence] }}>
-                AI: would buy ({o.aiConfidence} confidence)
+                AI: would buy
                 {o.aiSuggestedAmountPls
                   ? ` — sizing this at ${Math.round(o.aiSuggestedAmountPls).toLocaleString()} ${CHAIN.nativeSymbol}`
                   : ""}
@@ -213,10 +234,10 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
       </div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Tokens on {CHAIN.dexName} that Discovery Bot spotted moving (price and liquidity climbing
-        together) or Hunter Bot spotted looking oversold (RSI/MACD/Bollinger), and that the AI
-        didn't flag as a bad buy. Turn either bot on above to start seeing new ones. Copy a
-        token's address to look it up yourself before trusting the screen alone, or set your own
-        amount and buy it directly.
+        together) or Hunter Bot spotted looking oversold on at least 2 of its 3 technical signals
+        (RSI/MACD/Bollinger) at once, and that the AI didn't flag as a bad buy. Turn either bot on
+        above to start seeing new ones. Copy a token's address to look it up yourself before
+        trusting the screen alone, or set your own amount and buy it directly.
       </p>
       {live.length === 0 && (
         <p className="hint">Nothing live right now. This fills in as Discovery Bot or Hunter Bot runs.</p>

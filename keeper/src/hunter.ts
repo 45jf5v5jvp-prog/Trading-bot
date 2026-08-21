@@ -49,6 +49,20 @@ const ATR_STOP_MAX_PCT = 80;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
+// How many of {RSI oversold, bullish MACD cross, Bollinger lower band} have
+// to agree before this counts as a real setup at all. One indicator alone
+// is noise a lot of the time; two independent signals landing on the same
+// token together is a much stronger tell. See evaluateWatchedToken and
+// technicalConfidence() below - confidence scales with how many actually hit.
+const MIN_AGREEING_SIGNALS = 2;
+
+/** Confidence grounded in something a person can verify - how many
+ * independent technical signals actually agree - rather than only the AI's
+ * own self-reported word for it. Never called below MIN_AGREEING_SIGNALS. */
+function technicalConfidence(signalCount: number): "confident" | "high" {
+  return signalCount >= 3 ? "high" : "confident";
+}
+
 interface Strictest {
   requireRsi: boolean; rsiOversold: number;
   requireMacdCross: boolean;
@@ -120,7 +134,10 @@ function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, 
   const volNote = volRatio !== null && Number.isFinite(volRatio)
     ? ` Recent volume is running ${volRatio.toFixed(1)}x its baseline.`
     : "";
-  const base = `${symbol} looks oversold: ${triggers.join("; ")}.${volNote}`;
+  const confidenceNote = technicalConfidence(triggers.length) === "high"
+    ? " All three technical signals agree - high confidence."
+    : " Two technical signals agree.";
+  const base = `${symbol} looks oversold: ${triggers.join("; ")}.${confidenceNote}${volNote}`;
   if (s.verdict !== "pass") return `${base} Screen failed: ${s.reason}.`;
   const screened = `${base} Passed the same honeypot, tax, LP-lock and renounce screen the Launch Bot runs.`;
   if (!ai) return screened;
@@ -238,7 +255,11 @@ async function evaluateWatchedToken(
   if (!snap) return;
 
   const triggers = checkTriggers(snap, strictest);
-  if (triggers.length === 0) return;
+  // A single indicator alone (RSI oversold on its own, say) is too easy to
+  // hit on noise - real conviction is when independent signals agree.
+  // Below this, it's not treated as a setup worth screening at all, let
+  // alone buying.
+  if (triggers.length < MIN_AGREEING_SIGNALS) return;
 
   const first = candles[0]!;
   const last = candles[candles.length - 1]!;
@@ -263,6 +284,7 @@ async function evaluateWatchedToken(
       verdict: "fail", reason: "liquidity fell far more than the price move explains - looks like LP was pulled, not organic selling",
       narrative: `${w.symbol} looks oversold (${triggers.join("; ")}) but its liquidity dropped more than the price move alone would explain - this looks like a liquidity pull, not a real dip. Skipped.`,
       source: "hunter", rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
+      signalCount: triggers.length,
     });
     log("warn", "hunter", `Opportunity #${id}: ${w.symbol} rejected - liquidity pull signature, not a real dip`);
     return;
@@ -295,7 +317,7 @@ async function evaluateWatchedToken(
     source: "hunter", rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
     aiRecommend: ai?.recommend ?? null, aiConfidence: ai?.confidence ?? null, aiReasoning: ai?.reasoning ?? null,
     aiSuggestedAmountPls: ai?.suggestedAmountPls ?? null,
-    atrPct: snap.atrPct, volRatio: snap.volRatio,
+    atrPct: snap.atrPct, volRatio: snap.volRatio, signalCount: triggers.length,
   });
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 

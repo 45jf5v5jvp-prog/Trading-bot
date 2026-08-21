@@ -50,6 +50,7 @@ export default async function handler(req, res) {
     staleReason: o.stale_reason ?? null,
     atrPct: o.atr_pct ?? null,
     volRatio: o.vol_ratio ?? null,
+    signalCount: o.signal_count ?? null,
     action: actions[o.id]?.action ?? null,
     txHash: actions[o.id]?.txHash ?? null,
   }));

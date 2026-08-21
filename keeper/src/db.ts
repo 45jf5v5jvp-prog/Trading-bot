@@ -184,6 +184,16 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   // before these existed.
   add("atr_pct", "atr_pct REAL");
   add("vol_ratio", "vol_ratio REAL");
+  // How many of Hunter Bot's technical triggers (RSI oversold, bullish MACD
+  // cross, Bollinger lower band) actually fired together - a single
+  // indicator alone isn't treated as a real setup (see hunter.ts's
+  // checkTriggers/evaluateWatchedToken), so this is always >= 2 for a
+  // hunter-sourced row and null for discovery.ts's, which has no technical
+  // triggers at all. The site derives its confidence label from this count
+  // directly rather than trusting the AI's own self-reported confidence
+  // alone, since agreement between independent signals is something a user
+  // can actually verify.
+  add("signal_count", "signal_count INTEGER");
 }
 
 // Additive migration: databases created before volume tracking existed have
@@ -376,6 +386,10 @@ export interface NewOpportunity {
    * predating these fields. */
   atrPct?: number | null;
   volRatio?: number | null;
+  /** How many of Hunter Bot's technical triggers fired together (see
+   * hunter.ts's checkTriggers) - null for discovery.ts's rows, which have no
+   * technical triggers at all. */
+  signalCount?: number | null;
 }
 export interface OpportunityRow extends NewOpportunity {
   id: number; ts: number; source: "discovery" | "hunter";
@@ -391,15 +405,15 @@ export interface OpportunityRow extends NewOpportunity {
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection,atr_pct,vol_ratio)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection,atr_pct,vol_ratio,signal_count)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
       o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
       o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
       o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
       o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
-      o.priceAtDetection ?? null, o.atrPct ?? null, o.volRatio ?? null,
+      o.priceAtDetection ?? null, o.atrPct ?? null, o.volRatio ?? null, o.signalCount ?? null,
     );
     return Number(info.lastInsertRowid);
   },
@@ -421,7 +435,7 @@ export const opportunities = {
              ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
              ai_suggested_amount_pls AS aiSuggestedAmountPls,
              price_at_detection AS priceAtDetection, stale, stale_reason AS staleReason,
-             atr_pct AS atrPct, vol_ratio AS volRatio
+             atr_pct AS atrPct, vol_ratio AS volRatio, signal_count AS signalCount
       FROM opportunities WHERE id=?
     `).get(id) as any;
     if (!r) return undefined;

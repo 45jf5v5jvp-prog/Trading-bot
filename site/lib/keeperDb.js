@@ -110,7 +110,7 @@ function getOpportunities(limit = 50) {
       `SELECT id, token, ts, price_move_pct, liq_growth_pct, liq_pls, buy_tax_bps, sell_tax_bps,
               lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative,
               source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning,
-              ai_suggested_amount_pls, stale, stale_reason, atr_pct, vol_ratio
+              ai_suggested_amount_pls, stale, stale_reason, atr_pct, vol_ratio, signal_count
        FROM opportunities WHERE verdict = 'pass' ORDER BY ts DESC LIMIT ?`,
     ).all(limit);
   } catch {

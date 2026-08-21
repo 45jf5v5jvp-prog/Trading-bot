@@ -39,6 +39,13 @@ const MIN_CANDLES = 36;
 // is never the ONLY thing standing between an open position and a total
 // loss, no matter what the owner set.
 const MANDATORY_MIN_STOP_LOSS_PCT = 50;
+// Bounds on an ATR-derived stop distance, regardless of atrStopMultiplier -
+// a stop tighter than this on a low-cap PulseX token is almost certainly
+// noise-triggered, not a real invalidation of the setup; a stop looser than
+// this is not meaningfully a stop at all. Applied before the Auto Full
+// mandatory floor, which can still raise it further.
+const ATR_STOP_MIN_PCT = 5;
+const ATR_STOP_MAX_PCT = 80;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
@@ -46,6 +53,7 @@ interface Strictest {
   requireRsi: boolean; rsiOversold: number;
   requireMacdCross: boolean;
   requireBollinger: boolean; bollingerPercentBMax: number;
+  requireVolumeConfirmation: boolean; minVolumeRatio: number;
   minLiquidityPls: number;
   maxBuyTaxBps: number; maxSellTaxBps: number;
   requireLpLock: boolean; requireOwnerRenounced: boolean;
@@ -55,6 +63,20 @@ interface Strictest {
   // against. Each vault still clamps to its OWN (possibly stricter)
   // ceiling at dispatch time - see sizeForVault().
   aiCeilingPls: number;
+}
+
+/** The stop-loss % to actually bake into a position at open time. ATR-based
+ * when the vault opted in and a real ATR reading was available at detection
+ * time, clamped to a sane range either way; otherwise the flat configured
+ * stopLossPct. Auto Full's mandatory floor is layered on top regardless of
+ * which path produced the number - see MANDATORY_MIN_STOP_LOSS_PCT. */
+function computeStopLossPct(H: HunterConfig, atrPct: number | null): number {
+  let pct = H.stopLossPct;
+  if (H.useAtrStop && atrPct !== null && atrPct > 0) {
+    pct = Math.min(ATR_STOP_MAX_PCT, Math.max(ATR_STOP_MIN_PCT, atrPct * H.atrStopMultiplier));
+  }
+  if (H.exitMode === "full") pct = pct > 0 ? pct : MANDATORY_MIN_STOP_LOSS_PCT;
+  return pct;
 }
 
 async function vaultWplsPls(vault: string): Promise<number> {
@@ -94,8 +116,11 @@ function checkTriggers(
   return hits;
 }
 
-function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, ai: AiVerdict | null): string {
-  const base = `${symbol} looks oversold: ${triggers.join("; ")}.`;
+function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, ai: AiVerdict | null, volRatio: number | null): string {
+  const volNote = volRatio !== null && Number.isFinite(volRatio)
+    ? ` Recent volume is running ${volRatio.toFixed(1)}x its baseline.`
+    : "";
+  const base = `${symbol} looks oversold: ${triggers.join("; ")}.${volNote}`;
   if (s.verdict !== "pass") return `${base} Screen failed: ${s.reason}.`;
   const screened = `${base} Passed the same honeypot, tax, LP-lock and renounce screen the Launch Bot runs.`;
   if (!ai) return screened;
@@ -109,7 +134,7 @@ function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, 
  * the full ceiling. Either way `amountPls` here is the actual spend, never
  * exceeding H.maxPerTradePls.
  */
-async function executeHunterBuy(v: VaultRecord, id: number, token: string, amountPls: number): Promise<void> {
+async function executeHunterBuy(v: VaultRecord, id: number, token: string, amountPls: number, atrPct: number | null): Promise<void> {
   const H = v.hunter;
   if (amountPls <= 0 || H.allocatedPls <= 0) return;
 
@@ -138,9 +163,9 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
   if (res.ok) {
     // Auto Full: the AI takes over deciding when to exit (see
     // reviewFullModePositions), so the fixed take-profit/trailing/time
-    // targets don't apply - only the mandatory stop-loss does, and it's
-    // never actually disabled even if stopLossPct was left at 0.
-    const slPct = H.exitMode === "full" ? (H.stopLossPct > 0 ? H.stopLossPct : MANDATORY_MIN_STOP_LOSS_PCT) : H.stopLossPct;
+    // targets don't apply - only the stop-loss does, and it's never
+    // actually disabled even if it resolved to 0 or wasn't set.
+    const slPct = computeStopLossPct(H, atrPct);
     openPosition({
       vault: v.address, bot: "hunter", token,
       spentPls: amountPls, tokensOut: res.amountOut,
@@ -166,7 +191,7 @@ function sizeForVault(H: HunterConfig, ai: AiVerdict | null): number {
 }
 
 async function dispatch(
-  id: number, token: string, ai: AiVerdict | null, s: DiscoveryScreen, candidates: VaultRecord[],
+  id: number, token: string, ai: AiVerdict | null, s: DiscoveryScreen, atrPct: number | null, candidates: VaultRecord[],
 ): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const H = v.hunter;
@@ -196,7 +221,7 @@ async function dispatch(
       }
     }
 
-    await executeHunterBuy(v, id, token, sizeForVault(H, ai));
+    await executeHunterBuy(v, id, token, sizeForVault(H, ai), atrPct);
   });
 }
 
@@ -218,6 +243,13 @@ async function evaluateWatchedToken(
   const first = candles[0]!;
   const last = candles[candles.length - 1]!;
   if (last.liq < strictest.minLiquidityPls) return;
+
+  // Confirmation gate, not an alternative trigger: an RSI/MACD/Bollinger
+  // reading on a token nobody is actually trading isn't trustworthy on its
+  // own. Skipped entirely (not recorded) rather than shown as a rejected
+  // opportunity - unlike the liquidity-pull check below, "not enough volume
+  // yet" isn't itself an interesting finding, it just means try again later.
+  if (strictest.requireVolumeConfirmation && (snap.volRatio === null || snap.volRatio < strictest.minVolumeRatio)) return;
 
   // Hard gate, not configurable - the exact trap this bot exists to avoid.
   // Recorded and shown rather than silently dropped, same as a failed
@@ -248,12 +280,13 @@ async function evaluateWatchedToken(
       liqGrowthPct: ((last.liq - first.liq) / first.liq) * 100,
       rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null,
       macdBullishCross: snap.macd?.bullishCross ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
+      atrPct: snap.atrPct, volRatio: snap.volRatio,
       narrative: `Technical setup: ${triggers.join("; ")}`,
     };
     ai = await assess(profile, strictest.aiCeilingPls > 0 ? strictest.aiCeilingPls : undefined);
   }
 
-  const narrative = buildNarrative(w.symbol, triggers, s, ai);
+  const narrative = buildNarrative(w.symbol, triggers, s, ai, snap.volRatio);
   const id = opportunities.insert({
     token: w.token, priceMovePct: ((last.close - first.close) / first.close) * 100,
     liqGrowthPct: ((last.liq - first.liq) / first.liq) * 100, liqPls: last.liq,
@@ -262,11 +295,12 @@ async function evaluateWatchedToken(
     source: "hunter", rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
     aiRecommend: ai?.recommend ?? null, aiConfidence: ai?.confidence ?? null, aiReasoning: ai?.reasoning ?? null,
     aiSuggestedAmountPls: ai?.suggestedAmountPls ?? null,
+    atrPct: snap.atrPct, volRatio: snap.volRatio,
   });
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
   if (s.verdict !== "pass") return;
-  await dispatch(id, w.token, ai, s, candidates);
+  await dispatch(id, w.token, ai, s, snap.atrPct, candidates);
 }
 
 interface FullModeRow { id: number; vault: string; token: string; opened_at: number; entry_price: number; high_water: number }
@@ -312,6 +346,8 @@ async function reviewFullModePositions(): Promise<void> {
         macdBullishCross: snap?.macd?.bullishCross ?? null,
         macdBearishCross: snap?.macd?.bearishCross ?? null,
         bollingerPercentB: snap?.bollinger?.percentB ?? null,
+        atrPct: snap?.atrPct ?? null,
+        volRatio: snap?.volRatio ?? null,
       };
 
       const verdict = await assessExit(context);
@@ -343,7 +379,7 @@ async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void
           : opp.aiSuggestedAmountPls
           ? Math.min(opp.aiSuggestedAmountPls, v.hunter.maxPerTradePls)
           : v.hunter.maxPerTradePls;
-        await executeHunterBuy(v, id, opp.token, amountPls);
+        await executeHunterBuy(v, id, opp.token, amountPls, opp.atrPct ?? null);
       } catch (e) {
         log("error", "hunter", `${v.address} buy request for opportunity #${id}: ${(e as Error).message}`);
       }
@@ -365,6 +401,7 @@ export async function tick(): Promise<void> {
   // discovery.ts and launch.ts use for their own per-token checks.
   const rsiSubs = candidates.filter((c) => c.hunter.requireRsi);
   const bollSubs = candidates.filter((c) => c.hunter.requireBollinger);
+  const volSubs = candidates.filter((c) => c.hunter.requireVolumeConfirmation);
   const aiSubs = candidates.filter((c) => c.hunter.requireAiApproval);
   const strictest: Strictest = {
     requireRsi: rsiSubs.length > 0,
@@ -372,6 +409,11 @@ export async function tick(): Promise<void> {
     requireMacdCross: candidates.some((c) => c.hunter.requireMacdCross),
     requireBollinger: bollSubs.length > 0,
     bollingerPercentBMax: bollSubs.length ? Math.max(...bollSubs.map((c) => c.hunter.bollingerPercentBMax)) : 0,
+    requireVolumeConfirmation: volSubs.length > 0,
+    // Lower = easier to pass, so the loosest shared bar is the SMALLEST
+    // minVolumeRatio among subscribers - the opposite direction from
+    // bollingerPercentBMax above, where a bigger number is the looser one.
+    minVolumeRatio: volSubs.length ? Math.min(...volSubs.map((c) => c.hunter.minVolumeRatio)) : 0,
     minLiquidityPls: Math.min(...candidates.map((c) => c.hunter.minLiquidityPls)),
     maxBuyTaxBps: Math.max(...candidates.map((c) => c.hunter.maxBuyTaxBps)),
     maxSellTaxBps: Math.max(...candidates.map((c) => c.hunter.maxSellTaxBps)),

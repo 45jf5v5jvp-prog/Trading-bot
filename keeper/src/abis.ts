@@ -18,6 +18,7 @@ export const PAIR_ABI = [
   "function token1() view returns (address)",
   "function totalSupply() view returns (uint256)",
   "function balanceOf(address) view returns (uint256)",
+  "event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)",
 ];
 
 export const ERC20_ABI = [

@@ -133,17 +133,76 @@ export function liquidityDropIsSuspicious(
   return actualLiqRatio < expectedLiqRatio * toleranceRatio;
 }
 
-export interface IndicatorSnapshot { close: number; rsi: number | null; macd: Macd | null; bollinger: Bollinger | null }
+/**
+ * Wilder's ATR (Average True Range) - a volatility measure, not a
+ * direction/oversold signal like the other three. True range per candle is
+ * the largest of: this candle's own high-low spread, or the gap from the
+ * PRIOR close to this candle's high or low - the gap terms are what let ATR
+ * capture a gap move that a same-candle high-low spread alone would miss.
+ * Same Wilder smoothing as rsi() above, over the same default 14-period.
+ */
+export function atr(candles: Candle[], period = 14): number | null {
+  if (candles.length < period + 1) return null;
+  const trueRanges: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i]!, prev = candles[i - 1]!;
+    trueRanges.push(Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close)));
+  }
+  let avg = trueRanges.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trueRanges.length; i++) avg = (avg * (period - 1) + trueRanges[i]!) / period;
+  return avg;
+}
+
+export interface VolumeConfirmation { recentAvgVolPls: number; baselineAvgVolPls: number; ratio: number }
+
+/**
+ * Is there real trading volume behind the recent candles, or is this token
+ * just drifting on thin activity? Compares the average volume of the most
+ * recent `recentCount` candles against the average of everything before
+ * them. A ratio above 1 means recent activity is running hotter than the
+ * token's own baseline - the confirmation a technical setup (RSI/MACD/
+ * Bollinger) needs before it's trustworthy, since an oversold reading on a
+ * token nobody is actually trading is not a signal, it's noise.
+ *
+ * Needs enough candles on BOTH sides of the split to mean anything; returns
+ * null rather than comparing a lopsided sample. A baseline of exactly 0
+ * volume (a token the keeper has price ticks for but never saw a matching
+ * Swap event on) reports Infinity if there's any recent volume at all, or a
+ * neutral 1 if there's none either - never a division by zero.
+ */
+export function volumeConfirmation(candles: Candle[], recentCount = 8): VolumeConfirmation | null {
+  if (candles.length < recentCount * 2) return null;
+  const recent = candles.slice(candles.length - recentCount);
+  const baseline = candles.slice(0, candles.length - recentCount);
+  const avg = (cs: Candle[]) => cs.reduce((a, c) => a + c.vol, 0) / cs.length;
+  const recentAvgVolPls = avg(recent);
+  const baselineAvgVolPls = avg(baseline);
+  const ratio = baselineAvgVolPls > 0 ? recentAvgVolPls / baselineAvgVolPls : (recentAvgVolPls > 0 ? Infinity : 1);
+  return { recentAvgVolPls, baselineAvgVolPls, ratio };
+}
+
+export interface IndicatorSnapshot {
+  close: number; rsi: number | null; macd: Macd | null; bollinger: Bollinger | null;
+  atrPct: number | null; volRatio: number | null;
+}
 
 /** Every indicator at once, off the same candle set. Any that lack enough
  * history come back null rather than a misleading half-formed value. */
 export function snapshot(candles: Candle[]): IndicatorSnapshot | null {
   if (candles.length === 0) return null;
   const closes = candles.map((c) => c.close);
+  const close = closes[closes.length - 1]!;
+  const atrVal = atr(candles);
+  const vol = volumeConfirmation(candles);
   return {
-    close: closes[closes.length - 1]!,
+    close,
     rsi: rsi(closes),
     macd: macd(closes),
     bollinger: bollinger(closes),
+    // As a % of price, not a raw PLS-per-token figure, so it's comparable
+    // across tokens of wildly different unit prices - the same thing
+    // stopLossPct already is.
+    atrPct: atrVal !== null && close > 0 ? (atrVal / close) * 100 : null,
+    volRatio: vol?.ratio ?? null,
   };
 }

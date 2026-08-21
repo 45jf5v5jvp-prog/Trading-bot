@@ -14,12 +14,24 @@ CREATE TABLE IF NOT EXISTS prices (
 );
 CREATE INDEX IF NOT EXISTS prices_token_ts ON prices(token, ts DESC);
 
+-- Drains into a price tick's vol column each poll, then resets to 0 - see
+-- prices.ts's scanSwapVolume/pollAll. A running total between polls, not a
+-- history of its own.
+CREATE TABLE IF NOT EXISTS token_volume_accum (
+  token TEXT PRIMARY KEY,
+  vol   REAL NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS watched (
   token      TEXT PRIMARY KEY,
   symbol     TEXT,
   decimals   INTEGER DEFAULT 18,
   pair       TEXT,
-  first_seen INTEGER NOT NULL
+  first_seen INTEGER NOT NULL,
+  -- Whether WPLS is token0 of the pair, resolved once at watch time. NULL on
+  -- a row from before this existed - readPair()/scanSwapVolume() in
+  -- prices.ts self-heal it lazily on first use, not a bulk backfill.
+  pls_first  INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS screened (
@@ -156,6 +168,32 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   add("price_at_detection", "price_at_detection REAL");
   add("stale", "stale INTEGER NOT NULL DEFAULT 0");
   add("stale_reason", "stale_reason TEXT");
+  // ATR (volatility, as a % of price) and volume confirmation ratio - see
+  // indicators.ts's atr()/volumeConfirmation(). Both null for discovery.ts's
+  // rows (no technical setup involved there) and for any hunter.ts row from
+  // before these existed.
+  add("atr_pct", "atr_pct REAL");
+  add("vol_ratio", "vol_ratio REAL");
+}
+
+// Additive migration: databases created before volume tracking existed have
+// no vol column on prices - old rows read back as 0 (see PricePoint below),
+// same "missing means zero, not unknown" convention token_volume_accum uses.
+{
+  const cols = db.prepare("PRAGMA table_info(prices)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "vol")) {
+    db.exec("ALTER TABLE prices ADD COLUMN vol REAL NOT NULL DEFAULT 0");
+  }
+}
+
+// Additive migration: a watched row from before pls_first existed reads
+// back as NULL - prices.ts resolves and persists it on first use rather
+// than needing a bulk backfill.
+{
+  const cols = db.prepare("PRAGMA table_info(watched)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "pls_first")) {
+    db.exec("ALTER TABLE watched ADD COLUMN pls_first INTEGER");
+  }
 }
 
 export const meta = {
@@ -168,17 +206,17 @@ export const meta = {
   },
 };
 
-export interface PricePoint { ts: number; price: number; liq: number }
+export interface PricePoint { ts: number; price: number; liq: number; vol: number }
 
 export const prices = {
-  insert: db.prepare("INSERT OR REPLACE INTO prices(token,ts,price,liq) VALUES(?,?,?,?)"),
+  insert: db.prepare("INSERT OR REPLACE INTO prices(token,ts,price,liq,vol) VALUES(?,?,?,?,?)"),
 
   since(token: string, fromTs: number): PricePoint[] {
-    return db.prepare("SELECT ts,price,liq FROM prices WHERE token=? AND ts>=? ORDER BY ts ASC")
+    return db.prepare("SELECT ts,price,liq,vol FROM prices WHERE token=? AND ts>=? ORDER BY ts ASC")
       .all(token.toLowerCase(), fromTs) as PricePoint[];
   },
   latest(token: string): PricePoint | undefined {
-    return db.prepare("SELECT ts,price,liq FROM prices WHERE token=? ORDER BY ts DESC LIMIT 1")
+    return db.prepare("SELECT ts,price,liq,vol FROM prices WHERE token=? ORDER BY ts DESC LIMIT 1")
       .get(token.toLowerCase()) as PricePoint | undefined;
   },
   /** How many hours of history exist. Decides whether a rule can arm. */
@@ -190,6 +228,32 @@ export const prices = {
   },
   prune(olderThan: number): void {
     db.prepare("DELETE FROM prices WHERE ts < ?").run(olderThan);
+  },
+};
+
+/**
+ * Running WPLS-denominated Swap volume per token, accumulated as
+ * prices.ts's scanSwapVolume() scans chain logs, then drained into that
+ * interval's prices.vol on the next poll and reset to 0 - see pollAll().
+ * Decouples the block-based log scan from the price-poll cadence: either
+ * can run more or less often than the other without losing or double-
+ * counting volume, since a swap always lands in exactly one drain no matter
+ * when it's scanned relative to the poll tick.
+ */
+export const volumeAccum = {
+  add(token: string, wplsAmount: number): void {
+    db.prepare(`INSERT INTO token_volume_accum(token,vol) VALUES(?,?)
+                ON CONFLICT(token) DO UPDATE SET vol = vol + excluded.vol`)
+      .run(token.toLowerCase(), wplsAmount);
+  },
+  /** Reads the current total and resets it to 0 in the same call - callers
+   * must persist the returned value themselves (see pollAll()), since once
+   * drained it's gone from the accumulator either way. */
+  drain(token: string): number {
+    const t = token.toLowerCase();
+    const r = db.prepare("SELECT vol FROM token_volume_accum WHERE token=?").get(t) as { vol: number } | undefined;
+    if (r) db.prepare("UPDATE token_volume_accum SET vol=0 WHERE token=?").run(t);
+    return r?.vol ?? 0;
   },
 };
 
@@ -250,12 +314,20 @@ export const aiExitRequests = {
 };
 
 export const watched = {
-  add(token: string, symbol: string, decimals: number, pair: string): void {
-    db.prepare(`INSERT OR IGNORE INTO watched(token,symbol,decimals,pair,first_seen)
-                VALUES(?,?,?,?,?)`).run(token.toLowerCase(), symbol, decimals, pair.toLowerCase(), Math.floor(Date.now() / 1000));
+  add(token: string, symbol: string, decimals: number, pair: string, plsFirst: boolean): void {
+    db.prepare(`INSERT OR IGNORE INTO watched(token,symbol,decimals,pair,first_seen,pls_first)
+                VALUES(?,?,?,?,?,?)`).run(
+      token.toLowerCase(), symbol, decimals, pair.toLowerCase(), Math.floor(Date.now() / 1000), plsFirst ? 1 : 0,
+    );
   },
-  all(): { token: string; symbol: string; decimals: number; pair: string }[] {
-    return db.prepare("SELECT token,symbol,decimals,pair FROM watched").all() as any;
+  all(): { token: string; symbol: string; decimals: number; pair: string; plsFirst: boolean | null }[] {
+    const rows = db.prepare("SELECT token,symbol,decimals,pair,pls_first AS plsFirst FROM watched").all() as any[];
+    return rows.map((r) => ({ ...r, plsFirst: r.plsFirst === null ? null : Boolean(r.plsFirst) }));
+  },
+  /** Persists a lazily-resolved pls_first for a row that predates the
+   * column - see prices.ts's readPair()/scanSwapVolume() self-heal. */
+  setPlsFirst(token: string, plsFirst: boolean): void {
+    db.prepare("UPDATE watched SET pls_first=? WHERE token=?").run(plsFirst ? 1 : 0, token.toLowerCase());
   },
 };
 
@@ -285,6 +357,15 @@ export interface NewOpportunity {
    * refreshStaleness in discovery.ts). Null is fine (an old row from before
    * this existed); staleness then falls back to the time-based check alone. */
   priceAtDetection?: number | null;
+  /** ATR as a % of price at detection time, and the recent-vs-baseline
+   * volume ratio (see indicators.ts's atr()/volumeConfirmation()) - stored
+   * so a later manual "Buy Now" on this same opportunity can size an
+   * ATR-based stop-loss off the same numbers the detection pass saw,
+   * without needing a fresh candle read at execution time. Null for
+   * discovery.ts's rows (no technical setup there) and for hunter.ts rows
+   * predating these fields. */
+  atrPct?: number | null;
+  volRatio?: number | null;
 }
 export interface OpportunityRow extends NewOpportunity {
   id: number; ts: number; source: "discovery" | "hunter";
@@ -300,15 +381,15 @@ export interface OpportunityRow extends NewOpportunity {
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection,atr_pct,vol_ratio)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
       o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
       o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
       o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
       o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
-      o.priceAtDetection ?? null,
+      o.priceAtDetection ?? null, o.atrPct ?? null, o.volRatio ?? null,
     );
     return Number(info.lastInsertRowid);
   },
@@ -329,7 +410,8 @@ export const opportunities = {
              source, rsi, macd_histogram AS macdHistogram, bollinger_percent_b AS bollingerPercentB,
              ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
              ai_suggested_amount_pls AS aiSuggestedAmountPls,
-             price_at_detection AS priceAtDetection, stale, stale_reason AS staleReason
+             price_at_detection AS priceAtDetection, stale, stale_reason AS staleReason,
+             atr_pct AS atrPct, vol_ratio AS volRatio
       FROM opportunities WHERE id=?
     `).get(id) as any;
     if (!r) return undefined;

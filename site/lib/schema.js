@@ -47,7 +47,9 @@ const DEFAULT_HUNTER = {
   minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
   requireAiApproval: true, minAiConfidence: "medium",
-  takeProfitPct: 40, stopLossPct: 25, trailingStopPct: 0, timeExitMin: 0,
+  takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
+  trailingStopPct: 0, timeExitMin: 0,
+  requireVolumeConfirmation: false, minVolumeRatio: 1.5,
 };
 
 function isFiniteNumber(v) {
@@ -180,6 +182,7 @@ function normalizeHunter(h) {
   for (const field of [
     "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
     "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
+    "atrStopMultiplier", "minVolumeRatio",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
       throw new Error(`hunter.${field} must be a non-negative number`);
@@ -191,8 +194,13 @@ function normalizeHunter(h) {
   // Auto Full hands the AI ongoing exit authority - the stop-loss is the one
   // thing that authority can never remove, so it must be a real number here,
   // not left at the "disabled" 0 a limited-mode owner might reasonably use.
+  // useAtrStop still needs a real flat stopLossPct too - it's the fallback
+  // whenever ATR wasn't available at buy time (see keeper/src/hunter.ts's
+  // computeStopLossPct), so Auto Full can't be left with nothing either way.
   if (merged.exitMode === "full" && merged.stopLossPct <= 0)
     throw new Error("hunter.stopLossPct must be greater than 0 when exitMode is \"full\" - Auto Full still needs a mandatory stop-loss");
+  if (merged.useAtrStop && merged.atrStopMultiplier <= 0)
+    throw new Error("hunter.atrStopMultiplier must be greater than 0 when useAtrStop is on");
   return {
     enabled: Boolean(merged.enabled),
     mode: merged.mode,
@@ -214,8 +222,12 @@ function normalizeHunter(h) {
     minAiConfidence: merged.minAiConfidence,
     takeProfitPct: merged.takeProfitPct,
     stopLossPct: merged.stopLossPct,
+    useAtrStop: Boolean(merged.useAtrStop),
+    atrStopMultiplier: merged.atrStopMultiplier,
     trailingStopPct: merged.trailingStopPct,
     timeExitMin: merged.timeExitMin,
+    requireVolumeConfirmation: Boolean(merged.requireVolumeConfirmation),
+    minVolumeRatio: merged.minVolumeRatio,
   };
 }
 

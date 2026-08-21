@@ -131,9 +131,29 @@ export interface HunterConfig {
   minAiConfidence: "low" | "medium" | "high";
 
   takeProfitPct: number;
+  // When useAtrStop is on, the position's actual stop distance is computed
+  // from the token's own ATR(14) at buy time (ATR as a % of price, times
+  // atrStopMultiplier) instead of this flat stopLossPct - a volatile token
+  // gets a wider stop, a calm one a tighter one, rather than every token
+  // getting the same fixed percentage regardless of how much it normally
+  // moves. stopLossPct still applies as-is when useAtrStop is off, and Auto
+  // Full's mandatory-stop floor (see hunter.ts's MANDATORY_MIN_STOP_LOSS_PCT)
+  // applies to whichever number this resolves to either way.
   stopLossPct: number;
+  useAtrStop: boolean;
+  atrStopMultiplier: number;
   trailingStopPct: number;
   timeExitMin: number;
+
+  // Require the recent candle volume to be running meaningfully hotter than
+  // the token's own baseline before trusting an RSI/MACD/Bollinger trigger -
+  // an oversold reading on a token nobody is actually trading is noise, not
+  // signal. See indicators.ts's volumeConfirmation(). Off by default: the
+  // keeper only just started tracking real Swap volume, so a freshly watched
+  // token has none yet and this would silently block every trigger until it
+  // does.
+  requireVolumeConfirmation: boolean;
+  minVolumeRatio: number;
 }
 
 /**
@@ -242,7 +262,9 @@ const DEFAULT_HUNTER: HunterConfig = {
   minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
   requireAiApproval: true, minAiConfidence: "medium",
-  takeProfitPct: 40, stopLossPct: 25, trailingStopPct: 0, timeExitMin: 0,
+  takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
+  trailingStopPct: 0, timeExitMin: 0,
+  requireVolumeConfirmation: false, minVolumeRatio: 1.5,
 };
 
 const cache = new Map<string, VaultRecord>();

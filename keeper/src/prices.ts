@@ -1,8 +1,8 @@
-import { Contract, formatUnits } from "ethers";
+import { Contract, Interface, formatUnits, formatEther, id } from "ethers";
 import { CFG } from "./config.js";
 import { provider, factory, type Dyn } from "./chain.js";
 import { ERC20_ABI, PAIR_ABI } from "./abis.js";
-import { prices, watched } from "./db.js";
+import { prices, watched, meta, volumeAccum } from "./db.js";
 import { log } from "./log.js";
 
 /**
@@ -23,11 +23,14 @@ export async function ensureWatched(token: string): Promise<boolean> {
       return false;
     }
     const erc = new Contract(token, ERC20_ABI, provider) as Dyn;
-    const [sym, dec] = await Promise.all([
+    const p = new Contract(pair, PAIR_ABI, provider) as Dyn;
+    const [sym, dec, t0] = await Promise.all([
       erc.symbol().catch(() => "???"),
       erc.decimals().catch(() => 18),
+      p.token0(),
     ]);
-    watched.add(token, String(sym), Number(dec), pair);
+    const plsFirst = (t0 as string).toLowerCase() === CFG.wpls.toLowerCase();
+    watched.add(token, String(sym), Number(dec), pair, plsFirst);
     log("info", "prices", `Now watching ${sym} (${token})`);
     return true;
   } catch (e) {
@@ -36,16 +39,25 @@ export async function ensureWatched(token: string): Promise<boolean> {
   }
 }
 
+/** A watched row's WPLS-is-token0 flag, resolving and persisting it if this
+ * row predates that column (see db.ts's watched.setPlsFirst). */
+async function resolvePlsFirst(w: { token: string; pair: string; plsFirst: boolean | null }): Promise<boolean> {
+  if (w.plsFirst !== null) return w.plsFirst;
+  const p = new Contract(w.pair, PAIR_ABI, provider) as Dyn;
+  const t0: string = await p.token0();
+  const plsFirst = t0.toLowerCase() === CFG.wpls.toLowerCase();
+  watched.setPlsFirst(w.token, plsFirst);
+  return plsFirst;
+}
+
 /** Mid price in PLS per token, straight from pair reserves. */
-async function readPair(token: string, pairAddr: string, decimals: number):
+async function readPair(pairAddr: string, decimals: number, plsFirst: boolean):
   Promise<{ price: number; liq: number } | null> {
   try {
     const p = new Contract(pairAddr, PAIR_ABI, provider) as Dyn;
     const [r0, r1] = await p.getReserves();
-    const t0: string = await p.token0();
-    const isPlsFirst = t0.toLowerCase() === CFG.wpls.toLowerCase();
-    const plsRes = BigInt(isPlsFirst ? r0 : r1);
-    const tokRes = BigInt(isPlsFirst ? r1 : r0);
+    const plsRes = BigInt(plsFirst ? r0 : r1);
+    const tokRes = BigInt(plsFirst ? r1 : r0);
     if (plsRes === 0n || tokRes === 0n) return null;
     const pls = Number(formatUnits(plsRes, 18));
     const tok = Number(formatUnits(tokRes, decimals));
@@ -55,14 +67,84 @@ async function readPair(token: string, pairAddr: string, decimals: number):
   }
 }
 
+// Swap(address,uint256,uint256,uint256,uint256,address) - the standard V2
+// pair event, identical across every PulseX pair contract regardless of
+// which token it holds. Scanning by this single topic with NO address
+// filter, rather than one getLogs call per watched pair, keeps this to one
+// request per chunk no matter how many tokens the keeper is watching - the
+// same reasoning launch.ts's factory-wide PairCreated scan already relies
+// on, just applied to pairs instead of the factory.
+const SWAP_TOPIC0 = id("Swap(address,uint256,uint256,uint256,uint256,address)");
+const SWAP_IFACE = new Interface(PAIR_ABI);
+
+// Deliberately smaller than launch.ts's LOG_CHUNK_BLOCKS: an unfiltered
+// chain-wide Swap scan returns every DEX trade in range, not just this
+// factory's pair creations, so a chunk sized for PairCreated risks an
+// oversized response here. Configurable per RPC provider same as that one.
+const SWAP_LOG_CHUNK_BLOCKS = Math.max(1, Number(process.env.SWAP_LOG_CHUNK_BLOCKS || "200"));
+
+/**
+ * Chunked, checkpointed scan for Swap events on every pair the keeper is
+ * watching, accumulating WPLS-denominated trade size per token into
+ * token_volume_accum (see db.ts's volumeAccum) - pollAll() drains that into
+ * each price tick's vol column right after this runs. Same
+ * scan-forward-only, checkpoint-per-chunk shape as launch.ts's scan() for
+ * PairCreated: no backfill of history from before the keeper started
+ * watching, and a failure partway through a catch-up keeps the progress
+ * already made rather than losing it.
+ */
+export async function scanSwapVolume(): Promise<void> {
+  const list = watched.all();
+  if (list.length === 0) return;
+  const pairIndex = new Map<string, { token: string; plsFirst: boolean }>();
+  for (const w of list) pairIndex.set(w.pair.toLowerCase(), { token: w.token, plsFirst: await resolvePlsFirst(w) });
+
+  const head = await provider.getBlockNumber();
+  const last = Number(meta.get("last_swap_block", String(head - 200)));
+  if (head <= last) return;
+
+  const from = Math.max(last + 1, head - 2000); // cap catch-up per pass
+  let totalMatched = 0;
+  let chunkStart = from;
+  while (chunkStart <= head) {
+    const chunkEnd = Math.min(chunkStart + SWAP_LOG_CHUNK_BLOCKS - 1, head);
+    try {
+      const logs = await provider.getLogs({ fromBlock: chunkStart, toBlock: chunkEnd, topics: [SWAP_TOPIC0] });
+      for (const l of logs) {
+        const hit = pairIndex.get(l.address.toLowerCase());
+        if (!hit) continue; // a swap on some other pair entirely - not ours
+        let parsed;
+        try { parsed = SWAP_IFACE.parseLog(l); } catch { continue; }
+        if (!parsed) continue;
+        const { amount0In, amount1In, amount0Out, amount1Out } = parsed.args;
+        const wplsAmount: bigint = hit.plsFirst
+          ? (amount0In as bigint) + (amount0Out as bigint)
+          : (amount1In as bigint) + (amount1Out as bigint);
+        if (wplsAmount <= 0n) continue;
+        volumeAccum.add(hit.token, Number(formatEther(wplsAmount)));
+        totalMatched++;
+      }
+      meta.set("last_swap_block", String(chunkEnd));
+      chunkStart = chunkEnd + 1;
+    } catch (e) {
+      log("error", "prices", `Swap scan ${chunkStart}-${chunkEnd} failed: ${(e as Error).message}`);
+      return;
+    }
+  }
+  if (totalMatched) log("debug", "prices", `Swap scan ${from}-${head}: ${totalMatched} matching trades`);
+}
+
 export async function pollAll(): Promise<void> {
+  await scanSwapVolume();
+
   const list = watched.all();
   const ts = Math.floor(Date.now() / 1000);
   let ok = 0;
   for (const w of list) {
-    const r = await readPair(w.token, w.pair, w.decimals);
+    const plsFirst = await resolvePlsFirst(w);
+    const r = await readPair(w.pair, w.decimals, plsFirst);
     if (!r) continue;
-    prices.insert.run(w.token, ts, r.price, r.liq);
+    prices.insert.run(w.token, ts, r.price, r.liq, volumeAccum.drain(w.token));
     ok++;
   }
   log("debug", "prices", `Sampled ${ok}/${list.length} tokens`);

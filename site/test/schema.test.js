@@ -99,6 +99,43 @@ test("allows hunter maxPerTradePls larger than allocatedPls when allocatedPls is
   assert.equal(out.hunter.maxPerTradePls, 5000);
 });
 
+test("hunter ATR stop and volume confirmation default off", () => {
+  const c = emptyConfig();
+  assert.equal(c.hunter.useAtrStop, false);
+  assert.equal(c.hunter.atrStopMultiplier, 3);
+  assert.equal(c.hunter.requireVolumeConfirmation, false);
+  assert.equal(c.hunter.minVolumeRatio, 1.5);
+});
+
+test("accepts useAtrStop on with a positive atrStopMultiplier", () => {
+  const out = normalizeConfig({ hunter: { useAtrStop: true, atrStopMultiplier: 4 } });
+  assert.equal(out.hunter.useAtrStop, true);
+  assert.equal(out.hunter.atrStopMultiplier, 4);
+});
+
+test("rejects useAtrStop on with atrStopMultiplier at 0", () => {
+  assert.throws(
+    () => normalizeConfig({ hunter: { useAtrStop: true, atrStopMultiplier: 0 } }),
+    /atrStopMultiplier/,
+  );
+});
+
+test("allows atrStopMultiplier at 0 when useAtrStop is off (the setting just doesn't apply)", () => {
+  const out = normalizeConfig({ hunter: { useAtrStop: false, atrStopMultiplier: 0 } });
+  assert.equal(out.hunter.atrStopMultiplier, 0);
+});
+
+test("rejects a negative atrStopMultiplier or minVolumeRatio", () => {
+  assert.throws(() => normalizeConfig({ hunter: { atrStopMultiplier: -1 } }), /atrStopMultiplier/);
+  assert.throws(() => normalizeConfig({ hunter: { minVolumeRatio: -1 } }), /minVolumeRatio/);
+});
+
+test("accepts requireVolumeConfirmation on with a minVolumeRatio", () => {
+  const out = normalizeConfig({ hunter: { requireVolumeConfirmation: true, minVolumeRatio: 2 } });
+  assert.equal(out.hunter.requireVolumeConfirmation, true);
+  assert.equal(out.hunter.minVolumeRatio, 2);
+});
+
 test("accepts a minimal valid snipe target", () => {
   const out = normalizeConfig({
     snipes: [{ enabled: true, token: "0x" + "2".repeat(40), amountPls: 1000 }],

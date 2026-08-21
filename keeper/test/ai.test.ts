@@ -20,13 +20,14 @@ const baseProfile = {
   liqPls: 2_000_000, buyTaxBps: 100, sellTaxBps: 100, lpLockedPct: 99,
   deployerPct: null, ownerRenounced: true, roundTripLossBps: 50,
   priceMovePct: 25, liqGrowthPct: 20, rsi: 28, macdHistogram: 0.4,
-  macdBullishCross: true, bollingerPercentB: 0.1,
+  macdBullishCross: true, bollingerPercentB: 0.1, atrPct: 12.5, volRatio: 1.8,
 };
 
 const basePosition = {
   symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
   entryPrice: 1, currentPrice: 1.5, pnlPct: 50, peakPnlPct: 60, minutesHeld: 90,
   rsi: 65, macdHistogram: 0.1, macdBullishCross: false, macdBearishCross: false, bollingerPercentB: 0.8,
+  atrPct: 9, volRatio: 1.2,
 };
 
 test("assess() returns null with no API key set, never a fabricated approval", async () => {

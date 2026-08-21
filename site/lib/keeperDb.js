@@ -110,7 +110,7 @@ function getOpportunities(limit = 50) {
       `SELECT id, token, ts, price_move_pct, liq_growth_pct, liq_pls, buy_tax_bps, sell_tax_bps,
               lp_locked_pct, owner_renounced, sellable, verdict, reason, narrative,
               source, rsi, macd_histogram, bollinger_percent_b, ai_recommend, ai_confidence, ai_reasoning,
-              ai_suggested_amount_pls, stale, stale_reason
+              ai_suggested_amount_pls, stale, stale_reason, atr_pct, vol_ratio
        FROM opportunities WHERE verdict = 'pass' ORDER BY ts DESC LIMIT ?`,
     ).all(limit);
   } catch {
@@ -136,6 +136,27 @@ function getDiscoveryActionsForVault(vault) {
   }
 }
 
+/**
+ * Raw price ticks for a token since `sinceTs` (unix seconds), oldest first -
+ * the same `prices` table the keeper's own candle/indicator math reads (see
+ * keeper/src/candles.ts). Used by Ask Icaria (lib/askIcaria.js) to give the
+ * AI actual price action and technicals instead of only tax/LP/renounce
+ * facts. [] if the keeper.db file doesn't exist yet, or the token has no
+ * price history on file (never watched, or watched too recently) - either
+ * way "no price data" is a normal state here, not an error.
+ */
+function getRecentPrices(token, sinceTs) {
+  const d = getDb();
+  if (!d) return [];
+  try {
+    return d.prepare(
+      `SELECT ts, price, liq, vol FROM prices WHERE token = ? AND ts >= ? ORDER BY ts ASC`,
+    ).all(token.toLowerCase(), sinceTs);
+  } catch {
+    return []; // no vol column yet on an older keeper.db - still usable without it
+  }
+}
+
 function resetForTests() {
   if (db) db.close();
   db = undefined;
@@ -144,6 +165,6 @@ function resetForTests() {
 
 module.exports = {
   getPositions, getRecentFires, getTotalFees, getV4PoolsForToken,
-  getOpportunities, getDiscoveryActionsForVault,
+  getOpportunities, getDiscoveryActionsForVault, getRecentPrices,
   resetForTests, resolveDbPath,
 };

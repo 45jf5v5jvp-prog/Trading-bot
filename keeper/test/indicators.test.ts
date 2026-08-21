@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { toCandles } from "../src/candles.js";
-import { rsi, macd, bollinger, snapshot, liquidityDropIsSuspicious } from "../src/indicators.js";
+import { rsi, macd, bollinger, atr, volumeConfirmation, snapshot, liquidityDropIsSuspicious } from "../src/indicators.js";
 
 test("toCandles buckets ticks by interval and tracks high/low/open/close", () => {
   const rows = [
-    { ts: 0, price: 10, liq: 100 },
-    { ts: 30, price: 12, liq: 110 },
-    { ts: 61, price: 9, liq: 90 },   // next bucket (bucketSeconds=60)
-    { ts: 90, price: 11, liq: 95 },
+    { ts: 0, price: 10, liq: 100, vol: 5 },
+    { ts: 30, price: 12, liq: 110, vol: 7 },
+    { ts: 61, price: 9, liq: 90, vol: 3 },   // next bucket (bucketSeconds=60)
+    { ts: 90, price: 11, liq: 95, vol: 4 },
   ];
   const candles = toCandles(rows, 60);
   assert.equal(candles.length, 2);
@@ -18,6 +18,23 @@ test("toCandles buckets ticks by interval and tracks high/low/open/close", () =>
   assert.equal(candles[0]!.close, 12);
   assert.equal(candles[1]!.open, 9);
   assert.equal(candles[1]!.close, 11);
+});
+
+test("toCandles sums vol across every tick in a bucket, not just the last one", () => {
+  const rows = [
+    { ts: 0, price: 10, liq: 100, vol: 5 },
+    { ts: 30, price: 12, liq: 110, vol: 7 },
+    { ts: 61, price: 9, liq: 90, vol: 3 }, // next bucket
+  ];
+  const candles = toCandles(rows, 60);
+  assert.equal(candles[0]!.vol, 12); // 5 + 7
+  assert.equal(candles[1]!.vol, 3);
+});
+
+test("toCandles treats a missing vol as 0 rather than throwing", () => {
+  const rows = [{ ts: 0, price: 10, liq: 100 }] as any;
+  const candles = toCandles(rows, 60);
+  assert.equal(candles[0]!.vol, 0);
 });
 
 test("toCandles returns [] for no rows", () => {
@@ -89,17 +106,78 @@ test("bollinger percentB approaches 1 when price pushes to a new high", () => {
   assert.ok(b!.percentB > 0.9);
 });
 
+test("atr is null with too little history", () => {
+  const candles = Array.from({ length: 5 }, (_, i) => ({ ts: i * 60, open: i, high: i + 1, low: i, close: i, liq: 1000, vol: 0 }));
+  assert.equal(atr(candles, 14), null);
+});
+
+test("atr is 0 on a perfectly flat series (no range at all)", () => {
+  const candles = Array.from({ length: 20 }, (_, i) => ({ ts: i * 60, open: 10, high: 10, low: 10, close: 10, liq: 1000, vol: 0 }));
+  assert.equal(atr(candles, 14), 0);
+});
+
+test("atr reports a positive value that scales with a wider daily range", () => {
+  const tight = Array.from({ length: 20 }, (_, i) => ({ ts: i * 60, open: 10, high: 10.1, low: 9.9, close: 10, liq: 1000, vol: 0 }));
+  const wide = Array.from({ length: 20 }, (_, i) => ({ ts: i * 60, open: 10, high: 12, low: 8, close: 10, liq: 1000, vol: 0 }));
+  const tightAtr = atr(tight, 14);
+  const wideAtr = atr(wide, 14);
+  assert.ok(tightAtr !== null && wideAtr !== null);
+  assert.ok(wideAtr! > tightAtr!);
+});
+
+test("volumeConfirmation is null with too few candles to split into recent/baseline", () => {
+  const candles = Array.from({ length: 10 }, (_, i) => ({ ts: i * 60, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 5 }));
+  assert.equal(volumeConfirmation(candles, 8), null);
+});
+
+test("volumeConfirmation ratio is above 1 when recent volume is running hotter than baseline", () => {
+  const baseline = Array.from({ length: 16 }, (_, i) => ({ ts: i * 60, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 10 }));
+  const recent = Array.from({ length: 8 }, (_, i) => ({ ts: (16 + i) * 60, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 40 }));
+  const v = volumeConfirmation([...baseline, ...recent], 8);
+  assert.ok(v);
+  assert.equal(v!.baselineAvgVolPls, 10);
+  assert.equal(v!.recentAvgVolPls, 40);
+  assert.equal(v!.ratio, 4);
+});
+
+test("volumeConfirmation treats a zero baseline with real recent volume as unbounded confirmation, not a crash", () => {
+  const baseline = Array.from({ length: 16 }, (_, i) => ({ ts: i * 60, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 0 }));
+  const recent = Array.from({ length: 8 }, (_, i) => ({ ts: (16 + i) * 60, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 5 }));
+  const v = volumeConfirmation([...baseline, ...recent], 8);
+  assert.ok(v);
+  assert.equal(v!.ratio, Infinity);
+});
+
+test("volumeConfirmation is neutral (ratio 1) when neither baseline nor recent has any volume on file", () => {
+  const candles = Array.from({ length: 24 }, (_, i) => ({ ts: i * 60, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 0 }));
+  const v = volumeConfirmation(candles, 8);
+  assert.ok(v);
+  assert.equal(v!.ratio, 1);
+});
+
 test("snapshot returns null on an empty candle set", () => {
   assert.equal(snapshot([]), null);
 });
 
-test("snapshot combines rsi/macd/bollinger off the same closes", () => {
-  const candles = Array.from({ length: 40 }, (_, i) => ({ ts: i * 60, open: i, high: i, low: i, close: i, liq: 1000 }));
+test("snapshot combines rsi/macd/bollinger/atr/volRatio off the same candles", () => {
+  const candles = Array.from({ length: 40 }, (_, i) => ({ ts: i * 60, open: i, high: i + 0.5, low: i - 0.5, close: i, liq: 1000, vol: 10 }));
   const s = snapshot(candles);
   assert.ok(s);
   assert.equal(s!.close, 39);
   assert.ok(s!.rsi !== null);
   assert.ok(s!.bollinger !== null);
+  assert.ok(s!.atrPct !== null);
+  assert.ok(s!.volRatio !== null);
+});
+
+test("snapshot's atrPct is expressed as a % of the latest close, not a raw price unit", () => {
+  // A constant 1-unit high-low spread every candle gives ATR = 1 exactly -
+  // on a close of 100 that's 1% of price.
+  const candles = Array.from({ length: 20 }, (_, i) => ({ ts: i * 60, open: 100, high: 100.5, low: 99.5, close: 100, liq: 1000, vol: 0 }));
+  const s = snapshot(candles);
+  assert.ok(s);
+  assert.ok(s!.atrPct !== null);
+  assert.ok(Math.abs(s!.atrPct! - 1) < 0.01);
 });
 
 test("liquidityDropIsSuspicious is false for a price drop with no liquidity change (rise, not a dip)", () => {

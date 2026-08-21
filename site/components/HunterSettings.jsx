@@ -85,6 +85,21 @@ export default function HunterSettings({ hunter, onChange }) {
         <input {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
       </div>
 
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
+        <input
+          type="checkbox" checked={hunter.requireVolumeConfirmation}
+          onChange={(e) => onChange({ ...hunter, requireVolumeConfirmation: e.target.checked })}
+        />
+        Require volume confirmation: recent trading at least
+        <input {...num("minVolumeRatio")} min="0" step="0.1" style={{ width: 70 }} disabled={!hunter.requireVolumeConfirmation} />
+        x this token's own baseline
+      </label>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        Unlike the triggers above, this isn't an alternative way to qualify - it's an extra
+        requirement on top of them. An oversold reading on a token nobody is actually trading isn't
+        much of a signal; this makes sure real volume is behind the move before trusting it.
+      </p>
+
       <div className="sub-label">AI judgment gate</div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
@@ -137,7 +152,7 @@ export default function HunterSettings({ hunter, onChange }) {
           </>
         )}
         <label>Stop loss %{hunter.exitMode === "full" ? " (mandatory floor)" : ""}</label>
-        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} />
+        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} disabled={hunter.useAtrStop} />
         {hunter.exitMode === "limited" && (
           <>
             <label>Time exit (min)</label>
@@ -145,6 +160,18 @@ export default function HunterSettings({ hunter, onChange }) {
           </>
         )}
       </div>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
+        <input type="checkbox" checked={hunter.useAtrStop} onChange={(e) => onChange({ ...hunter, useAtrStop: e.target.checked })} />
+        Size the stop off this token's own volatility (ATR) instead of a flat %, at
+        <input {...num("atrStopMultiplier")} min="0" step="0.5" style={{ width: 60 }} disabled={!hunter.useAtrStop} />
+        x ATR
+      </label>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        A volatile token gets a wider stop, a calm one a tighter one, instead of every token using
+        the same fixed percentage regardless of how much it normally moves. Falls back to the flat
+        stop loss % above if ATR wasn't available yet when the trade opened.
+      </p>
 
       {hunter.exitMode === "limited" && (
         <div className="field-inline">

@@ -60,11 +60,16 @@ setup.exec(`
     sellable INTEGER NOT NULL, verdict TEXT NOT NULL, reason TEXT, narrative TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'discovery', rsi REAL, macd_histogram REAL, bollinger_percent_b REAL,
     ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT, ai_suggested_amount_pls REAL,
-    price_at_detection REAL, stale INTEGER NOT NULL DEFAULT 0, stale_reason TEXT
+    price_at_detection REAL, stale INTEGER NOT NULL DEFAULT 0, stale_reason TEXT,
+    atr_pct REAL, vol_ratio REAL
   );
   CREATE TABLE discovery_actions (
     vault TEXT NOT NULL, opportunity_id INTEGER NOT NULL, ts INTEGER NOT NULL,
     action TEXT NOT NULL, tx_hash TEXT, PRIMARY KEY (vault, opportunity_id)
+  );
+  CREATE TABLE prices (
+    token TEXT NOT NULL, ts INTEGER NOT NULL, price REAL NOT NULL, liq REAL NOT NULL, vol REAL NOT NULL,
+    PRIMARY KEY (token, ts)
   );
 `);
 const OPP_TOKEN = "0x" + "f".repeat(40);
@@ -90,6 +95,18 @@ setup.prepare(`INSERT INTO opportunities
   (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,stale,stale_reason)
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
   .run(STALE_OPP_TOKEN, 1900, 25, 18, 4000000, 100, 100, 100, 1, 1, "pass", "clear", "moved up 25%", 1, "Notified 130 minutes ago - too much time has passed to trust the original signal.");
+
+// A Hunter Bot row carrying ATR/volume-ratio, alongside its RSI/MACD/Bollinger.
+const HUNTER_OPP_TOKEN = "0x" + "7".repeat(40);
+setup.prepare(`INSERT INTO opportunities
+  (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,atr_pct,vol_ratio)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(HUNTER_OPP_TOKEN, 1950, -15, 5, 2500000, 100, 100, 100, 1, 1, "pass", "clear", "RSI oversold", "hunter", 22, 14.5, 2.3);
+
+const PRICE_TOKEN = "0x" + "6".repeat(40);
+setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 1000, 1.0, 500000, 10);
+setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 2000, 1.2, 520000, 15);
+setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 500, 0.9, 480000, 8); // before the window
 
 setup.close();
 
@@ -179,12 +196,32 @@ test("getOpportunities returns Discovery Bot findings newest first, passed scree
   delete require.cache[require.resolve("../lib/keeperDb")];
   const { getOpportunities } = require("../lib/keeperDb");
   const rows = getOpportunities();
-  assert.equal(rows.length, 2); // the passed one, plus the passed-but-now-stale one - not the failed one
+  assert.equal(rows.length, 3); // the passed one, the passed-but-now-stale one, and the hunter one - not the failed one
   assert.equal(rows[0].token, OPP_TOKEN);
   assert.equal(rows[0].verdict, "pass");
   assert.equal(rows[0].narrative, "moved up 30%");
   assert.equal(rows[0].stale, 0);
   assert.ok(!rows.some((r) => r.token === FAILED_OPP_TOKEN), "a failed screen must never reach the site");
+});
+
+test("getOpportunities carries atr_pct and vol_ratio through for a Hunter Bot row", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getOpportunities } = require("../lib/keeperDb");
+  const row = getOpportunities().find((r) => r.token === HUNTER_OPP_TOKEN);
+  assert.ok(row);
+  assert.equal(row.source, "hunter");
+  assert.equal(row.atr_pct, 14.5);
+  assert.equal(row.vol_ratio, 2.3);
+});
+
+test("getOpportunities leaves atr_pct/vol_ratio null for a discovery row that never had them", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getOpportunities } = require("../lib/keeperDb");
+  const row = getOpportunities().find((r) => r.token === OPP_TOKEN);
+  assert.equal(row.atr_pct, null);
+  assert.equal(row.vol_ratio, null);
 });
 
 test("getOpportunities still returns a stale opportunity - staleness doesn't hide it, verdict does", () => {
@@ -236,4 +273,30 @@ test("the connection is opened read-only - a write attempt must fail", () => {
     "opening with readonly:true must make writes impossible, protecting the keeper's live data",
   );
   readonlyDb.close();
+});
+
+test("getRecentPrices returns ticks since the given timestamp, oldest first, excluding earlier ones", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getRecentPrices } = require("../lib/keeperDb");
+  const rows = getRecentPrices(PRICE_TOKEN, 600);
+  assert.equal(rows.length, 2); // the tick at ts=500 is before the window
+  assert.equal(rows[0].ts, 1000);
+  assert.equal(rows[0].price, 1.0);
+  assert.equal(rows[0].vol, 10);
+  assert.equal(rows[1].ts, 2000);
+});
+
+test("getRecentPrices returns [] for a token with no price history on file", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getRecentPrices } = require("../lib/keeperDb");
+  assert.deepEqual(getRecentPrices("0x" + "5".repeat(40), 0), []);
+});
+
+test("getRecentPrices returns [] when the keeper.db file doesn't exist yet", () => {
+  process.env.KEEPER_DB_PATH = path.join(__dirname, "does-not-exist.db");
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getRecentPrices } = require("../lib/keeperDb");
+  assert.deepEqual(getRecentPrices(PRICE_TOKEN, 0), []);
 });

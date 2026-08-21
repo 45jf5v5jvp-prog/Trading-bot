@@ -39,6 +39,8 @@ export interface TokenProfile {
   macdHistogram: number | null;
   macdBullishCross: boolean | null;
   bollingerPercentB: number | null;
+  atrPct: number | null;   // ATR(14) as a % of price - how much this token normally moves
+  volRatio: number | null; // recent candle volume vs. this token's own baseline; >1 means hotter than usual
   narrative?: string; // e.g. discovery.ts's buildNarrative, if this came from there
 }
 
@@ -70,6 +72,9 @@ function describeProfile(p: TokenProfile): string {
   if (p.macdHistogram !== null)
     lines.push(`MACD histogram: ${p.macdHistogram.toFixed(4)}${p.macdBullishCross ? " (bullish cross just occurred)" : ""}`);
   if (p.bollingerPercentB !== null) lines.push(`Bollinger %B: ${p.bollingerPercentB.toFixed(2)} (0 = lower band, 1 = upper band)`);
+  if (p.atrPct != null) lines.push(`ATR(14): ${p.atrPct.toFixed(1)}% of price (how much this token normally moves)`);
+  if (p.volRatio != null && Number.isFinite(p.volRatio))
+    lines.push(`Recent volume vs. this token's own baseline: ${p.volRatio.toFixed(1)}x`);
   if (p.narrative) lines.push(`Detector narrative: ${p.narrative}`);
   return lines.join("\n");
 }
@@ -193,6 +198,8 @@ export interface OpenPositionContext {
   macdBullishCross: boolean | null;
   macdBearishCross: boolean | null;
   bollingerPercentB: number | null;
+  atrPct: number | null;
+  volRatio: number | null;
 }
 
 export interface ExitVerdict {
@@ -227,6 +234,8 @@ function describePosition(p: OpenPositionContext): string {
     lines.push(`MACD histogram: ${p.macdHistogram.toFixed(4)}${cross}`);
   }
   if (p.bollingerPercentB !== null) lines.push(`Bollinger %B: ${p.bollingerPercentB.toFixed(2)} (0 = lower band, 1 = upper band)`);
+  if (p.atrPct != null) lines.push(`ATR(14): ${p.atrPct.toFixed(1)}% of price`);
+  if (p.volRatio != null && Number.isFinite(p.volRatio)) lines.push(`Recent volume vs. baseline: ${p.volRatio.toFixed(1)}x`);
   return lines.join("\n");
 }
 

@@ -6,11 +6,19 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
-  // The prices table has no volume column - PulseX gives no cheap way to read
-  // historical swap volume from reserves alone. Liquidity at candle close
-  // stands in for it: a real breakout should show liquidity moving too, the
-  // same signal discovery.ts already leans on for the same reason.
+  // Liquidity at candle close - a real breakout should show liquidity
+  // moving too, the same signal discovery.ts already leans on for the same
+  // reason.
   liq: number;
+  // Summed WPLS-denominated Swap volume across every tick in the bucket
+  // (see prices.ts's scanSwapVolume) - unlike liq/close this is a SUM, not
+  // the last tick's value, since volume is a flow over the interval, not a
+  // point-in-time reading. 0 for any bucket the volume scanner hasn't
+  // covered yet (an old price row from before it existed, or a token whose
+  // pair the scanner hasn't matched a Swap event for), not a missing value -
+  // indicators.ts's volumeConfirmation() treats a real zero and "no data
+  // yet" identically, both read as "no confirming volume."
+  vol: number;
 }
 
 /**
@@ -30,14 +38,15 @@ export function toCandles(rows: PricePoint[], bucketSeconds: number): Candle[] {
   }
   return [...buckets.keys()].sort((a, b) => a - b).map((k) => {
     const ticks = buckets.get(k)!;
-    let high = -Infinity, low = Infinity;
+    let high = -Infinity, low = Infinity, vol = 0;
     for (const t of ticks) {
       if (t.price > high) high = t.price;
       if (t.price < low) low = t.price;
+      vol += t.vol ?? 0;
     }
     return {
       ts: k, open: ticks[0]!.price, high, low,
-      close: ticks[ticks.length - 1]!.price, liq: ticks[ticks.length - 1]!.liq,
+      close: ticks[ticks.length - 1]!.price, liq: ticks[ticks.length - 1]!.liq, vol,
     };
   });
 }

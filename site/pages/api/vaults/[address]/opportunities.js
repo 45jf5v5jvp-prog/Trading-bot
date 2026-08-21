@@ -48,6 +48,8 @@ export default async function handler(req, res) {
     aiSuggestedAmountPls: o.ai_suggested_amount_pls ?? null,
     stale: Boolean(o.stale),
     staleReason: o.stale_reason ?? null,
+    atrPct: o.atr_pct ?? null,
+    volRatio: o.vol_ratio ?? null,
     action: actions[o.id]?.action ?? null,
     txHash: actions[o.id]?.txHash ?? null,
   }));

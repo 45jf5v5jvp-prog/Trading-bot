@@ -44,15 +44,33 @@ function realizedPnlPct(p) {
   return (p.proceeds_pls / p.spent_pls - 1) * 100;
 }
 
+/** The actual money made or lost, in PLS - a percentage alone doesn't answer
+ * "did I make money," especially next to numbers big enough to make a % look
+ * dramatic either way. This is the number that actually answers it. */
+function realizedPnlPls(p) {
+  if (p.proceeds_pls === null || p.proceeds_pls === undefined) return null;
+  return p.proceeds_pls - p.spent_pls;
+}
+
 function ClosedPositionRow({ p }) {
-  const pnl = realizedPnlPct(p);
+  const pnlPls = realizedPnlPls(p);
+  const pnlPct = realizedPnlPct(p);
+  const unit = CHAIN.nativeSymbol;
   return (
     <div className="closed-row" title={p.close_reason || ""}>
-      <span className="closed-bot">{p.bot}</span>
-      <span className="closed-token">{short(p.token)}</span>
-      <span className="closed-date">{fmtTsShort(p.closed_at)}</span>
-      <span className={`closed-pnl ${pnlClass(pnl)}`}>{pnl === null ? "-" : fmtPnl(pnl)}</span>
-      <span className="closed-reason">{shortReason(p.close_reason, p.status)}</span>
+      <div className="closed-row-top">
+        <span className="closed-bot">{p.bot}</span>
+        <span className="closed-token">{short(p.token)}</span>
+        <span className="closed-date">{fmtTsShort(p.closed_at)}</span>
+      </div>
+      <div className="closed-row-bottom">
+        <span className={`closed-pnl ${pnlClass(pnlPct)}`}>
+          {pnlPls === null
+            ? "Never sold - tokens are still in the vault"
+            : `${fmtSignedAmount(pnlPls)} ${unit}${pnlPct !== null ? ` (${fmtPnl(pnlPct)})` : ""}`}
+        </span>
+        <span className="closed-reason">{shortReason(p.close_reason, p.status)}</span>
+      </div>
     </div>
   );
 }

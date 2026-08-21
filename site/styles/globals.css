@@ -388,18 +388,26 @@ td { color: var(--text); }
   border-top-color: var(--bad); color: var(--bad);
 }
 
+/* Two lines per closed position: who/what/when on top, then the actual
+   money made or lost right underneath - a percentage alone doesn't answer
+   "did this make money," especially once a number gets big enough to look
+   dramatic either way. */
 .closed-list { font-size: 13px; }
 .closed-row {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 7px 0; border-bottom: 1px solid var(--edge);
-  white-space: nowrap; overflow: hidden;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 9px 0; border-bottom: 1px solid var(--edge);
 }
 .closed-row:last-child { border-bottom: none; }
+.closed-row-top {
+  display: flex; align-items: baseline; gap: 10px;
+  white-space: nowrap; overflow: hidden;
+}
 .closed-bot { color: var(--ash); font-size: 11px; width: 48px; flex-shrink: 0; }
 .closed-token { flex-shrink: 0; }
 .closed-date { color: var(--ash); flex-shrink: 0; }
-.closed-pnl { font-weight: 600; flex-shrink: 0; min-width: 52px; text-align: right; }
+.closed-row-bottom { display: flex; align-items: baseline; gap: 10px; }
+.closed-pnl { font-weight: 600; flex-shrink: 0; }
 .closed-reason {
   color: var(--ash); flex: 1; min-width: 0; text-align: right;
-  overflow: hidden; text-overflow: ellipsis;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

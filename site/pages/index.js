@@ -6,7 +6,7 @@ import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
 import { loadHunterIQ } from "../lib/loadHunterIQ";
 import { closePosition } from "../lib/closePosition";
-import { submitHunterFeedback } from "../lib/hunterFeedback";
+import { loadHunterChat, sendHunterChatMessage } from "../lib/talkToHunter";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { APP_VERSION } from "../lib/version";
 import { numberFieldProps } from "../lib/numberField";
@@ -23,7 +23,6 @@ import BotCard from "../components/BotCard";
 import InfoButton from "../components/InfoButton";
 import { TradingBotsIcon, LaunchIcon, SniperIcon, HunterIcon, LimitOrderIcon } from "../components/BotIcons";
 import HunterIQPanel from "../components/HunterIQPanel";
-import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
 import PnlSnapshot from "../components/PnlSnapshot";
 import Sun from "../components/Sun";
@@ -84,6 +83,7 @@ export default function Dashboard() {
   const [history, setHistory] = useState(null);
   const [portfolio, setPortfolio] = useState(null);
   const [hunterIQ, setHunterIQ] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
@@ -205,6 +205,18 @@ export default function Dashboard() {
     if (!vaultAddress) return;
     let cancelled = false;
     const refresh = () => loadHunterIQ(vaultAddress).then((h) => { if (!cancelled) setHunterIQ(h); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [vaultAddress]);
+
+  // Same polling idea for the Talk to Your Hunter thread - so a reply that
+  // came in async (or a lesson the bot wrote to itself) shows up without a
+  // manual refresh, same as Hunter IQ's trade/lessons feed above.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const refresh = () => loadHunterChat(vaultAddress).then((c) => { if (!cancelled) setChatMessages(c.messages); }).catch(() => {});
     refresh();
     const id = setInterval(refresh, 20_000);
     return () => { cancelled = true; clearInterval(id); };
@@ -419,11 +431,17 @@ export default function Dashboard() {
     }
   }
 
-  /** Signs and submits Hunter IQ feedback, then refreshes the panel so the
-   * new lesson (once the keeper's ingested it, usually within a tick) shows
-   * up without waiting for the next 20s poll. */
-  async function handleSubmitFeedback(text) {
-    await submitHunterFeedback(getProvider, vaultAddress, text);
+  /** Signs and sends one chat message to this vault's Hunter Bot, appends the
+   * owner's own message immediately (no round-trip needed to show it), then
+   * the live reply once it comes back. The same message is also queued as
+   * Hunter IQ feedback server-side (see hunter-chat.js), so it still becomes
+   * a lesson even though the reply itself is generated synchronously here. */
+  async function handleSendChat(text) {
+    setChatMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: "owner", text }]);
+    const { reply } = await sendHunterChatMessage(getProvider, vaultAddress, text);
+    loadHunterChat(vaultAddress).then((c) => setChatMessages(c.messages)).catch(() => {
+      if (reply) setChatMessages((prev) => [...prev, { id: `local-reply-${Date.now()}`, role: "hunter", text: reply }]);
+    });
     loadHunterIQ(vaultAddress).then(setHunterIQ).catch(() => {});
   }
 
@@ -723,11 +741,7 @@ export default function Dashboard() {
                 </BotCard>
 
                 <div className="panel">
-                  <HunterIQPanel hunterIQ={hunterIQ} onSubmitFeedback={handleSubmitFeedback} />
-                </div>
-
-                <div className="panel">
-                  <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
+                  <HunterIQPanel hunterIQ={hunterIQ} chatMessages={chatMessages} onSendChat={handleSendChat} />
                 </div>
 
                 <div className="panel">

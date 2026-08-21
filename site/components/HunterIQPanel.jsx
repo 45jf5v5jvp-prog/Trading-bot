@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CHAIN, EXPLORER_URL } from "../lib/contracts";
 
 function short(addr) {
@@ -69,42 +69,69 @@ function TradeRow({ t }) {
   );
 }
 
+function ChatBubble({ m }) {
+  const mine = m.role === "owner";
+  return (
+    <div className={`chat-msg ${mine ? "chat-msg-owner" : "chat-msg-hunter"}`}>
+      <div className="chat-bubble">{m.text}</div>
+    </div>
+  );
+}
+
 /**
  * What replaces the Opportunities panel for Hunter Bot: a justified trade
  * feed (what it bought and why, pulled from the same narrative already
  * written at buy time - see keeper/src/hunter.ts's buildNarrative) instead
- * of a queue of things waiting on a click, plus Hunter IQ - the lessons this
- * vault's bot has picked up, from the owner directly or from reflecting on
- * its own past trades (see hunter.ts's reflectOnClosedLosses/
+ * of a queue of things waiting on a click, plus Talk to Your Hunter - a real
+ * back-and-forth with this vault's own bot (see lib/hunterChat.js), and
+ * Hunter IQ - the lessons it's picked up, from the owner directly or from
+ * reflecting on its own past trades (see hunter.ts's reflectOnClosedLosses/
  * reflectOnMissedOpportunities). Once a vault has any lesson at all, future
  * AI reviews for THIS vault specifically weigh that history - see ai.ts's
  * assess() guidance parameter - which is what makes one vault's Hunter
- * actually diverge from another's over time.
+ * actually diverge from another's over time. A chat message is ALSO a
+ * lesson - see hunter-chat.js - so talking to it and coaching it are the
+ * same action, not two separate features.
  */
-export default function HunterIQPanel({ hunterIQ, onSubmitFeedback }) {
+export default function HunterIQPanel({ hunterIQ, chatMessages, onSendChat }) {
   const [text, setText] = useState("");
-  const [status, setStatus] = useState("idle"); // idle | sending | sent | error
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [showAllTrades, setShowAllTrades] = useState(false);
   const [showAllLessons, setShowAllLessons] = useState(false);
+  const threadRef = useRef(null);
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatMessages, sending]);
 
   if (!hunterIQ) return null;
   const trades = hunterIQ.trades || [];
   const lessons = hunterIQ.lessons || [];
+  const messages = chatMessages || [];
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!text.trim() || status === "sending") return;
-    setStatus("sending");
+    if (!text.trim() || sending) return;
+    setSending(true);
     setError("");
+    const sent = text.trim();
+    setText("");
     try {
-      await onSubmitFeedback(text.trim());
-      setText("");
-      setStatus("sent");
-      setTimeout(() => setStatus("idle"), 2500);
+      await onSendChat(sent);
     } catch (err) {
-      setStatus("error");
-      setError(err.message || "Could not send feedback");
+      setError(err.message || "Could not send message");
+      setText(sent);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
     }
   }
 
@@ -112,29 +139,41 @@ export default function HunterIQPanel({ hunterIQ, onSubmitFeedback }) {
     <div className="hunter-iq">
       <div className="section-label">Hunter IQ</div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        Every trade below is justified in plain English. Tell it what to do differently and it
-        weighs that on every future decision for this vault specifically - your Hunter learns on
-        its own too, from its own wins, losses, and misses.
+        Every trade below is justified in plain English. Talk to it below about your strategy, or
+        paste a token address to ask what it thinks - it weighs everything you tell it on every
+        future decision for this vault specifically, and it learns on its own too, from its own
+        wins, losses, and misses.
       </p>
 
-      <div className="sub-label" style={{ marginTop: 0 }}>Hunter IQ Feedback</div>
-      <form onSubmit={handleSubmit} className="feedback-box">
+      <div className="sub-label" style={{ marginTop: 0 }}>Talk to Your Hunter</div>
+      <div className="chat-thread" ref={threadRef}>
+        {messages.length === 0 && (
+          <p className="chat-empty">
+            Say hi, ask about your strategy, or paste a token address - "is 0x... worth buying?"
+          </p>
+        )}
+        {messages.map((m) => <ChatBubble key={m.id} m={m} />)}
+        {sending && (
+          <div className="chat-msg chat-msg-hunter">
+            <div className="chat-bubble hint" style={{ fontStyle: "italic" }}>thinking...</div>
+          </div>
+        )}
+      </div>
+      <form onSubmit={handleSubmit} className="chat-input-row">
         <textarea
-          className="feedback-input"
-          placeholder="e.g. Don't buy anything with liquidity under 5,000,000 PLS, even if RSI looks great."
+          className="chat-input"
+          placeholder="Message your Hunter..."
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
           maxLength={1000}
-          rows={3}
+          rows={1}
         />
-        <div className="row-between" style={{ marginTop: 8 }}>
-          <span className="hint" style={{ margin: 0 }}>{text.length}/1000</span>
-          <button type="submit" className="btn btn-small btn-primary" disabled={!text.trim() || status === "sending"}>
-            {status === "sending" ? "Sending..." : status === "sent" ? "Sent!" : "Send feedback"}
-          </button>
-        </div>
-        {status === "error" && <p className="error-msg" style={{ marginTop: 8 }}>{error}</p>}
+        <button type="submit" className="btn btn-small btn-primary" disabled={!text.trim() || sending}>
+          Send
+        </button>
       </form>
+      {error && <p className="error-msg" style={{ marginTop: 6 }}>{error}</p>}
 
       {lessons.length > 0 && (
         <>

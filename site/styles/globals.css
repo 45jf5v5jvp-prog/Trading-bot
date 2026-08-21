@@ -443,24 +443,52 @@ input::placeholder { color: #6b6c76; }
   margin-top: 5px;
 }
 
-/* Hunter IQ - see components/HunterIQPanel.jsx. */
-.feedback-box {
+/* Talk to Your Hunter - see components/HunterIQPanel.jsx. */
+.chat-thread {
   background: var(--chip);
   border: 1px solid var(--edge);
   border-radius: 12px;
-  padding: 14px;
+  padding: 10px 12px;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.feedback-input {
-  width: 100%;
-  background: transparent;
-  border: none;
+.chat-msg { display: flex; }
+.chat-msg-owner { justify-content: flex-end; }
+.chat-msg-hunter { justify-content: flex-start; }
+.chat-bubble {
+  max-width: 78%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.chat-msg-owner .chat-bubble { background: var(--good-soft); color: var(--text); border-bottom-right-radius: 4px; }
+.chat-msg-hunter .chat-bubble { background: var(--panel); border: 1px solid var(--edge); color: var(--text); border-bottom-left-radius: 4px; }
+.chat-empty { color: var(--ash); font-size: 13px; padding: 6px 2px; }
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: flex-end;
+}
+.chat-input {
+  flex: 1;
+  background: var(--chip);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  padding: 10px 12px;
   color: var(--text);
   font: inherit;
-  resize: vertical;
-  min-height: 60px;
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
 }
-.feedback-input:focus { outline: none; }
-.feedback-input::placeholder { color: var(--ash); }
+.chat-input:focus { outline: none; border-color: var(--good); }
+.chat-input::placeholder { color: var(--ash); }
 
 .lesson-row { padding: 8px 0; border-bottom: 1px solid var(--edge); }
 .lesson-row:last-child { border-bottom: none; }

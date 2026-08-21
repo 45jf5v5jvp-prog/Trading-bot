@@ -7,6 +7,18 @@ Versioning: two numbers, not three - 3.1, 3.2, 3.3 for every normal round of
 changes, a whole new major number only for something on the scale of v3.0's
 redesign.
 
+## v3.2 - Layout tweaks, AI-declined transparency
+
+- Limit Order Bot moved up next to the other bot cards, instead of sitting
+  down by Opportunities/Ask Icaria.
+- Revoke Executor moved to the very bottom next to Emergency Withdraw - the
+  vault card keeps Refresh/Pause Bot and their own explanation.
+- Opportunities now has a tucked-away "See AI-declined" link: tokens that
+  passed the mechanical honeypot/tax/LP-lock screen but the AI judged a bad
+  buy don't clutter the main feed, but you can still see them (and read
+  exactly why the AI said no) to confirm the bots are actually running even
+  on a quiet day.
+
 ## v3.1 - Visual polish, bot safeguards, referral protections
 
 - Dashboard now actually looks like the Icaria Bot Deck design: gradient hero

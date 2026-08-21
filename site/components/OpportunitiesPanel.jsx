@@ -94,6 +94,10 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
   const busy = buyState === "pending";
   const bought = o.action === "bought" || buyState === "requested";
   const isHunter = o.source === "hunter";
+  // Passed the mechanical honeypot/tax/LP-lock/renounce screen but the AI
+  // judged it a bad buy anyway - shown for transparency (see
+  // OpportunitiesPanel's "AI-declined" screen) but never buyable from here.
+  const aiDeclined = o.aiConfidence != null && o.aiRecommend === false;
   const [expanded, setExpanded] = useState(false);
   // Pre-filled with the AI's own sizing when there is one (already shown in
   // the narrative below), so accepting its suggestion is a single click -
@@ -130,7 +134,11 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
           >
             {tech && <span style={{ color: tech.color, fontWeight: 700 }}>{tech.label} — </span>}
             {firstSentence(o.narrative)}
-            {o.aiConfidence && <span style={{ color: CONFIDENCE_COLOR[o.aiConfidence] }}> — AI would buy</span>}
+            {o.aiConfidence && (
+              <span style={{ color: aiDeclined ? "var(--red, #c0392b)" : CONFIDENCE_COLOR[o.aiConfidence] }}>
+                {" "}— {aiDeclined ? "AI declined" : "AI would buy"}
+              </span>
+            )}
             {o.stale && !bought && <span style={{ color: "var(--red, #c0392b)" }}> — Expired</span>}
           </p>
         )}
@@ -143,11 +151,12 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
               </p>
             )}
             {o.aiConfidence && (
-              <p className="hint" style={{ margin: "4px 0 0", color: CONFIDENCE_COLOR[o.aiConfidence] }}>
-                AI: would buy
-                {o.aiSuggestedAmountPls
+              <p className="hint" style={{ margin: "4px 0 0", color: aiDeclined ? "var(--red, #c0392b)" : CONFIDENCE_COLOR[o.aiConfidence] }}>
+                AI: {aiDeclined ? "declined" : "would buy"}
+                {!aiDeclined && o.aiSuggestedAmountPls
                   ? ` — sizing this at ${Math.round(o.aiSuggestedAmountPls).toLocaleString()} ${CHAIN.nativeSymbol}`
                   : ""}
+                {o.aiReasoning ? ` — ${o.aiReasoning}` : ""}
               </p>
             )}
             {o.stale && !bought && (
@@ -158,25 +167,31 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
           </div>
         )}
       </div>
-      {passed && !bought && !o.stale && (
-        <span className="row" style={{ gap: 6, alignItems: "center" }}>
-          <NumberField value={amount} onChange={setAmount} disabled={busy} style={{ width: 90 }} />
-          <span style={{ color: "var(--ash)", fontSize: 12 }}>{CHAIN.nativeSymbol}</span>
-          <button
-            type="button"
-            className="btn btn-small"
-            onClick={() => onBuy(o.id, Number(amount))}
-            disabled={busy || !amountValid}
-          >
-            {busy ? "..." : "Buy Now"}
-          </button>
-        </span>
-      )}
-      {passed && !bought && o.stale && (
-        <button type="button" className="btn btn-small" disabled title={o.staleReason || ""}>Expired</button>
-      )}
-      {passed && bought && (
-        <button type="button" className="btn btn-small" disabled>Bought</button>
+      {aiDeclined ? (
+        <span className="hint" style={{ color: "var(--red, #c0392b)", flexShrink: 0 }}>AI declined</span>
+      ) : (
+        <>
+          {passed && !bought && !o.stale && (
+            <span className="row" style={{ gap: 6, alignItems: "center" }}>
+              <NumberField value={amount} onChange={setAmount} disabled={busy} style={{ width: 90 }} />
+              <span style={{ color: "var(--ash)", fontSize: 12 }}>{CHAIN.nativeSymbol}</span>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => onBuy(o.id, Number(amount))}
+                disabled={busy || !amountValid}
+              >
+                {busy ? "..." : "Buy Now"}
+              </button>
+            </span>
+          )}
+          {passed && !bought && o.stale && (
+            <button type="button" className="btn btn-small" disabled title={o.staleReason || ""}>Expired</button>
+          )}
+          {passed && bought && (
+            <button type="button" className="btn btn-small" disabled>Bought</button>
+          )}
+        </>
       )}
     </div>
   );
@@ -197,13 +212,16 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
  */
 export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, onCopyFallback }) {
   const [showOldScreen, setShowOldScreen] = useState(false);
+  const [showDeclinedScreen, setShowDeclinedScreen] = useState(false);
   // A mechanical pass (verdict === "pass", the only kind that reaches this
   // list at all) still gets an AI opinion layered on top for Hunter Bot and
   // Discovery Bot in Full AI mode. Showing every mechanically-passed token
   // including ones the AI itself flagged as bad buys made the feed read like
   // generic token info instead of a "here's what to buy" list - so anything
-  // the AI explicitly said not to buy is hidden here, not just deprioritized
-  // (and never archived either - it was never a real opportunity to miss).
+  // the AI explicitly said not to buy is hidden from the live feed, not just
+  // deprioritized. It's not thrown away either - see `declined` below - just
+  // tucked behind its own collapsed link so the main feed stays a clean "here's
+  // what to buy" list instead of getting cluttered with rejected tokens.
   // A token with no AI opinion at all (AI review off, or not yet run) still
   // shows, since "no opinion" isn't the same as "don't buy".
   const passesAiFilter = (o) => o.aiConfidence == null || o.aiRecommend;
@@ -214,6 +232,10 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
   // (or, before this, disappearing with no record at all).
   const old = opportunities?.filter((o) => passesAiFilter(o) && isDone(o)) ?? [];
   const boughtCount = old.filter((o) => o.action === "bought").length;
+  // Passed the mechanical screen but the AI said no - proof the bots are
+  // actually running and evaluating things even on a day with zero buys,
+  // without cluttering the main feed with tokens nobody should buy.
+  const declined = opportunities?.filter((o) => o.aiConfidence != null && !o.aiRecommend) ?? [];
 
   return (
     <div>
@@ -223,7 +245,10 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
           A token one of your bots found and screened for honeypot, tax, and LP-lock risk. Showing
           up here means it passed that screen - it doesn't mean it was bought automatically, unless
           that bot's own auto-buy mode is turned on. Otherwise it just waits here for you to Buy
-          Now, or moves to Old Opportunities if nobody acts on it in time.
+          Now, or moves to Old Opportunities if nobody acts on it in time. A token that passed the
+          screen but the AI judged a bad buy never shows here at all - it's tucked behind its own
+          "See AI-declined" link instead, so you can still confirm the bots are actually finding and
+          evaluating things without the feed filling up with tokens nobody should buy.
         </InfoButton>
       </div>
       <p className="hint" style={{ marginBottom: 14 }}>
@@ -256,6 +281,26 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
         onClose={() => setShowOldScreen(false)}
       >
         {old.map((o) => (
+          <OpportunityRow key={o.id} o={o} onBuy={onBuy} buyState={buyStates?.[o.id]} onCopyFallback={onCopyFallback} />
+        ))}
+      </DrillInScreen>
+
+      {declined.length > 0 && (
+        <button type="button" className="archive-link" onClick={() => setShowDeclinedScreen(true)}>
+          See {declined.length} AI-declined
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+      )}
+
+      <DrillInScreen
+        title="AI-Declined Opportunities"
+        subtitle={`${declined.length} passed the mechanical screen, but the AI said not to buy`}
+        open={showDeclinedScreen}
+        onClose={() => setShowDeclinedScreen(false)}
+      >
+        {declined.map((o) => (
           <OpportunityRow key={o.id} o={o} onBuy={onBuy} buyState={buyStates?.[o.id]} onCopyFallback={onCopyFallback} />
         ))}
       </DrillInScreen>

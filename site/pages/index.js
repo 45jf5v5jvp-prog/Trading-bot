@@ -366,7 +366,7 @@ export default function Dashboard() {
 
   return (
     <div className="page">
-      <div className="container">
+      <div className={dirty ? "container has-unsaved-changes" : "container"}>
         <div className="header">
           <Sun size={26} />
           <span className="brand wordmark">ICARIA</span>

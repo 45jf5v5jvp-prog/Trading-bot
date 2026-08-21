@@ -132,7 +132,7 @@ h1, h2, h3 { font-weight: 600; }
 
 .field { margin-bottom: 12px; }
 .field label { display: block; font-size: 12px; color: var(--ash); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
-.field-inline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.field-inline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .field-inline label { color: var(--ash); font-size: 13px; white-space: nowrap; }
 
 /* Noticeably lighter than --panel/--chip on purpose - an input you're
@@ -150,7 +150,16 @@ input[type="text"], input[type="number"], input, select {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-input[type="checkbox"] { accent-color: var(--amber); width: 15px; height: 15px; vertical-align: middle; }
+/* Muted by default - a checked box you already saved reads as "settled,
+   nothing to do here," not as a thing still asking for your attention. Only
+   turns amber (matching .unsaved-bar's own color) while .container carries
+   .has-unsaved-changes - i.e. there's a real unsaved edit somewhere on the
+   page right now, the same single dirty flag the Save button and the fixed
+   bottom bar already key off. Every checked box lighting up bright amber
+   ALL the time, saved or not, was the actual complaint: it constantly read
+   as "still needs review" even immediately after saving. */
+input[type="checkbox"] { accent-color: var(--ash); width: 15px; height: 15px; vertical-align: middle; }
+.has-unsaved-changes input[type="checkbox"] { accent-color: var(--amber); }
 input:focus, select:focus {
   border-color: var(--amber);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(201, 138, 62, 0.18);

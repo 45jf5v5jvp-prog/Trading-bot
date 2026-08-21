@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CHAIN } from "../lib/contracts";
+import { APP_VERSION } from "../lib/version";
 import Sun from "../components/Sun";
 
 /** One collapsed-by-default question. Click the row (or the caret) to
@@ -56,6 +57,7 @@ export default function Faq() {
           <span className="brand wordmark">ICARIA</span>
           <span className="wordmark-sub">Bots</span>
           <span className="beta-badge">BETA</span>
+          <span className="version-tag">v{APP_VERSION}</span>
         </div>
 
         <div className="panel">

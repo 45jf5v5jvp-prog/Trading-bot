@@ -8,6 +8,7 @@ import { loadOpportunities } from "../lib/loadOpportunities";
 import { closePosition } from "../lib/closePosition";
 import { buyOpportunity } from "../lib/buyOpportunity";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
+import { APP_VERSION } from "../lib/version";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
@@ -371,6 +372,7 @@ export default function Dashboard() {
           <span className="brand wordmark">ICARIA</span>
           <span className="wordmark-sub">Bots</span>
           <span className="beta-badge">BETA</span>
+          <span className="version-tag">v{APP_VERSION}</span>
           <Link href="/faq" style={{ marginLeft: "auto" }} className="btn btn-small">FAQ</Link>
         </div>
 

@@ -82,6 +82,16 @@ h1, h2, h3 { font-weight: 600; }
   text-transform: uppercase;
 }
 
+/* Bumped by hand on every round of shipped changes - see lib/version.js.
+   Quieter than .beta-badge on purpose: BETA is a state worth flagging,
+   a version number is just a reference point for "is this deployed yet." */
+.version-tag {
+  margin-left: 8px;
+  color: var(--ash);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}
+
 .section-label {
   font-family: 'Montserrat', system-ui, sans-serif;
   font-size: 11px;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserProvider, Contract, JsonRpcProvider, formatEther, parseEther, ZeroAddress } from "ethers";
-import { CHAIN, CHAIN_ID, VAULT_FACTORY, MULTI_VENUE_VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WRAPPED, ERC20_ABI, RPC_URL } from "./contracts";
+import { CHAIN, CHAIN_ID, VAULT_FACTORY, MULTI_VENUE_VAULT_FACTORY, MULTI_VENUE_V4_VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WRAPPED, ERC20_ABI, RPC_URL } from "./contracts";
 import { getWalletConnectProvider, walletConnectConfigured } from "./walletConnect";
 
 /**
@@ -84,11 +84,16 @@ export function useVault() {
     }
     setAccount(accounts[0]);
 
-    // Multi-venue checked first - if someone somehow has a vault from both
-    // factories, the more capable one is the one the dashboard shows.
+    // Most capable factory checked first - if someone somehow has a vault
+    // from more than one, the dashboard shows the most capable one.
     let addr = ZeroAddress;
     let kind = null;
-    if (MULTI_VENUE_VAULT_FACTORY) {
+    if (MULTI_VENUE_V4_VAULT_FACTORY) {
+      const v4Factory = new Contract(MULTI_VENUE_V4_VAULT_FACTORY, VAULT_FACTORY_ABI, provider);
+      addr = await v4Factory.vaultOf(accounts[0]);
+      if (addr !== ZeroAddress) kind = "multiVenueV4";
+    }
+    if (addr === ZeroAddress && MULTI_VENUE_VAULT_FACTORY) {
       const mvFactory = new Contract(MULTI_VENUE_VAULT_FACTORY, VAULT_FACTORY_ABI, provider);
       addr = await mvFactory.vaultOf(accounts[0]);
       if (addr !== ZeroAddress) kind = "multiVenue";
@@ -198,17 +203,18 @@ export function useVault() {
     setVaultInfo(null);
   }, []);
 
-  /** New vaults go to the multi-venue factory (V2 + V3) on chains where it's
-   * deployed and configured; falls back to the V2-only factory otherwise.
+  /** New vaults always come from the most capable factory deployed - V4
+   * (V2+V3+V4) where configured, else V3 (V2+V3), else the V2-only factory.
    * Either way this only ever runs for someone who doesn't have a vault yet -
-   * see the on-chain "vault exists" check in both factory contracts. */
+   * see the on-chain "vault exists" check in every factory contract. */
   const createVault = useCallback(async (onProgress) => {
     setError(null);
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
-      const useMultiVenue = Boolean(MULTI_VENUE_VAULT_FACTORY);
-      const factoryAddr = useMultiVenue ? MULTI_VENUE_VAULT_FACTORY : VAULT_FACTORY;
+      const factoryAddr = MULTI_VENUE_V4_VAULT_FACTORY || MULTI_VENUE_VAULT_FACTORY || VAULT_FACTORY;
+      const newKind = MULTI_VENUE_V4_VAULT_FACTORY ? "multiVenueV4"
+        : MULTI_VENUE_VAULT_FACTORY ? "multiVenue" : "v2";
       const factory = new Contract(factoryAddr, VAULT_FACTORY_ABI, signer);
       onProgress?.("Confirm the transaction in your wallet...");
       const tx = await factory.createVault([]);
@@ -216,7 +222,7 @@ export function useVault() {
       await waitForReceipt(tx.hash);
       const addr = await factory.vaultOf(account);
       setVaultAddress(addr);
-      setVaultKind(useMultiVenue ? "multiVenue" : "v2");
+      setVaultKind(newKind);
       await refreshVaultInfo(addr);
       return addr;
     } catch (e) {

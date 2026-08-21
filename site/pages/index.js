@@ -557,7 +557,7 @@ export default function Dashboard() {
             <div className="hero">
               <div className="hero-top">
                 <span className="hero-label">
-                  Your Vault &middot; {vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
+                  Your Vault &middot; {vaultKind === "multiVenueV4" ? "Trades on V2, V3, and V4" : vaultKind === "multiVenue" ? "Trades on V2 and V3" : "Trades on V2 only"}
                 </span>
                 <span className={vaultInfo.paused ? "status-pill is-paused" : "status-pill"}>
                   <span className={vaultInfo.paused ? "dot" : "dot pulse"} />

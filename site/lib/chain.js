@@ -47,6 +47,7 @@ const PRESETS = {
     // 2026-08-14. See DEPLOYED-ADDRESSES.md for the full history.
     vaultFactory: "0x5B5d3B68814857695F3Fedfe0543F03166Bc73e0",
     multiVenueVaultFactory: "",
+    multiVenueV4VaultFactory: "",
     // V3/V4 pricing addresses - PulseX has no V3 or V4 deployment, so these
     // stay empty like the keeper's own FACTORY_V3/POOL_MANAGER do. Empty
     // means "don't try this venue," not "broken."
@@ -83,6 +84,7 @@ const PRESETS = {
     factory: "",
     vaultFactory: "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54",
     multiVenueVaultFactory: "",
+    multiVenueV4VaultFactory: "",
     // V3/V4 pricing addresses. Same "no fabricated defaults" convention as
     // the keeper's own FACTORY_V3/POOL_MANAGER - unset until the matching
     // NEXT_PUBLIC_* var is set on the deployment, matched to keeper/.env.
@@ -124,6 +126,10 @@ const CHAIN = {
   factory: process.env.NEXT_PUBLIC_FACTORY_V2 || p.factory,
   vaultFactory: process.env.NEXT_PUBLIC_VAULT_FACTORY || p.vaultFactory,
   multiVenueVaultFactory: process.env.NEXT_PUBLIC_MULTI_VENUE_VAULT_FACTORY || p.multiVenueVaultFactory,
+  // V2+V3+V4 capable vaults (MultiVenueVaultV4) - the kind that can trade
+  // PONS launches. Blank until deployed; new vaults then come from this
+  // factory (see useVault.js's most-capable-factory-first resolution).
+  multiVenueV4VaultFactory: process.env.NEXT_PUBLIC_MULTI_VENUE_V4_VAULT_FACTORY || p.multiVenueV4VaultFactory,
   factoryV3: process.env.NEXT_PUBLIC_FACTORY_V3 || p.factoryV3,
   quoterV3: process.env.NEXT_PUBLIC_QUOTER_V3 || p.quoterV3,
   v3FeeTiers: (process.env.NEXT_PUBLIC_V3_FEE_TIERS || "500,3000,10000").split(",").map(Number),

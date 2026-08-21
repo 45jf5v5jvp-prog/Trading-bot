@@ -30,11 +30,14 @@ const TOKEN_ADDR_RE = /0x[0-9a-fA-F]{40}/;
 function describeTokenProfile(token, profile) {
   if (!profile) return `\nThe owner asked about ${token}, but its data could not be loaded right now.`;
   if (profile.error) return `\nThe owner asked about ${token}. ${profile.error}`;
-  const lines = [`\nThe owner asked about a specific token, ${profile.symbol} (${token}):`];
+  const lpLine = profile.lpLockUnverifiable
+    ? "LP lock cannot be checked on this venue (V3/V4 liquidity is a position, not a lockable LP-token balance)"
+    : `LP locked ${profile.lpLockedPct.toFixed(1)}%`;
+  const lines = [`\nThe owner asked about a specific token, ${profile.symbol} (${token})${profile.venue ? `, traded on ${profile.venue}` : ""}:`];
   lines.push(
     `- Liquidity: ${Math.round(profile.liqPls).toLocaleString()} ${CHAIN.nativeSymbol}. ` +
     `Buy tax ${(profile.buyTaxBps / 100).toFixed(1)}%, sell tax ${(profile.sellTaxBps / 100).toFixed(1)}%. ` +
-    `LP locked ${profile.lpLockedPct.toFixed(1)}%. Owner ${profile.ownerRenounced ? "renounced" : "not renounced"}.` +
+    `${lpLine}. Owner ${profile.ownerRenounced ? "renounced" : "not renounced"}.` +
     (profile.honeypotLikely ? " This looks like a honeypot - say so plainly." : ""),
   );
   if (profile.priceNow != null) {

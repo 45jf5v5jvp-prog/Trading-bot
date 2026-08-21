@@ -75,16 +75,22 @@ export async function seedMarket(): Promise<void> {
   const usdPerPls = await plsUsd();
   const floor = CFG.minSeedLiquidityUsd;
   const alreadyWatched = new Set(watched.all().map((w) => w.token));
+  // "added" is only tokens newly put into watched this pass. "aboveFloor" is
+  // the real answer to "how many tokens clear the $ liquidity bar right
+  // now" - it also counts ones already watched from before, which "added"
+  // deliberately skips re-adding.
   let added = 0;
+  let aboveFloor = 0;
 
   // Re-check liquidity on every already-known WPLS pair - the only part of
   // a repeat pass that can actually change.
   const known = wplsPairs.all();
   if (known.length > 0) {
     await mapLimit(known, CFG.keeperConcurrency, async (row) => {
-      if (alreadyWatched.has(row.token)) return;
       const liqUsd = await pairReserveUsd(row.pair, row.plsFirst, usdPerPls);
       if (liqUsd === null || liqUsd < floor) return;
+      aboveFloor++;
+      if (alreadyWatched.has(row.token)) return;
       if (await ensureWatched(row.token)) added++;
     });
   }
@@ -108,8 +114,9 @@ export async function seedMarket(): Promise<void> {
         if (!info) return; // not a WPLS pair - never re-checked again
         wplsPairs.insert(i, pairAddr, info.token, info.plsFirst);
         newWplsPairs++;
-        if (alreadyWatched.has(info.token)) return;
         if (info.liqUsd < floor) return;
+        aboveFloor++;
+        if (alreadyWatched.has(info.token)) return;
         if (await ensureWatched(info.token)) added++;
       } catch {
         // One bad pair index (a transient RPC error, a malformed pair
@@ -120,8 +127,8 @@ export async function seedMarket(): Promise<void> {
       }
     });
     meta.set("marketSeedClassifiedUpTo", String(total));
-    log("info", "marketSeed", `Market seed pass done: ${added} token(s) added/still above $${floor.toLocaleString()} liquidity, ${known.length + newWplsPairs} WPLS pairs known total`);
+    log("info", "marketSeed", `Market seed pass done: ${aboveFloor} of ${known.length + newWplsPairs} known WPLS pairs are above $${floor.toLocaleString()} liquidity (${added} newly added to watched this pass)`);
   } else {
-    log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; no new pairs since the last classification pass. ${added} token(s) added/still above $${floor.toLocaleString()} liquidity`);
+    log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; no new pairs since the last classification pass. ${aboveFloor} are above $${floor.toLocaleString()} liquidity (${added} newly added to watched this pass)`);
   }
 }

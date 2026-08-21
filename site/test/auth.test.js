@@ -1,7 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet } = require("ethers");
-const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage } = require("../lib/auth");
+const { id } = require("ethers");
+const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterFeedback, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterFeedbackMessage } = require("../lib/auth");
 
 const VAULT = "0x" + "e".repeat(40);
 const wallet = Wallet.createRandom();
@@ -254,4 +255,35 @@ test("authorizeReferral rejects an expired timestamp without ever calling the ch
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);
+});
+
+test("authorizeHunterFeedback accepts a correctly-signed feedback submission from the real owner", async () => {
+  const ts = Date.now();
+  const hash = id("Don't buy anything with liquidity under 5,000,000 PLS");
+  const signature = await wallet.signMessage(buildHunterFeedbackMessage(VAULT, hash, ts));
+  const readOwner = fakeReader(wallet.address);
+  const result = await authorizeHunterFeedback({ vaultAddress: VAULT, textHash: hash, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+});
+
+test("authorizeHunterFeedback rejects a signature made for DIFFERENT feedback text (can't retarget a captured signature)", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildHunterFeedbackMessage(VAULT, id("original feedback"), ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeHunterFeedback({ vaultAddress: VAULT, textHash: id("swapped-in feedback"), timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /invalid signature|not this vault's owner/,
+  );
+});
+
+test("authorizeHunterFeedback rejects when the signer is not the vault's on-chain owner", async () => {
+  const ts = Date.now();
+  const hash = id("feedback text");
+  const signature = await wallet.signMessage(buildHunterFeedbackMessage(VAULT, hash, ts));
+  const someoneElse = Wallet.createRandom();
+  const readOwner = fakeReader(someoneElse.address);
+  await assert.rejects(
+    authorizeHunterFeedback({ vaultAddress: VAULT, textHash: hash, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
 });

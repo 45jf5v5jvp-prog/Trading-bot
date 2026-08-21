@@ -143,6 +143,37 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   ts          INTEGER NOT NULL,
   reason      TEXT NOT NULL
 );
+
+-- Hunter IQ: what a vault's Hunter Bot has learned, from three sources -
+-- 'owner' (the vault owner typed guidance on the dashboard), 'self_loss'
+-- (the bot reflected on one of its own losing closes), 'self_miss' (the bot
+-- reflected on a token it declined that then ran without it). See hunter.ts's
+-- personalizedAssess/reflectOnClosedLosses/reflectOnMissedOpportunities.
+-- position_id/opportunity_id are set only for the source they came from,
+-- and double as a dedup key - a given closed position or declined
+-- opportunity only ever generates one self-written lesson, never one per
+-- tick it happens to still match the query.
+CREATE TABLE IF NOT EXISTS hunter_lessons (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  vault           TEXT NOT NULL,
+  source          TEXT NOT NULL, -- 'owner' | 'self_loss' | 'self_miss'
+  text            TEXT NOT NULL,
+  position_id     INTEGER,
+  opportunity_id  INTEGER,
+  owner_request_id INTEGER, -- site.db's hunter_feedback_requests.id, for 'owner' rows - dedups re-ingesting the same request every tick
+  ts              INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS hunter_lessons_vault_ts ON hunter_lessons(vault, ts DESC);
+
+-- Every closed Hunter position / declined Hunter opportunity this vault's
+-- bot has already reviewed for a self-written lesson, whether or not the
+-- review actually produced one (most closes are small wins or near-flat -
+-- nothing to reflect on). Separate from hunter_lessons itself so the
+-- reflect-on-* scans below can move on permanently after one look, instead
+-- of re-querying every non-lesson-worthy close/decline on every tick
+-- forever.
+CREATE TABLE IF NOT EXISTS hunter_reviewed_closes (position_id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS hunter_reviewed_misses (opportunity_id INTEGER PRIMARY KEY);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -515,5 +546,55 @@ export const discoveryActions = {
   record(vault: string, opportunityId: number, action: string, txHash?: string): void {
     db.prepare(`INSERT OR REPLACE INTO discovery_actions(vault,opportunity_id,ts,action,tx_hash) VALUES(?,?,?,?,?)`)
       .run(vault.toLowerCase(), opportunityId, Math.floor(Date.now() / 1000), action, txHash ?? null);
+  },
+};
+
+export type HunterLessonSource = "owner" | "self_loss" | "self_miss";
+export interface HunterLessonRow {
+  id: number; vault: string; source: HunterLessonSource; text: string;
+  positionId: number | null; opportunityId: number | null; ts: number;
+}
+
+/** Hunter IQ's memory - every lesson a vault's Hunter Bot has (owner-typed
+ * or self-written), newest first when read, and the small "have I already
+ * looked at this" trackers that keep the reflect-on-* scans in hunter.ts
+ * from re-querying the same closed position or declined opportunity
+ * forever. See db.ts's hunter_lessons/hunter_reviewed_closes/
+ * hunter_reviewed_misses tables. */
+export const hunterLessons = {
+  add(vault: string, source: HunterLessonSource, text: string, opts?: { positionId?: number; opportunityId?: number; ownerRequestId?: number }): void {
+    db.prepare(`INSERT INTO hunter_lessons(vault,source,text,position_id,opportunity_id,owner_request_id,ts) VALUES(?,?,?,?,?,?,?)`)
+      .run(vault.toLowerCase(), source, text, opts?.positionId ?? null, opts?.opportunityId ?? null, opts?.ownerRequestId ?? null, Math.floor(Date.now() / 1000));
+  },
+  hasAny(vault: string): boolean {
+    const r = db.prepare("SELECT 1 FROM hunter_lessons WHERE vault=? LIMIT 1").get(vault.toLowerCase());
+    return Boolean(r);
+  },
+  /** Most recent `limit` lessons, oldest of the batch first - the order an
+   * AI prompt should read them in, and a reasonable reading order for the
+   * dashboard's own lessons list too. */
+  recentForVault(vault: string, limit: number): HunterLessonRow[] {
+    const rows = db.prepare(`
+      SELECT id, vault, source, text, position_id AS positionId, opportunity_id AS opportunityId, ts
+      FROM hunter_lessons WHERE vault=? ORDER BY ts DESC LIMIT ?
+    `).all(vault.toLowerCase(), limit) as HunterLessonRow[];
+    return rows.reverse();
+  },
+  alreadyIngestedOwnerRequest(vault: string, ownerRequestId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM hunter_lessons WHERE vault=? AND owner_request_id=? LIMIT 1")
+      .get(vault.toLowerCase(), ownerRequestId);
+    return Boolean(r);
+  },
+  closeAlreadyReviewed(positionId: number): boolean {
+    return Boolean(db.prepare("SELECT 1 FROM hunter_reviewed_closes WHERE position_id=?").get(positionId));
+  },
+  markCloseReviewed(positionId: number): void {
+    db.prepare("INSERT OR IGNORE INTO hunter_reviewed_closes(position_id) VALUES(?)").run(positionId);
+  },
+  missAlreadyReviewed(opportunityId: number): boolean {
+    return Boolean(db.prepare("SELECT 1 FROM hunter_reviewed_misses WHERE opportunity_id=?").get(opportunityId));
+  },
+  markMissReviewed(opportunityId: number): void {
+    db.prepare("INSERT OR IGNORE INTO hunter_reviewed_misses(opportunity_id) VALUES(?)").run(opportunityId);
   },
 };

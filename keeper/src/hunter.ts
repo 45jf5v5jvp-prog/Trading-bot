@@ -3,11 +3,11 @@ import { CFG } from "./config.js";
 import { provider, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
 import { registry, type VaultRecord, type HunterConfig } from "./registry.js";
-import { watched, opportunities, discoveryActions, aiExitRequests, prices, db } from "./db.js";
+import { watched, opportunities, discoveryActions, aiExitRequests, hunterLessons, prices, db } from "./db.js";
 import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./discovery.js";
 import { candlesForToken } from "./candles.js";
 import { snapshot, liquidityDropIsSuspicious } from "./indicators.js";
-import { assess, assessExit, type TokenProfile, type AiVerdict, type OpenPositionContext } from "./ai.js";
+import { assess, assessExit, reflectOnLoss, reflectOnMiss, type TokenProfile, type AiVerdict, type OpenPositionContext } from "./ai.js";
 import { executeSwap } from "./executor.js";
 import { openPosition, positionsValuePls } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
@@ -48,6 +48,29 @@ const ATR_STOP_MIN_PCT = 5;
 const ATR_STOP_MAX_PCT = 80;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
+
+// Hunter IQ: how much of a vault's own lesson history rides along in a
+// personalized AI call - bounded so the prompt doesn't grow without limit as
+// a vault accumulates trades.
+const LESSON_CONTEXT_LIMIT = 8;
+// A realized loss worse than this on a Hunter position is worth the bot
+// writing itself a lesson about - most losing closes are just how
+// dip-buying goes and aren't actually instructive.
+const LOSS_LESSON_THRESHOLD_PCT = -15;
+// A token Hunter declined that then ran at least this much afterward is
+// worth reflecting on as a real miss, not noise.
+const MISS_LESSON_MOVE_PCT = 50;
+// Give a declined token time to actually move before judging the decision -
+// checking an hour later would just be measuring normal volatility.
+const MISS_REVIEW_DELAY_HOURS = 24;
+// Don't keep re-checking price on declines older than this - a miss from a
+// month ago isn't a fresh lesson anymore.
+const MISS_REVIEW_WINDOW_DAYS = 14;
+// Cap self-reflection AI calls per tick, so a backlog (first deploy after
+// this shipped, or the keeper having been down a while) can't burst-spend
+// on a pile of historical closes/misses all at once - it works through the
+// backlog gradually instead.
+const REFLECTION_BATCH_LIMIT = 5;
 
 // How many of {RSI oversold, bullish MACD cross, Bollinger lower band} have
 // to agree before this counts as a real setup at all. One real technical
@@ -195,6 +218,10 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
       trailPct: H.exitMode === "full" ? 0 : H.trailingStopPct,
       timeExitMin: H.exitMode === "full" ? 0 : H.timeExitMin,
       exitMode: H.exitMode,
+      // Needed to find this trade's own buy narrative later - see
+      // reflectOnClosedLosses below, which has nothing to reflect on
+      // without it.
+      sourceTxHash: res.txHash,
     });
     discoveryActions.record(v.address, id, "bought", res.txHash);
     log("info", "hunter", `${v.address} bought ${amountPls} PLS of ${token} on opportunity #${id}`);
@@ -211,8 +238,27 @@ function sizeForVault(H: HunterConfig, ai: AiVerdict | null): number {
   return H.maxPerTradePls;
 }
 
+/**
+ * Hunter IQ's actual personalization point. A vault with no lessons yet
+ * keeps sharing the one AI call computed for this opportunity (see
+ * evaluateWatchedToken) - the shared-call cost model every other subscriber
+ * relies on stays unchanged for them. Only once a vault has its own
+ * owner-typed feedback or self-written lessons does it get its own call,
+ * weighing its own history and its own spending ceiling instead of the
+ * loosest shared one. If the personalized call itself fails (rate limit,
+ * API outage), falls back to the shared verdict rather than losing AI
+ * review outright for a vault that was otherwise entitled to it.
+ */
+async function personalizedOrSharedAi(v: VaultRecord, sharedAi: AiVerdict | null, profile: TokenProfile | null): Promise<AiVerdict | null> {
+  if (!profile || !hunterLessons.hasAny(v.address)) return sharedAi;
+  const guidance = hunterLessons.recentForVault(v.address, LESSON_CONTEXT_LIMIT).map((l) => l.text);
+  const personal = await assess(profile, v.hunter.maxPerTradePls, guidance);
+  return personal ?? sharedAi;
+}
+
 async function dispatch(
   id: number, token: string, ai: AiVerdict | null, s: DiscoveryScreen, atrPct: number | null, candidates: VaultRecord[],
+  profile: TokenProfile | null,
 ): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const H = v.hunter;
@@ -229,20 +275,22 @@ async function dispatch(
       return;
     }
 
+    let vAi = ai;
     if (H.requireAiApproval) {
-      if (!ai) {
+      vAi = await personalizedOrSharedAi(v, ai, profile);
+      if (!vAi) {
         log("info", "hunter", `${v.address} ${token}: AI approval required but unavailable, notifying instead of buying`);
         discoveryActions.record(v.address, id, "notified");
         return;
       }
-      if (!ai.recommend || CONFIDENCE_RANK[ai.confidence] < CONFIDENCE_RANK[H.minAiConfidence]) {
-        log("info", "hunter", `${v.address} ${token}: AI did not clear the bar (recommend=${ai.recommend}, confidence=${ai.confidence}), notifying instead of buying`);
+      if (!vAi.recommend || CONFIDENCE_RANK[vAi.confidence] < CONFIDENCE_RANK[H.minAiConfidence]) {
+        log("info", "hunter", `${v.address} ${token}: AI did not clear the bar (recommend=${vAi.recommend}, confidence=${vAi.confidence}), notifying instead of buying`);
         discoveryActions.record(v.address, id, "notified");
         return;
       }
     }
 
-    await executeHunterBuy(v, id, token, sizeForVault(H, ai), atrPct);
+    await executeHunterBuy(v, id, token, sizeForVault(H, vAi), atrPct);
   });
 }
 
@@ -297,8 +345,9 @@ async function evaluateWatchedToken(
   const s = await screenOpportunity(w.token, w.pair, strictest);
 
   let ai: AiVerdict | null = null;
+  let profile: TokenProfile | null = null;
   if (s.verdict === "pass" && strictest.anyRequireAi) {
-    const profile: TokenProfile = {
+    profile = {
       symbol: w.symbol, token: w.token, liqPls: last.liq,
       buyTaxBps: s.buyTaxBps, sellTaxBps: s.sellTaxBps, lpLockedPct: s.lpLockedPct,
       deployerPct: null, ownerRenounced: s.ownerRenounced, roundTripLossBps: s.roundTripLossBps,
@@ -326,7 +375,7 @@ async function evaluateWatchedToken(
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
   if (s.verdict !== "pass") return;
-  await dispatch(id, w.token, ai, s, snap.atrPct, candidates);
+  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile);
 }
 
 interface FullModeRow { id: number; vault: string; token: string; opened_at: number; entry_price: number; high_water: number }
@@ -387,6 +436,160 @@ async function reviewFullModePositions(): Promise<void> {
   });
 }
 
+interface FetchedFeedback { id: number; text: string }
+
+/** Owner-typed Hunter IQ feedback, pending on the site's side - same
+ * "site writes an intent, keeper picks it up" split as fetchBuyRequests. */
+async function fetchOwnerFeedback(vault: string): Promise<FetchedFeedback[]> {
+  const api = process.env.CONFIG_API;
+  if (!api) return [];
+  try {
+    const res = await fetch(`${api}/vaults/${vault}/hunter-feedback-requests`);
+    if (!res.ok) return [];
+    return (await res.json()) as FetchedFeedback[];
+  } catch (e) {
+    log("warn", "hunter", `Feedback fetch failed for ${vault}: ${(e as Error).message}`);
+    return [];
+  }
+}
+
+async function ingestOwnerFeedback(candidates: VaultRecord[]): Promise<void> {
+  await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
+    const requests = await fetchOwnerFeedback(v.address);
+    for (const r of requests) {
+      if (hunterLessons.alreadyIngestedOwnerRequest(v.address, r.id)) continue;
+      hunterLessons.add(v.address, "owner", r.text, { ownerRequestId: r.id });
+      log("info", "hunter", `${v.address}: new Hunter IQ feedback recorded (request #${r.id})`);
+    }
+  });
+}
+
+interface ClosedHunterPositionRow {
+  id: number; vault: string; token: string; spent_pls: number; proceeds_pls: number | null;
+  close_reason: string | null; opened_at: number; closed_at: number | null; source_tx_hash: string | null;
+}
+
+/**
+ * Hunter IQ's self-reflection on its own losing trades. Every Hunter close
+ * gets looked at exactly once (see hunterLessons.closeAlreadyReviewed/
+ * markCloseReviewed) - most are ignored (small wins, near-flat closes
+ * aren't instructive), and only a real loss past LOSS_LESSON_THRESHOLD_PCT
+ * triggers an AI call to actually write a lesson. Runs on the same cadence
+ * as detection since it's cheap to check and naturally rate-limited by
+ * REFLECTION_BATCH_LIMIT.
+ */
+async function reflectOnClosedLosses(): Promise<void> {
+  const rows = db.prepare(`
+    SELECT id, vault, token, spent_pls, proceeds_pls, close_reason, opened_at, closed_at, source_tx_hash
+    FROM positions WHERE bot='hunter' AND status IN ('closed','stuck')
+  `).all() as ClosedHunterPositionRow[];
+  if (rows.length === 0) return;
+
+  const symbolByToken = new Map(watched.all().map((w) => [w.token, w.symbol]));
+  let processed = 0;
+  for (const r of rows) {
+    if (processed >= REFLECTION_BATCH_LIMIT) break;
+    if (hunterLessons.closeAlreadyReviewed(r.id)) continue;
+    processed++;
+
+    if (r.proceeds_pls === null || !r.spent_pls) { hunterLessons.markCloseReviewed(r.id); continue; }
+    const pnlPct = (r.proceeds_pls / r.spent_pls - 1) * 100;
+    if (pnlPct > LOSS_LESSON_THRESHOLD_PCT) { hunterLessons.markCloseReviewed(r.id); continue; }
+
+    try {
+      // The opportunity that led to this buy, for its narrative - linked via
+      // the tx that opened it (see positions.ts's OpenArgs.sourceTxHash and
+      // executeHunterBuy above). A position opened before that link existed
+      // just gets a generic note instead of failing outright.
+      let buyNarrative = "no detection narrative on file for this trade";
+      if (r.source_tx_hash) {
+        const action = db.prepare("SELECT opportunity_id FROM discovery_actions WHERE vault=? AND tx_hash=? AND action='bought'")
+          .get(r.vault, r.source_tx_hash) as { opportunity_id: number } | undefined;
+        if (action) {
+          const opp = opportunities.get(action.opportunity_id);
+          if (opp) buyNarrative = opp.narrative;
+        }
+      }
+
+      const symbol = symbolByToken.get(r.token) ?? r.token;
+      const lesson = await reflectOnLoss({
+        symbol, token: r.token, buyNarrative,
+        closeReason: r.close_reason ?? "unknown", pnlPct,
+        heldMinutes: r.closed_at ? (r.closed_at - r.opened_at) / 60 : 0,
+      });
+      if (lesson) {
+        hunterLessons.add(r.vault, "self_loss", lesson, { positionId: r.id });
+        log("info", "hunter", `${r.vault}: self-reflection on position #${r.id} (${symbol}) - ${lesson}`);
+      }
+    } catch (e) {
+      log("error", "hunter", `Loss reflection for position #${r.id}: ${(e as Error).message}`);
+    } finally {
+      hunterLessons.markCloseReviewed(r.id);
+    }
+  }
+}
+
+interface DeclinedOpportunityRow {
+  id: number; token: string; ts: number; narrative: string; aiReasoning: string | null; priceAtDetection: number | null;
+}
+
+/**
+ * Hunter IQ's self-reflection on its own declines - a candidate that passed
+ * the mechanical screen but the AI gate turned down, checked back after
+ * MISS_REVIEW_DELAY_HOURS to see if it actually ran without the bot. Only a
+ * real, sizeable move (MISS_LESSON_MOVE_PCT) is worth an AI call; most
+ * declines just never go anywhere, which isn't a miss, it's the decline
+ * working as intended. A lesson from this only goes to vaults that actually
+ * saw this opportunity declined (see discoveryActions) - a vault that never
+ * subscribed to it has nothing to learn from a call it wasn't party to.
+ */
+async function reflectOnMissedOpportunities(): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const reviewFrom = now - MISS_REVIEW_WINDOW_DAYS * 86400;
+  const reviewUntil = now - MISS_REVIEW_DELAY_HOURS * 3600;
+  const rows = db.prepare(`
+    SELECT id, token, ts, narrative, ai_reasoning AS aiReasoning, price_at_detection AS priceAtDetection
+    FROM opportunities
+    WHERE source='hunter' AND verdict='pass' AND ai_recommend=0 AND ts >= ? AND ts <= ?
+  `).all(reviewFrom, reviewUntil) as DeclinedOpportunityRow[];
+  if (rows.length === 0) return;
+
+  const symbolByToken = new Map(watched.all().map((w) => [w.token, w.symbol]));
+  let processed = 0;
+  for (const r of rows) {
+    if (processed >= REFLECTION_BATCH_LIMIT) break;
+    if (hunterLessons.missAlreadyReviewed(r.id)) continue;
+    processed++;
+
+    if (r.priceAtDetection === null || r.priceAtDetection <= 0) { hunterLessons.markMissReviewed(r.id); continue; }
+    const latest = prices.latest(r.token);
+    if (!latest || latest.price <= 0) { hunterLessons.markMissReviewed(r.id); continue; }
+
+    const movePct = ((latest.price - r.priceAtDetection) / r.priceAtDetection) * 100;
+    if (movePct < MISS_LESSON_MOVE_PCT) { hunterLessons.markMissReviewed(r.id); continue; }
+
+    const vaults = db.prepare("SELECT DISTINCT vault FROM discovery_actions WHERE opportunity_id=?").all(r.id) as { vault: string }[];
+    if (vaults.length === 0) { hunterLessons.markMissReviewed(r.id); continue; }
+
+    try {
+      const symbol = symbolByToken.get(r.token) ?? r.token;
+      const lesson = await reflectOnMiss({
+        symbol, token: r.token,
+        detectionNarrative: r.narrative, declineReason: r.aiReasoning ?? "declined (no AI reasoning on file)",
+        movePctSinceDeclined: movePct, daysSinceDeclined: (now - r.ts) / 86400,
+      });
+      if (lesson) {
+        for (const { vault } of vaults) hunterLessons.add(vault, "self_miss", lesson, { opportunityId: r.id });
+        log("info", "hunter", `Self-reflection on missed opportunity #${r.id} (${symbol}) - ${lesson}`);
+      }
+    } catch (e) {
+      log("error", "hunter", `Miss reflection for opportunity #${r.id}: ${(e as Error).message}`);
+    } finally {
+      hunterLessons.markMissReviewed(r.id);
+    }
+  }
+}
+
 async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const requests = await fetchBuyRequests(v.address);
@@ -419,6 +622,15 @@ export async function tick(): Promise<void> {
   // owner later turns the bot off, same as positions.ts's own tick()
   // manages every open position regardless of any bot's current config.
   await reviewFullModePositions();
+
+  // Hunter IQ likewise runs regardless of whether Hunter is currently
+  // enabled on any vault - an owner can still leave feedback (or the bot
+  // still reflect on an already-closed trade) while it's turned off, so
+  // it's ready the moment they turn it back on. Must run before the
+  // enabled-candidates early return below, not after.
+  await ingestOwnerFeedback(registry.active());
+  await reflectOnClosedLosses();
+  await reflectOnMissedOpportunities();
 
   const candidates = registry.active().filter((v) => v.hunter.enabled);
   if (candidates.length === 0) return;

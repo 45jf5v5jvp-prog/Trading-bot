@@ -443,6 +443,56 @@ input::placeholder { color: #6b6c76; }
   margin-top: 5px;
 }
 
+/* Hunter IQ - see components/HunterIQPanel.jsx. */
+.feedback-box {
+  background: var(--chip);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  padding: 14px;
+}
+.feedback-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+  min-height: 60px;
+}
+.feedback-input:focus { outline: none; }
+.feedback-input::placeholder { color: var(--ash); }
+
+.lesson-row { padding: 8px 0; border-bottom: 1px solid var(--edge); }
+.lesson-row:last-child { border-bottom: none; }
+.lesson-text { margin: 4px 0 0; font-size: 13.5px; color: var(--text); line-height: 1.5; }
+.lesson-badge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.lesson-badge-owner { background: var(--good-soft); color: var(--good); }
+.lesson-badge-loss { background: var(--bad-soft); color: var(--bad); }
+.lesson-badge-miss { background: rgba(201, 138, 62, 0.14); color: var(--amber); }
+
+.trade-row { padding: 10px 0; border-bottom: 1px solid var(--edge); }
+.trade-row:last-child { border-bottom: none; }
+.trade-rationale {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ash);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.trade-rationale-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* Collapsed rugged/-100% positions (see components/HistoryPanel.jsx isDead) -
    deliberately much lighter-weight than .holding-card so a wall of rugs
    doesn't push the positions still worth deciding about off the screen. */

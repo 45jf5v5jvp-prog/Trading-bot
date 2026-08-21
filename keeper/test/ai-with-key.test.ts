@@ -11,7 +11,7 @@ import { existsSync, rmSync } from "node:fs";
 for (const p of [process.env.DB_PATH, process.env.DB_PATH + "-wal", process.env.DB_PATH + "-shm"])
   if (existsSync(p)) rmSync(p);
 
-const { assess, answerQuestion, assessExit } = await import("../src/ai.js");
+const { assess, answerQuestion, assessExit, reflectOnLoss, reflectOnMiss } = await import("../src/ai.js");
 
 const baseProfile = {
   symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
@@ -166,5 +166,90 @@ test("assessExit() returns null on a non-ok HTTP response rather than throwing",
   try {
     const v = await assessExit(basePosition as any);
     assert.equal(v, null);
+  } finally { restore(); }
+});
+
+test("assess() with guidance includes each lesson in the prompt sent to Claude, oldest first", async () => {
+  let capturedBody: any = null;
+  const restore = mockFetch(async (_url: string, init: any) => {
+    capturedBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        content: [{ type: "tool_use", name: "give_verdict", input: { recommend: true, confidence: "medium", reasoning: "Fine." } }],
+      }),
+    };
+  });
+  try {
+    await assess(baseProfile as any, undefined, ["Skip anything under 5M PLS liquidity.", "Weight RSI more than MACD."]);
+    const prompt = capturedBody.messages[0].content as string;
+    assert.match(prompt, /Skip anything under 5M PLS liquidity\./);
+    assert.match(prompt, /Weight RSI more than MACD\./);
+    assert.ok(prompt.indexOf("Skip anything") < prompt.indexOf("Weight RSI"), "guidance must appear oldest-first");
+  } finally { restore(); }
+});
+
+test("assess() with no guidance omits the coaching section entirely (unchanged prompt for a vault with no lessons)", async () => {
+  let capturedBody: any = null;
+  const restore = mockFetch(async (_url: string, init: any) => {
+    capturedBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        content: [{ type: "tool_use", name: "give_verdict", input: { recommend: true, confidence: "medium", reasoning: "Fine." } }],
+      }),
+    };
+  });
+  try {
+    await assess(baseProfile as any);
+    const prompt = capturedBody.messages[0].content as string;
+    assert.doesNotMatch(prompt, /coaching this bot/);
+  } finally { restore(); }
+});
+
+test("reflectOnLoss() parses a well-formed give_lesson tool call", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      content: [{ type: "tool_use", name: "give_lesson", input: { lesson: "The RSI signal was real but liquidity was too thin to hold through the dip." } }],
+    }),
+  }));
+  try {
+    const lesson = await reflectOnLoss({
+      symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
+      buyNarrative: "TEST looks oversold: RSI 25.", closeReason: "stop loss 25%", pnlPct: -25, heldMinutes: 40,
+    });
+    assert.equal(lesson, "The RSI signal was real but liquidity was too thin to hold through the dip.");
+  } finally { restore(); }
+});
+
+test("reflectOnLoss() returns null rather than guessing when the tool call is missing", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({ content: [{ type: "text", text: "I refuse to use the tool." }] }),
+  }));
+  try {
+    const lesson = await reflectOnLoss({
+      symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
+      buyNarrative: "narrative", closeReason: "stop loss", pnlPct: -20, heldMinutes: 10,
+    });
+    assert.equal(lesson, null);
+  } finally { restore(); }
+});
+
+test("reflectOnMiss() parses a well-formed give_lesson tool call", async () => {
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      content: [{ type: "tool_use", name: "give_lesson", input: { lesson: "Low AI confidence on a passing screen was too cautious here - weight the mechanical screen more." } }],
+    }),
+  }));
+  try {
+    const lesson = await reflectOnMiss({
+      symbol: "TEST", token: "0x1111111111111111111111111111111111111111",
+      detectionNarrative: "TEST looks oversold: RSI 25.", declineReason: "low confidence",
+      movePctSinceDeclined: 80, daysSinceDeclined: 3,
+    });
+    assert.equal(lesson, "Low AI confidence on a passing screen was too cautious here - weight the mechanical screen more.");
   } finally { restore(); }
 });

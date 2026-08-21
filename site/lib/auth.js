@@ -61,6 +61,16 @@ function buildReferralMessage(vaultAddress, code, timestampMs) {
   return `Icaria: set referrer via code ${code} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape, for leaving Hunter IQ feedback. Binds a hash of the text
+ * rather than the text itself - the signed message a wallet shows the owner
+ * stays a fixed, readable length regardless of how long their feedback is,
+ * while still making a signature for one piece of feedback unusable to
+ * authorize any other. The server recomputes the same hash from the text in
+ * the request body and only accepts a match. */
+function buildHunterFeedbackMessage(vaultAddress, textHash, timestampMs) {
+  return `Icaria: give Hunter Bot feedback (${textHash}) for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 function checkFresh(timestampMs) {
   if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
   const age = Date.now() - timestampMs;
@@ -134,8 +144,14 @@ async function authorizeReferral({ vaultAddress, code, timestampMs, signature, r
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeHunterFeedback({ vaultAddress, textHash, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildHunterFeedbackMessage(vaultAddress, textHash, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterFeedback, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterFeedbackMessage, MESSAGE_MAX_AGE_MS,
   defaultReadOwner,
 };

@@ -57,6 +57,12 @@ function getDb() {
       referrer   TEXT NOT NULL,
       locked_at  INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS hunter_feedback_requests (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      vault        TEXT NOT NULL,
+      text         TEXT NOT NULL,
+      requested_at INTEGER NOT NULL
+    );
   `);
 
   // Additive migration: databases created before "Buy Now" let someone type
@@ -148,6 +154,32 @@ function pendingDiscoveryBuyRequests(vault) {
     .all(vault.toLowerCase())
     .map((r) => ({ id: r.opportunity_id, amountPls: r.amount_pls }));
 }
+/**
+ * Records Hunter IQ feedback the owner typed on the dashboard - same
+ * "site writes an intent, keeper picks it up" split as everything else here.
+ * The keeper (hunter.ts's ingestOwnerFeedback) polls this per vault and
+ * copies each new row into its own hunter_lessons table, which is what
+ * future personalized AI reviews actually read from - this table is only
+ * ever the pending inbox, not the bot's long-term memory. No dedup on
+ * insert - leaving two pieces of feedback in a row is a normal thing to do,
+ * not a duplicate click.
+ */
+function requestHunterFeedback(vault, text, nowMs) {
+  const info = getDb()
+    .prepare(`INSERT INTO hunter_feedback_requests (vault, text, requested_at) VALUES (?, ?, ?)`)
+    .run(vault.toLowerCase(), text, nowMs);
+  return Number(info.lastInsertRowid);
+}
+
+/** Every piece of feedback this vault owner has ever left, oldest first -
+ * the keeper is responsible for only ingesting ones it hasn't seen yet
+ * (tracked on its own side, via hunter_lessons.owner_request_id). */
+function pendingHunterFeedback(vault) {
+  return getDb()
+    .prepare(`SELECT id, text FROM hunter_feedback_requests WHERE vault = ? ORDER BY id ASC`)
+    .all(vault.toLowerCase());
+}
+
 /**
  * Records an Ask Icaria "buy it" request - unlike the Discovery/Hunter buy
  * requests above, there's no pre-existing opportunity catalog entry to
@@ -333,6 +365,7 @@ function resetForTests() {
 module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
   requestDiscoveryBuy, pendingDiscoveryBuyRequests,
+  requestHunterFeedback, pendingHunterFeedback,
   requestAskBuy, pendingAskBuyRequests,
   getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer,
   getReferredVaults, getReferralPaidTotal, recordReferralPayout,

@@ -5,8 +5,10 @@ import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
 import { loadOpportunities } from "../lib/loadOpportunities";
+import { loadHunterIQ } from "../lib/loadHunterIQ";
 import { closePosition } from "../lib/closePosition";
 import { buyOpportunity } from "../lib/buyOpportunity";
+import { submitHunterFeedback } from "../lib/hunterFeedback";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { APP_VERSION } from "../lib/version";
 import { numberFieldProps } from "../lib/numberField";
@@ -24,6 +26,7 @@ import BotCard from "../components/BotCard";
 import InfoButton from "../components/InfoButton";
 import { TradingBotsIcon, LaunchIcon, SniperIcon, DiscoveryIcon, HunterIcon, LimitOrderIcon } from "../components/BotIcons";
 import OpportunitiesPanel from "../components/OpportunitiesPanel";
+import HunterIQPanel from "../components/HunterIQPanel";
 import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
 import PnlSnapshot from "../components/PnlSnapshot";
@@ -85,6 +88,7 @@ export default function Dashboard() {
   const [history, setHistory] = useState(null);
   const [portfolio, setPortfolio] = useState(null);
   const [opportunities, setOpportunities] = useState(null);
+  const [hunterIQ, setHunterIQ] = useState(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
@@ -212,6 +216,18 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
+  // Same polling idea for Hunter IQ - the trade-rationale feed and lessons
+  // list refresh on their own so a self-written lesson from a just-closed
+  // position shows up without a manual refresh.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const refresh = () => loadHunterIQ(vaultAddress).then((h) => { if (!cancelled) setHunterIQ(h); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [vaultAddress]);
+
   // Same idea for the vault's balance/paused state - previously this only
   // updated right after a deposit/withdraw/pause, so the balance would sit
   // stale until the user did something. Silent failures here (e.g. the
@@ -230,12 +246,14 @@ export default function Dashboard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const [, h, p, o] = await Promise.all([
+      const [, h, p, o, hiq] = await Promise.all([
         refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadOpportunities(vaultAddress),
+        loadHunterIQ(vaultAddress),
       ]);
       setHistory(h);
       setPortfolio(p.portfolio);
       setOpportunities(o.opportunities);
+      setHunterIQ(hiq);
     } catch (e) {
       setStatus(`Refresh failed: ${e.message}`);
     } finally {
@@ -419,6 +437,14 @@ export default function Dashboard() {
     } catch {
       setStatus(`Copy this link manually: ${link}`);
     }
+  }
+
+  /** Signs and submits Hunter IQ feedback, then refreshes the panel so the
+   * new lesson (once the keeper's ingested it, usually within a tick) shows
+   * up without waiting for the next 20s poll. */
+  async function handleSubmitFeedback(text) {
+    await submitHunterFeedback(getProvider, vaultAddress, text);
+    loadHunterIQ(vaultAddress).then(setHunterIQ).catch(() => {});
   }
 
   /** Signs and submits a manual buy request for one Discovery/Hunter Bot
@@ -730,6 +756,7 @@ export default function Dashboard() {
                     hunter={config.hunter}
                     onChange={(hunter) => updateConfig({ ...config, hunter })}
                   />
+                  <HunterIQPanel hunterIQ={hunterIQ} onSubmitFeedback={handleSubmitFeedback} />
                 </BotCard>
 
                 <BotCard
@@ -754,8 +781,11 @@ export default function Dashboard() {
                 </BotCard>
 
                 <div className="panel">
+                  {/* Hunter's own findings now live in its BotCard's Hunter IQ
+                      panel above, with the rationale that led to each trade -
+                      this stays Discovery-only, its manual notify/Buy Now flow. */}
                   <OpportunitiesPanel
-                    opportunities={opportunities}
+                    opportunities={(opportunities ?? []).filter((o) => (o.source ?? "discovery") !== "hunter")}
                     onBuy={handleBuyOpportunity}
                     buyStates={buyStates}
                     onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}

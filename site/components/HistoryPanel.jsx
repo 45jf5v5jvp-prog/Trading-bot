@@ -161,6 +161,9 @@ function HoldingCard({ p, onClose, closeState }) {
         <div className={`num holding-pnl ${pnlClass(p.pnlPct)}`}>{fmtPnl(p.pnlPct)}</div>
       </div>
       <div className="holding-meta">
+        {p.tokensHeld !== null && p.tokensHeld !== undefined
+          ? `Holding ${p.tokensHeld.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${p.symbol || "tokens"} · `
+          : ""}
         Spent {fmtAmount(p.spent_pls)} {unit}
         {p.valueNowPls !== null && p.valueNowPls !== undefined
           ? ` · worth ${fmtAmount(p.valueNowPls)} ${unit} now`

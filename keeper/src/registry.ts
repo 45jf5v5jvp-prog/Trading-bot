@@ -201,6 +201,13 @@ export interface LimitOrder {
   // side=sell only: sell the vault's entire live balance of the token
   // instead of a fixed amount - the common case ("just get me out").
   sellAll: boolean;
+  // side=buy only: once the buy fills, the resulting tokens become a real
+  // tracked position (see limits.ts's fireOrder) so it gets a P&L, a Close
+  // Position button, and - if these are set above 0 - an automatic exit at
+  // that gain/loss, the same machinery every other bot's positions already
+  // use. 0 means no automatic exit, manual Close Position only.
+  takeProfitPct: number;
+  stopLossPct: number;
 }
 
 export interface TradingRule {

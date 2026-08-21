@@ -20,19 +20,24 @@ export interface OpenArgs {
    * change never retroactively changes how an already-open position is
    * managed. Undefined/null for every non-Hunter position. */
   exitMode?: "limited" | "full" | null;
+  /** The transaction that actually bought these tokens, when known - see
+   * db.ts's source_tx_hash migration comment. Optional and purely for
+   * traceability; nothing reads it to decide behavior. */
+  sourceTxHash?: string | null;
 }
 
 export function openPosition(a: OpenArgs): void {
   const tokens = Number(formatEther(a.tokensOut));
   const entry = tokens > 0 ? a.spentPls / tokens : 0;
   db.prepare(`INSERT INTO positions
-    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status,exit_mode)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open',?)`).run(
+    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status,exit_mode,source_tx_hash)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?)`).run(
     a.vault.toLowerCase(), a.bot, a.token.toLowerCase(), Math.floor(Date.now() / 1000),
     // high_water is the peak value/cost ratio, so it starts at 1.0 (break even),
     // not at the entry price. Trailing stops read it as a ratio.
     entry, a.spentPls, a.tokensOut.toString(), 1.0,
     a.tpPct, a.slPct || null, a.trailPct || null, a.timeExitMin || null, a.exitMode ?? null,
+    a.sourceTxHash ?? null,
   );
 }
 

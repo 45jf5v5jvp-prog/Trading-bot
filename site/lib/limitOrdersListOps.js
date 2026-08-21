@@ -9,6 +9,7 @@ export function emptyLimitOrder() {
   return {
     id: newOrderId(), enabled: true, token: "", side: "sell",
     targetPrice: 0, amount: 0, sellAll: true,
+    takeProfitPct: 0, stopLossPct: 0,
   };
 }
 

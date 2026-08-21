@@ -146,6 +146,16 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   if (!cols.some((c) => c.name === "exit_mode")) {
     db.exec("ALTER TABLE positions ADD COLUMN exit_mode TEXT");
   }
+  // The exact transaction that created this position, when known - traces a
+  // position back to real on-chain proof instead of just this row's own
+  // say-so, and lets a one-time backfill script (scripts/backfill-limit-
+  // positions.js, for the bug where a filled limit-order buy never created a
+  // position at all) check whether a given fill has already been backfilled
+  // without guessing from timing alone. NULL for anything opened before this
+  // column existed.
+  if (!cols.some((c) => c.name === "source_tx_hash")) {
+    db.exec("ALTER TABLE positions ADD COLUMN source_tx_hash TEXT");
+  }
 }
 
 // Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request

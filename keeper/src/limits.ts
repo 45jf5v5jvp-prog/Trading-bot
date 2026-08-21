@@ -4,6 +4,7 @@ import { provider, routerRead, factory, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
 import { registry, type LimitOrder, type VaultRecord } from "./registry.js";
 import { executeSwap } from "./executor.js";
+import { openPosition } from "./positions.js";
 import { limitFires } from "./db.js";
 import { log } from "./log.js";
 
@@ -98,6 +99,21 @@ async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
     limitFires.record(v.address, o.id, res.txHash);
     const amountLabel = o.side === "buy" ? `${o.amount} PLS` : `${formatUnits(amountIn, decimals)} tokens`;
     log("info", "limits", `${v.address} filled ${o.side} order on ${token}: ${amountLabel} at target ${o.targetPrice} PLS (actual ${price})`);
+
+    // A buy fill was previously left completely untracked: the tokens landed
+    // in the vault but never became a real position, so there was no P&L, no
+    // Close Position button, nothing - the only way out was the dashboard's
+    // manual emergency token withdraw. Same tracking every other bot's buys
+    // already get, so the exact same Close Position / take-profit / stop-loss
+    // machinery (see positions.ts) just works here too.
+    if (o.side === "buy") {
+      openPosition({
+        vault: v.address, bot: "limit", token,
+        spentPls: o.amount, tokensOut: res.amountOut,
+        tpPct: o.takeProfitPct || 0, slPct: o.stopLossPct || 0, timeExitMin: 0,
+        sourceTxHash: res.txHash,
+      });
+    }
   } else {
     log("warn", "limits", `${v.address} ${o.side} order on ${token} not filled: ${res.reason}`);
   }

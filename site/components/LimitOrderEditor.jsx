@@ -162,10 +162,27 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
           )}
         </>
       ) : (
-        <div className="field-inline">
-          <label>{CHAIN.nativeSymbol} to spend</label>
-          <input {...num("amount")} min="0" style={{ width: 160 }} />
-        </div>
+        <>
+          <div className="field-inline">
+            <label>{CHAIN.nativeSymbol} to spend</label>
+            <input {...num("amount")} min="0" style={{ width: 160 }} />
+          </div>
+          <p className="hint" style={{ marginTop: -4 }}>
+            Once this fills, the tokens become a tracked position with its own P&amp;L and a Close
+            Position button on the dashboard - same as every other bot's buys. The two settings
+            below are optional automatic exits; leave either at 0 for manual close only.
+          </p>
+          <div className="field-inline">
+            <label>Take profit at +</label>
+            <input {...num("takeProfitPct")} min="0" step="any" style={{ width: 90 }} />
+            <span className="hint" style={{ margin: 0 }}>%</span>
+          </div>
+          <div className="field-inline">
+            <label>Stop loss at &minus;</label>
+            <input {...num("stopLossPct")} min="0" step="any" style={{ width: 90 }} />
+            <span className="hint" style={{ margin: 0 }}>%</span>
+          </div>
+        </>
       )}
       {needsAmount && (
         <p className="hint" style={{ color: "var(--bad)", marginTop: 6 }}>

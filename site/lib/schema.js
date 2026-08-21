@@ -143,6 +143,12 @@ function normalizeLimitOrder(o, i) {
     throw new Error(`limitOrders[${i}].targetPrice must be a positive number`);
   if (!isFiniteNumber(o.amount) || o.amount < 0)
     throw new Error(`limitOrders[${i}].amount must be a non-negative number`);
+  const takeProfitPct = o.takeProfitPct ?? 0;
+  const stopLossPct = o.stopLossPct ?? 0;
+  if (!isFiniteNumber(takeProfitPct) || takeProfitPct < 0)
+    throw new Error(`limitOrders[${i}].takeProfitPct must be a non-negative number`);
+  if (!isFiniteNumber(stopLossPct) || stopLossPct < 0)
+    throw new Error(`limitOrders[${i}].stopLossPct must be a non-negative number`);
   return {
     id: o.id,
     enabled: Boolean(o.enabled),
@@ -151,6 +157,8 @@ function normalizeLimitOrder(o, i) {
     targetPrice: o.targetPrice,
     amount: o.amount,
     sellAll: Boolean(o.sellAll),
+    takeProfitPct,
+    stopLossPct,
   };
 }
 

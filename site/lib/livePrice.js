@@ -144,22 +144,50 @@ async function quotePlsValue(token, tokensHeldRaw) {
   return Number(formatEther(best));
 }
 
+// Decimals and symbol never change for a given token - cached per server
+// process so pricing five open positions in the same token (or the same
+// position re-priced on every poll) doesn't repeat two RPC calls it already
+// has the answer to.
+const tokenMetaCache = new Map();
+async function getTokenMeta(token) {
+  const key = token.toLowerCase();
+  const cached = tokenMetaCache.get(key);
+  if (cached) return cached;
+  const erc = new Contract(token, ERC20_ABI, getProvider());
+  const meta = await Promise.all([
+    withTimeout(erc.decimals(), 8000).catch(() => 18),
+    withTimeout(erc.symbol(), 8000).catch(() => "???"),
+  ]).then(([decimals, symbol]) => ({ decimals, symbol }));
+  tokenMetaCache.set(key, meta);
+  return meta;
+}
+
 /**
  * Adds live valueNowPls/pnlPct to each open position (field names kept as-is
  * for shape-compatibility with the keeper's history schema - the values are
- * in whichever base unit this chain uses). A quote failure (e.g. a pair that
- * has lost all liquidity) leaves those fields null rather than throwing -
- * one unpriceable token shouldn't blank out the whole dashboard.
+ * in whichever base unit this chain uses), plus tokensHeld/symbol - the
+ * actual quantity held, decimals-correct, not just what was spent to get it.
+ * Knowing you spent 900 PLS doesn't tell you what you're holding; knowing you
+ * hold 1,204.5 INC does. A quote or metadata failure leaves those fields
+ * null rather than throwing - one unpriceable token shouldn't blank out the
+ * whole dashboard.
  */
 async function priceOpenPositions(openPositions) {
   return Promise.all(openPositions.map(async (p) => {
+    let valueNowPls = null;
+    let pnlPct = null;
+    let tokensHeld = null;
+    let symbol = null;
     try {
-      const valueNowPls = await quotePlsValue(p.token, p.tokens_held);
-      const pnlPct = p.spent_pls > 0 ? ((valueNowPls - p.spent_pls) / p.spent_pls) * 100 : null;
-      return { ...p, valueNowPls, pnlPct };
-    } catch {
-      return { ...p, valueNowPls: null, pnlPct: null };
-    }
+      valueNowPls = await quotePlsValue(p.token, p.tokens_held);
+      pnlPct = p.spent_pls > 0 ? ((valueNowPls - p.spent_pls) / p.spent_pls) * 100 : null;
+    } catch { /* leave valueNowPls/pnlPct null */ }
+    try {
+      const meta = await getTokenMeta(p.token);
+      tokensHeld = Number(formatUnits(BigInt(p.tokens_held), meta.decimals));
+      symbol = meta.symbol;
+    } catch { /* leave tokensHeld/symbol null */ }
+    return { ...p, valueNowPls, pnlPct, tokensHeld, symbol };
   }));
 }
 

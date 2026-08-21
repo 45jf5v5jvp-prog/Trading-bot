@@ -347,8 +347,18 @@ export async function tick(): Promise<void> {
     minLiquidityPls: Math.min(...candidates.map((c) => c.discovery.minLiquidityPls)),
     maxBuyTaxBps: Math.max(...candidates.map((c) => c.discovery.maxBuyTaxBps)),
     maxSellTaxBps: Math.max(...candidates.map((c) => c.discovery.maxSellTaxBps)),
-    requireLpLock: candidates.every((c) => c.discovery.requireLpLock),
-    requireOwnerRenounced: candidates.every((c) => c.discovery.requireOwnerRenounced),
+    // Always false, NOT candidates.every(...) - that contradicted the "loosest
+    // bar" comment above and was a real bug: the shared screen decides pass/
+    // fail ONCE for every vault (see evaluateWatchedToken's `if (s.verdict
+    // !== "pass") return`), so gating it on "every vault wants LP lock" meant
+    // one vault still requiring it silently blocked the opportunity for every
+    // OTHER vault too, even ones that had turned the requirement off.
+    // screenOpportunity always computes the real lpLockedPct/ownerRenounced
+    // regardless of this flag - dispatch() below already re-checks each
+    // vault's own D.requireLpLock/D.requireOwnerRenounced against that real
+    // data, which is the only place this decision should happen, per-vault.
+    requireLpLock: false,
+    requireOwnerRenounced: false,
   };
 
   const from = Math.floor(Date.now() / 1000) - DETECT_WINDOW_HOURS * 3600;

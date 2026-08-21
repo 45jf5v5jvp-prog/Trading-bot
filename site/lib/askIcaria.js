@@ -1,5 +1,7 @@
 const { JsonRpcProvider, Contract, Interface, formatEther, parseEther, toBeHex } = require("ethers");
 const { CHAIN } = require("./chain");
+const { getRecentPrices } = require("./keeperDb");
+const { toCandles, snapshot } = require("./indicators");
 
 /**
  * Ask Icaria: answers a free-form question about ANY token address the user
@@ -119,6 +121,57 @@ async function liquidityPls(token) {
   return { liq: Number(formatEther(plsSide)), pair };
 }
 
+// Same candle bucket size Hunter Bot detects on (keeper/src/hunter.ts's
+// CANDLE_MINUTES), and a wide enough lookback for a real RSI/MACD/Bollinger/
+// ATR read - the same window keeper/src/hunter.ts's LOOKBACK_HOURS uses.
+const CANDLE_MINUTES = 15;
+const TECHNICAL_LOOKBACK_HOURS = 48;
+
+function priceMovePct(rows, sinceTs) {
+  const inWindow = rows.filter((r) => r.ts >= sinceTs);
+  if (inWindow.length < 2) return null;
+  const first = inWindow[0].price;
+  const last = inWindow[inWindow.length - 1].price;
+  if (first <= 0) return null;
+  return ((last - first) / first) * 100;
+}
+
+/**
+ * Price action and technicals from the keeper's own price history (see
+ * keeperDb.js's getRecentPrices) - this is what was missing before: Ask
+ * Icaria could describe a token's tax/LP/renounce facts but had nothing to
+ * say about what the price is actually doing or whether a technical setup
+ * looks good, which is usually exactly what someone asking "is this a good
+ * buy right now" wants to know. All fields null (not zero, not omitted) if
+ * the keeper has no price history for this token yet - a token nobody has
+ * watched long enough to have a real read on, not a token with a flat price.
+ */
+function buildTechnicalProfile(token, nowMs = Date.now()) {
+  const nowSec = Math.floor(nowMs / 1000);
+  const rows = getRecentPrices(token, nowSec - TECHNICAL_LOOKBACK_HOURS * 3600);
+  if (rows.length === 0) {
+    return {
+      priceNow: null, priceMove1hPct: null, priceMove24hPct: null,
+      rsi: null, macdHistogram: null, macdBullishCross: null, bollingerPercentB: null,
+      atrPct: null, volRatio: null, historyHours: 0,
+    };
+  }
+  const candles = toCandles(rows, CANDLE_MINUTES * 60);
+  const snap = snapshot(candles);
+  return {
+    priceNow: rows[rows.length - 1].price,
+    priceMove1hPct: priceMovePct(rows, nowSec - 3600),
+    priceMove24hPct: priceMovePct(rows, nowSec - 86400),
+    rsi: snap?.rsi ?? null,
+    macdHistogram: snap?.macd?.histogram ?? null,
+    macdBullishCross: snap?.macd?.bullishCross ?? null,
+    bollingerPercentB: snap?.bollinger?.percentB ?? null,
+    atrPct: snap?.atrPct ?? null,
+    volRatio: snap?.volRatio ?? null,
+    historyHours: (rows[rows.length - 1].ts - rows[0].ts) / 3600,
+  };
+}
+
 /**
  * Builds the full mechanical profile for a token address, no AI involved.
  * Returns { error } instead of throwing when the token can't be evaluated
@@ -145,7 +198,8 @@ async function buildProfile(token) {
     sellable: sim.sellable, buyTaxBps: sim.buyTaxBps, sellTaxBps: sim.sellTaxBps,
     roundTripLossBps: sim.roundTripLossBps, honeypotLikely: sim.roundTripLossBps > HONEYPOT_MAX_LOSS_BPS || !sim.sellable,
     lpLockedPct: lpPct, ownerRenounced: renounced,
+    ...buildTechnicalProfile(token),
   };
 }
 
-module.exports = { buildProfile, getProvider };
+module.exports = { buildProfile, getProvider, buildTechnicalProfile, priceMovePct };

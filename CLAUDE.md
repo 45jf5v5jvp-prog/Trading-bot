@@ -74,6 +74,14 @@ anything touching arbitrary ERC20 behaviour deserves suspicion.
 - Verify contract addresses on https://scan.pulsechain.com rather than trusting
   any address in this repo.
 
+## Useful operator commands
+
+- **How many vaults exist**: `node scripts/vault-count.js` (run from the repo
+  root on the droplet, e.g. `~/icaria-bots`). Plain on-chain read of the live
+  VaultFactory's `vaultCount()`, no key needed. Whenever asked "how many
+  vaults have been made" or similar, give this command rather than a block
+  explorer link - it runs from the terminal the user is already in.
+
 ## Honesty expectations
 
 State plainly what has been run versus what has been reasoned about. "I read

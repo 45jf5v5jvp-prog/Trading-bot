@@ -83,8 +83,8 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
         <p className="hint" style={{ margin: "4px 0 0" }}>{o.narrative}</p>
         {o.aiConfidence && (
           <p className="hint" style={{ margin: "4px 0 0", color: CONFIDENCE_COLOR[o.aiConfidence] }}>
-            AI: {o.aiRecommend ? "would buy" : "would not buy"} ({o.aiConfidence} confidence)
-            {o.aiRecommend && o.aiSuggestedAmountPls
+            AI: would buy ({o.aiConfidence} confidence)
+            {o.aiSuggestedAmountPls
               ? ` — sizing this at ${Math.round(o.aiSuggestedAmountPls).toLocaleString()} ${CHAIN.nativeSymbol}`
               : ""}
           </p>
@@ -140,19 +140,29 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
  * that's no longer real.
  */
 export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, onCopyFallback }) {
+  // A mechanical pass (verdict === "pass", the only kind that reaches this
+  // list at all) still gets an AI opinion layered on top for Hunter Bot and
+  // Discovery Bot in Full AI mode. Showing every mechanically-passed token
+  // including ones the AI itself flagged as bad buys made the feed read like
+  // generic token info instead of a "here's what to buy" list - so anything
+  // the AI explicitly said not to buy is hidden here, not just deprioritized.
+  // A token with no AI opinion at all (AI review off, or not yet run) still
+  // shows, since "no opinion" isn't the same as "don't buy".
+  const shown = opportunities?.filter((o) => o.aiConfidence == null || o.aiRecommend);
   return (
     <div>
       <div className="section-label">Opportunities</div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Tokens on {CHAIN.dexName} that Discovery Bot spotted moving (price and liquidity climbing
-        together) or Hunter Bot spotted looking oversold (RSI/MACD/Bollinger). Turn either one on
-        above to start seeing new ones. Copy a token's address to look it up yourself before
-        trusting the screen alone, or set your own amount and buy it directly.
+        together) or Hunter Bot spotted looking oversold (RSI/MACD/Bollinger), and that the AI
+        didn't flag as a bad buy. Turn either bot on above to start seeing new ones. Copy a
+        token's address to look it up yourself before trusting the screen alone, or set your own
+        amount and buy it directly.
       </p>
-      {(!opportunities || opportunities.length === 0) && (
+      {(!shown || shown.length === 0) && (
         <p className="hint">Nothing found yet. This fills in as Discovery Bot or Hunter Bot runs.</p>
       )}
-      {opportunities?.map((o) => (
+      {shown?.map((o) => (
         <OpportunityRow key={o.id} o={o} onBuy={onBuy} buyState={buyStates?.[o.id]} onCopyFallback={onCopyFallback} />
       ))}
     </div>

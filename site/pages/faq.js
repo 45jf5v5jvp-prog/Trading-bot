@@ -142,6 +142,57 @@ export default function Faq() {
             by notifying you instead of ever buying blind.
           </Q>
 
+          <Q q="What's the difference between the Hunter Bot and Discovery Bot?">
+            Both scan every token the keeper has ever seen on {CHAIN.dexName}, not just new launches -
+            but they're looking for opposite things, using different math.
+            <div className="table-wrap" style={{ marginTop: 10 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Discovery Bot</th>
+                    <th>Hunter Bot</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>What it looks for</td>
+                    <td>Price and liquidity both climbing together over the last hour - the
+                      signature of real buying pressure, not a wash-traded pump</td>
+                    <td>Oversold setups from real technical indicators: RSI, MACD crossovers,
+                      Bollinger Bands</td>
+                  </tr>
+                  <tr>
+                    <td>The idea</td>
+                    <td>This is breaking out right now, real money is behind it</td>
+                    <td>This has been beaten down and is statistically due for a bounce</td>
+                  </tr>
+                  <tr>
+                    <td>History needed before it can act</td>
+                    <td>About 1 hour of price history per token</td>
+                    <td>About 9 hours of price history per token - RSI/MACD/Bollinger need a real
+                      time series to mean anything</td>
+                  </tr>
+                  <tr>
+                    <td>Sizing</td>
+                    <td>A fixed amount per buy you set (or a % of balance via Quick Setup)</td>
+                    <td>AI-decided position sizing within a max-per-trade cap, from a dedicated
+                      slice of your vault you choose</td>
+                  </tr>
+                  <tr>
+                    <td>Extra safety gate</td>
+                    <td>None beyond the standard honeypot/tax/LP-lock/renounce screen</td>
+                    <td>Optionally gated behind an AI judgment call before auto-buying - if no AI
+                      key is configured it fails safe by notifying instead of buying blind</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            Both run the exact same honeypot/tax/LP-lock/renounce screen before anything is ever
+            shown as buyable, and both support notify or auto-buy mode. Discovery reacts to a move
+            already happening; Hunter tries to catch one before it happens.
+          </Q>
+
           <Q q="What is Ask Icaria?">
             Paste in any token address - not just ones a bot already flagged - and get a plain-English
             read on it. It runs the exact same mechanical checks every bot here runs before ever

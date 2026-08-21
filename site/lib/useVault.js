@@ -14,7 +14,7 @@ import { getWalletConnectProvider, walletConnectConfigured } from "./walletConne
  * Polling a plain RPC directly sidesteps whatever the wallet's provider
  * is doing internally.
  */
-async function waitForReceipt(txHash, { timeoutMs = 120_000, intervalMs = 3000 } = {}) {
+export async function waitForReceipt(txHash, { timeoutMs = 120_000, intervalMs = 3000 } = {}) {
   const rpc = new JsonRpcProvider(RPC_URL);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

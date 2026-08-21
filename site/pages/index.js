@@ -23,6 +23,7 @@ import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
 import PnlSnapshot from "../components/PnlSnapshot";
 import Sun from "../components/Sun";
+import ManageVaultByAddress from "../components/ManageVaultByAddress";
 
 /** Balance in the chain's wrapped base token. The per-chain decimal budget
  * comes from the chain preset: WPLS balances are millions where fractional
@@ -477,6 +478,8 @@ export default function Dashboard() {
             </button>
           </div>
         )}
+
+        {account && <ManageVaultByAddress getProvider={getProvider} account={account} />}
 
         {account && vaultAddress && vaultInfo && (
           <div>

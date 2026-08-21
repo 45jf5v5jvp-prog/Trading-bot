@@ -1,5 +1,7 @@
+const { formatUnits } = require("ethers");
 const { buildProfile } = require("../../../../lib/askIcaria");
 const { askAboutToken } = require("../../../../lib/claude");
+const { getPositions } = require("../../../../lib/keeperDb");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -14,7 +16,10 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
  * always returned, even if the AI is unavailable - that's the part that
  * actually protects money. The `answer` field is the AI's plain-English
  * take on top of it, or null if no ANTHROPIC_API_KEY is configured on this
- * deployment.
+ * deployment. If this vault has an open position in the exact token asked
+ * about, `profile.position` carries its entry price/spend/current P&L, so
+ * "should I sell" gets answered against the actual cost basis instead of
+ * generic technicals - null if the vault doesn't hold it.
  */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -52,6 +57,30 @@ export default async function handler(req, res) {
     res.status(200).json({ profile: null, answer: null, error: profile.error });
     return;
   }
+
+  // If this vault already holds an open position in this exact token, a
+  // "should I sell" question needs the actual cost basis to mean anything -
+  // "the technicals look weak" is a very different answer at +40% than at
+  // -40%. Best-effort: a missing/unreadable keeper.db just means no position
+  // context, not a failure of the whole request.
+  profile.position = null;
+  try {
+    const open = getPositions(address).open;
+    const held = open.find((p) => p.token.toLowerCase() === token.toLowerCase());
+    if (held) {
+      const tokensHeld = Number(formatUnits(BigInt(held.tokens_held), profile.decimals ?? 18));
+      profile.position = {
+        bot: held.bot,
+        spentPls: held.spent_pls,
+        entryPrice: held.entry_price,
+        tokensHeld,
+        openedAt: held.opened_at,
+        pnlPct: profile.priceNow != null && held.entry_price > 0
+          ? ((profile.priceNow - held.entry_price) / held.entry_price) * 100
+          : null,
+      };
+    }
+  } catch { /* no position context available - describeProfile handles null fine */ }
 
   const answer = await askAboutToken(profile, question.trim());
   res.status(200).json({ profile, answer, error: null });

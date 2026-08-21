@@ -187,6 +187,7 @@ async function buildProfile(token) {
 
   const t = new Contract(token, ERC20_ABI, getProvider());
   const symbol = await t.symbol().catch(() => "???");
+  const decimals = await t.decimals().catch(() => 18);
 
   const sim = await simulate(token);
   if (!sim) return { error: "Honeypot/tax simulation is unavailable right now (no probe configured, or the call failed) - refusing to guess." };
@@ -194,7 +195,7 @@ async function buildProfile(token) {
   const [lpPct, renounced] = await Promise.all([lpLockedPct(pair), ownerRenounced(token)]);
 
   return {
-    symbol, token, pair, liqPls: liq,
+    symbol, token, pair, liqPls: liq, decimals: Number(decimals),
     sellable: sim.sellable, buyTaxBps: sim.buyTaxBps, sellTaxBps: sim.sellTaxBps,
     roundTripLossBps: sim.roundTripLossBps, honeypotLikely: sim.roundTripLossBps > HONEYPOT_MAX_LOSS_BPS || !sim.sellable,
     lpLockedPct: lpPct, ownerRenounced: renounced,

@@ -34,6 +34,17 @@ function describeProfile(p) {
       "to have a price read - say so plainly rather than guessing at price action or technicals.",
     );
   }
+  if (p.position) {
+    const pos = p.position;
+    lines.push(
+      `This vault ALREADY HOLDS an open position in this token (opened by the ${pos.bot} bot): ` +
+      `spent ${Math.round(pos.spentPls).toLocaleString()} PLS at an entry price of ${pos.entryPrice} ` +
+      `PLS/token, currently holding ${pos.tokensHeld.toLocaleString()} tokens` +
+      (pos.pnlPct != null ? `, unrealized P&L ${pos.pnlPct >= 0 ? "+" : ""}${pos.pnlPct.toFixed(1)}%.` : "."),
+    );
+  } else {
+    lines.push("This vault does NOT currently hold this token - there is no open position to sell.");
+  }
   return lines.join("\n");
 }
 
@@ -51,7 +62,14 @@ const SYSTEM_PROMPT =
   "cross) and that it looks like a reasonable entry; if they don't, say directly that this doesn't " +
   "look like a good time to enter given how the technicals look right now, and name what's missing " +
   "or working against it (e.g. RSI neutral, no volume confirmation, price still falling). If no " +
-  "price history is on file yet, say so plainly instead of guessing. Beyond the numbers, your job " +
+  "price history is on file yet, say so plainly instead of guessing. When the user asks something " +
+  "like 'should I sell' or 'should I hold,' check whether the profile says the vault already holds " +
+  "an open position in this token. If it does, ground the answer in the ACTUAL cost basis and P&L " +
+  "given, not just the technicals in the abstract - 'the technicals look weak' means something very " +
+  "different at +40% than at -40%, so say which situation this is and what that implies (locking in " +
+  "a gain, cutting a loss, or holding through noise). If the vault does not hold this token, say so " +
+  "plainly and answer the sell/hold question hypothetically off the technicals alone, making clear " +
+  "you are not describing an actual position. Beyond the numbers, your job " +
   "is judgment the numbers alone don't cover: does the overall picture look like real organic " +
   "interest, or engineered/suspicious? You are not certain of anything - a token can turn hostile " +
   "in the next block, and past price action predicts nothing about the next candle. Say so when " +

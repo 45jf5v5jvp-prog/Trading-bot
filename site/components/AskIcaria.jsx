@@ -104,6 +104,17 @@ export default function AskIcaria({ vaultAddress, getProvider }) {
             · sell tax {(profile.sellTaxBps / 100).toFixed(1)}% · LP locked {profile.lpLockedPct.toFixed(1)}%
             · owner {profile.ownerRenounced ? "renounced" : "not renounced"}
           </p>
+          {profile.position && (
+            <p className="hint" style={{ margin: "4px 0 0" }}>
+              You hold this in the vault: {profile.position.tokensHeld.toLocaleString(undefined, { maximumFractionDigits: 4 })}{" "}
+              tokens, spent {Math.round(profile.position.spentPls).toLocaleString()} {CHAIN.nativeSymbol} via the {profile.position.bot} bot
+              {profile.position.pnlPct != null && (
+                <span className={profile.position.pnlPct >= 0 ? "pnl-pos" : "pnl-neg"}>
+                  {" "}({profile.position.pnlPct >= 0 ? "+" : ""}{profile.position.pnlPct.toFixed(1)}%)
+                </span>
+              )}
+            </p>
+          )}
           {result.answer ? (
             <p className="hint" style={{ marginTop: 8 }}>{result.answer}</p>
           ) : (

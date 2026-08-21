@@ -125,13 +125,41 @@ async function evaluateToken(token: string, pair: string, txHash: string): Promi
   // many subscribers should not queue up behind a slow RPC round trip per vault.
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const L = v.launch;
-    if (firesToday(v.address) >= L.maxPerDay) return;
-    if (s.buyTaxBps > L.maxBuyTaxBps) return;
-    if (s.sellTaxBps > L.maxSellTaxBps) return;
-    if (L.requireLpLock && s.lpLockedPct < 95) return;
-    if (s.deployerPct > L.maxDeployerPct) return;
-    if (s.liqPls < L.minLiquidityPls) return;
-    if (L.requireOwnerRenounced && !s.ownerRenounced) return;
+    // Every one of these was a silent `return` with nothing to show for it -
+    // a token that passed the shared screen could still get rejected here by
+    // one vault's own stricter settings, and there was no way to tell that
+    // had even happened short of reading this source file. Logged now so a
+    // vault that "never buys anything" is diagnosable from its own logs
+    // instead of a guess (see keeper.db's `screened` table for the shared
+    // screen's own pass/fail, which this sits downstream of).
+    if (firesToday(v.address) >= L.maxPerDay) {
+      log("info", "launch", `${v.address} ${token}: already hit its ${L.maxPerDay}/day launch cap, skipping`);
+      return;
+    }
+    if (s.buyTaxBps > L.maxBuyTaxBps) {
+      log("info", "launch", `${v.address} ${token}: buy tax ${(s.buyTaxBps / 100).toFixed(1)}% over this vault's ${(L.maxBuyTaxBps / 100).toFixed(1)}% limit, skipping`);
+      return;
+    }
+    if (s.sellTaxBps > L.maxSellTaxBps) {
+      log("info", "launch", `${v.address} ${token}: sell tax ${(s.sellTaxBps / 100).toFixed(1)}% over this vault's ${(L.maxSellTaxBps / 100).toFixed(1)}% limit, skipping`);
+      return;
+    }
+    if (L.requireLpLock && s.lpLockedPct < 95) {
+      log("info", "launch", `${v.address} ${token}: only ${s.lpLockedPct.toFixed(1)}% of LP is locked or burned and this vault requires LP lock, skipping`);
+      return;
+    }
+    if (s.deployerPct > L.maxDeployerPct) {
+      log("info", "launch", `${v.address} ${token}: deployer holds ${s.deployerPct.toFixed(1)}% of supply, over this vault's ${L.maxDeployerPct}% limit, skipping`);
+      return;
+    }
+    if (s.liqPls < L.minLiquidityPls) {
+      log("info", "launch", `${v.address} ${token}: liquidity ${Math.round(s.liqPls)} PLS below this vault's ${L.minLiquidityPls} PLS floor, skipping`);
+      return;
+    }
+    if (L.requireOwnerRenounced && !s.ownerRenounced) {
+      log("info", "launch", `${v.address} ${token}: owner has not renounced control and this vault requires it, skipping`);
+      return;
+    }
 
     // Holding cap, same guard the rule bot uses. A fresh launch token has no
     // position yet, so its current value is whatever the vault already bought.

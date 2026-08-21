@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CHAIN } from "../lib/contracts";
 import DrillInScreen from "./DrillInScreen";
 import InfoButton from "./InfoButton";
+import NumberField from "./NumberField";
 
 function short(addr) {
   if (!addr) return "-";
@@ -159,15 +160,8 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
       </div>
       {passed && !bought && !o.stale && (
         <span className="row" style={{ gap: 6, alignItems: "center" }}>
-          <input
-            type="number"
-            placeholder={CHAIN.nativeSymbol}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            onFocus={(e) => e.target.select()}
-            disabled={busy}
-            style={{ width: 90 }}
-          />
+          <NumberField value={amount} onChange={setAmount} disabled={busy} style={{ width: 90 }} />
+          <span style={{ color: "var(--ash)", fontSize: 12 }}>{CHAIN.nativeSymbol}</span>
           <button
             type="button"
             className="btn btn-small"

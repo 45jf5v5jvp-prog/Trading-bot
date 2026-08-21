@@ -1,4 +1,5 @@
 import { numberFieldProps } from "../lib/numberField";
+import NumberField from "./NumberField";
 import { CHAIN } from "../lib/contracts";
 
 /**
@@ -31,7 +32,7 @@ export default function SnipeEditor({ snipe, onChange, onRemove }) {
 
       <div className="field-inline">
         <label>{CHAIN.nativeSymbol} to spend</label>
-        <input {...num("amountPls")} min="0" style={{ width: 110 }} />
+        <NumberField {...num("amountPls")} min="0" style={{ width: 110 }} />
       </div>
       <p className="hint" style={{ marginTop: -4 }}>
         Checked every few seconds. Fires once, the moment this address has a real pool to trade
@@ -44,16 +45,16 @@ export default function SnipeEditor({ snipe, onChange, onRemove }) {
 
       <div className="field-inline">
         <label>Take profit %</label>
-        <input {...num("tpPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("tpPct")} min="0" style={{ width: 80 }} />
         <label>Stop loss %</label>
-        <input {...num("slPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("slPct")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Trailing stop %</label>
-        <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
         <label>Time exit (min)</label>
-        <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("timeExitMin")} min="0" style={{ width: 80 }} />
       </div>
     </div>
   );

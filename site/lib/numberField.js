@@ -1,17 +1,11 @@
 /**
- * Props for a controlled numeric <input>. While the field is empty (the user
- * backspaced everything out), the underlying state holds "" rather than
- * being forced back to 0 - otherwise a controlled input whose value snaps
- * straight back to "0" on every keystroke makes backspace look broken, since
- * the box never actually appears empty. Blurring an empty field commits it
- * to 0 rather than leaving "" sitting in state indefinitely.
+ * Props for a controlled <NumberField> (see components/NumberField.jsx),
+ * which formats the value with comma separators as you type and owns the
+ * "stay empty while backspacing, commit to 0 on blur" behavior this used to
+ * implement directly for a plain <input type="number">. Kept as a one-line
+ * helper so every call site stays `<NumberField {...numberFieldProps(...)} />`
+ * regardless of where value/onChange actually live.
  */
 export function numberFieldProps(value, onChange) {
-  return {
-    type: "number",
-    value,
-    onFocus: (e) => e.target.select(),
-    onChange: (e) => onChange(e.target.value === "" ? "" : Number(e.target.value)),
-    onBlur: (e) => { if (e.target.value === "") onChange(0); },
-  };
+  return { value, onChange };
 }

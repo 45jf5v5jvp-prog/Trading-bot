@@ -1,4 +1,5 @@
 import { numberFieldProps } from "../lib/numberField";
+import NumberField from "./NumberField";
 import DurationField from "./DurationField";
 
 /**
@@ -35,37 +36,37 @@ export default function RuleEditor({ rule, onChange, onRemove }) {
 
       <div className="field-inline">
         <label>Threshold %</label>
-        <input {...num("thresholdPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("thresholdPct")} min="0" style={{ width: 80 }} />
         <label>over</label>
         <DurationField hours={rule.lookbackHours ?? 0} onChange={(h) => onChange({ ...rule, lookbackHours: h })} />
       </div>
 
       <div className="field-inline">
         <label>Allocate % of vault per trade</label>
-        <input {...num("allocPct")} min="0" max="100" style={{ width: 80 }} />
+        <NumberField {...num("allocPct")} min="0" max="100" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Cooldown</label>
         <DurationField hours={rule.cooldownHours ?? 0} onChange={(h) => onChange({ ...rule, cooldownHours: h })} />
         <label>Max fires/day</label>
-        <input {...num("maxFires")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("maxFires")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="sub-label">Sell targets (leave 0 to disable)</div>
 
       <div className="field-inline">
         <label>Take profit %</label>
-        <input {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
         <label>Stop loss %</label>
-        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("stopLossPct")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Trailing stop %</label>
-        <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
         <label>Time exit (min)</label>
-        <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("timeExitMin")} min="0" style={{ width: 80 }} />
       </div>
     </div>
   );

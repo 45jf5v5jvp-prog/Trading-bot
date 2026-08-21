@@ -1,4 +1,5 @@
 import { numberFieldProps } from "../lib/numberField";
+import NumberField from "./NumberField";
 import { CHAIN } from "../lib/contracts";
 
 /**
@@ -41,11 +42,11 @@ export default function HunterSettings({ hunter, onChange }) {
 
       <div className="field-inline">
         <label>Allocated {CHAIN.nativeSymbol}</label>
-        <input {...num("allocatedPls")} min="0" style={{ width: 110 }} />
+        <NumberField {...num("allocatedPls")} min="0" style={{ width: 110 }} />
         <label>Max {CHAIN.nativeSymbol} per buy</label>
-        <input {...num("maxPerTradePls")} min="0" style={{ width: 100 }} />
+        <NumberField {...num("maxPerTradePls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
-        <input {...num("maxPerDay")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("maxPerDay")} min="0" style={{ width: 80 }} />
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         Hunter Bot never has more than "Allocated" deployed at once across its own open positions -
@@ -61,7 +62,7 @@ export default function HunterSettings({ hunter, onChange }) {
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
         <input type="checkbox" checked={hunter.requireRsi} onChange={(e) => onChange({ ...hunter, requireRsi: e.target.checked })} />
         RSI oversold, at or below
-        <input {...num("rsiOversold")} min="0" max="100" style={{ width: 70 }} disabled={!hunter.requireRsi} />
+        <NumberField {...num("rsiOversold")} min="0" max="100" style={{ width: 70 }} disabled={!hunter.requireRsi} />
       </label>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
@@ -81,7 +82,7 @@ export default function HunterSettings({ hunter, onChange }) {
 
       <div className="field-inline">
         <label>Min liquidity ({CHAIN.nativeSymbol})</label>
-        <input {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
+        <NumberField {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
       </div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
@@ -93,7 +94,7 @@ export default function HunterSettings({ hunter, onChange }) {
       </label>
       <div className="field-inline" style={{ marginLeft: 21 }}>
         <label>Recent trading at least</label>
-        <input {...num("minVolumeRatio")} min="0" step="0.1" style={{ width: 70 }} disabled={!hunter.requireVolumeConfirmation} />
+        <NumberField {...num("minVolumeRatio")} min="0" step="0.1" style={{ width: 70 }} disabled={!hunter.requireVolumeConfirmation} />
         <span className="hint" style={{ margin: 0 }}>x this token's own baseline</span>
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
@@ -150,15 +151,15 @@ export default function HunterSettings({ hunter, onChange }) {
         {hunter.exitMode === "limited" && (
           <>
             <label>Take profit %</label>
-            <input {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
+            <NumberField {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
           </>
         )}
         <label>Stop loss %{hunter.exitMode === "full" ? " (mandatory floor)" : ""}</label>
-        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} disabled={hunter.useAtrStop} />
+        <NumberField {...num("stopLossPct")} min="0" style={{ width: 80 }} disabled={hunter.useAtrStop} />
         {hunter.exitMode === "limited" && (
           <>
             <label>Time exit (min)</label>
-            <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
+            <NumberField {...num("timeExitMin")} min="0" style={{ width: 80 }} />
           </>
         )}
       </div>
@@ -169,7 +170,7 @@ export default function HunterSettings({ hunter, onChange }) {
       </label>
       <div className="field-inline" style={{ marginLeft: 21 }}>
         <label>Multiplier</label>
-        <input {...num("atrStopMultiplier")} min="0" step="0.5" style={{ width: 60 }} disabled={!hunter.useAtrStop} />
+        <NumberField {...num("atrStopMultiplier")} min="0" step="0.5" style={{ width: 60 }} disabled={!hunter.useAtrStop} />
         <span className="hint" style={{ margin: 0 }}>x ATR</span>
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
@@ -181,7 +182,7 @@ export default function HunterSettings({ hunter, onChange }) {
       {hunter.exitMode === "limited" && (
         <div className="field-inline">
           <label>Trailing stop %</label>
-          <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+          <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
         </div>
       )}
 
@@ -189,9 +190,9 @@ export default function HunterSettings({ hunter, onChange }) {
 
       <div className="field-inline">
         <label>Max buy tax (bps)</label>
-        <input {...num("maxBuyTaxBps")} min="0" style={{ width: 90 }} />
+        <NumberField {...num("maxBuyTaxBps")} min="0" style={{ width: 90 }} />
         <label>Max sell tax (bps)</label>
-        <input {...num("maxSellTaxBps")} min="0" style={{ width: 90 }} />
+        <NumberField {...num("maxSellTaxBps")} min="0" style={{ width: 90 }} />
       </div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { numberFieldProps } from "../lib/numberField";
+import NumberField from "./NumberField";
 import { CHAIN } from "../lib/contracts";
 import { quoteTokenPrice } from "../lib/quoteTokenPrice";
 
@@ -110,7 +111,7 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
       {mode === "price" ? (
         <div className="field-inline">
           <label>Target price ({CHAIN.nativeSymbol} per token)</label>
-          <input {...num("targetPrice")} min="0" step="any" style={{ width: 160 }} />
+          <NumberField {...num("targetPrice")} min="0" step="any" style={{ width: 160 }} />
         </div>
       ) : (
         <>
@@ -157,7 +158,7 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
           {!order.sellAll && (
             <div className="field-inline">
               <label>Tokens to sell</label>
-              <input {...num("amount")} min="0" step="any" style={{ width: 160 }} />
+              <NumberField {...num("amount")} min="0" step="any" style={{ width: 160 }} />
             </div>
           )}
         </>
@@ -165,7 +166,7 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
         <>
           <div className="field-inline">
             <label>{CHAIN.nativeSymbol} to spend</label>
-            <input {...num("amount")} min="0" style={{ width: 160 }} />
+            <NumberField {...num("amount")} min="0" style={{ width: 160 }} />
           </div>
           <p className="hint" style={{ marginTop: -4 }}>
             Once this fills, the tokens become a tracked position with its own P&amp;L and a Close
@@ -174,12 +175,12 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
           </p>
           <div className="field-inline">
             <label>Take profit at +</label>
-            <input {...num("takeProfitPct")} min="0" step="any" style={{ width: 90 }} />
+            <NumberField {...num("takeProfitPct")} min="0" step="any" style={{ width: 90 }} />
             <span className="hint" style={{ margin: 0 }}>%</span>
           </div>
           <div className="field-inline">
             <label>Stop loss at &minus;</label>
-            <input {...num("stopLossPct")} min="0" step="any" style={{ width: 90 }} />
+            <NumberField {...num("stopLossPct")} min="0" step="any" style={{ width: 90 }} />
             <span className="hint" style={{ margin: 0 }}>%</span>
           </div>
         </>

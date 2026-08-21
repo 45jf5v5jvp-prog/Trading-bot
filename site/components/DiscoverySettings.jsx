@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { numberFieldProps } from "../lib/numberField";
+import NumberField from "./NumberField";
 import { CHAIN } from "../lib/contracts";
 import BotStatusBadge from "./BotStatusBadge";
 
@@ -209,9 +210,9 @@ export default function DiscoverySettings({ discovery, onChange, vaultBalance = 
 
       <div className="field-inline">
         <label>{CHAIN.nativeSymbol} per buy</label>
-        <input {...num("amountPls")} min="0" style={{ width: 100 }} />
+        <NumberField {...num("amountPls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
-        <input {...num("maxPerDay")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("maxPerDay")} min="0" style={{ width: 80 }} />
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         In notify mode this amount is also what a "Buy Now" click spends by default - Buy Now lets
@@ -222,9 +223,9 @@ export default function DiscoverySettings({ discovery, onChange, vaultBalance = 
 
       <div className="field-inline">
         <label>Min price move %</label>
-        <input {...num("minPriceMovePct")} min="0" style={{ width: 90 }} />
+        <NumberField {...num("minPriceMovePct")} min="0" style={{ width: 90 }} />
         <label>Min liquidity growth %</label>
-        <input {...num("minLiquidityGrowthPct")} min="0" style={{ width: 90 }} />
+        <NumberField {...num("minLiquidityGrowthPct")} min="0" style={{ width: 90 }} />
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         Lower thresholds catch smaller, more frequent moves - more trades, each less certain. Higher
@@ -233,30 +234,30 @@ export default function DiscoverySettings({ discovery, onChange, vaultBalance = 
 
       <div className="field-inline">
         <label>Min liquidity ({CHAIN.nativeSymbol})</label>
-        <input {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
+        <NumberField {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
       </div>
 
       <div className="field-inline">
         <label>Take profit %</label>
-        <input {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
         <label>Stop loss %</label>
-        <input {...num("stopLossPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("stopLossPct")} min="0" style={{ width: 80 }} />
         <label>Time exit (min)</label>
-        <input {...num("timeExitMin")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("timeExitMin")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="field-inline">
         <label>Trailing stop %</label>
-        <input {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+        <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
       </div>
 
       <div className="sub-label">Screening limits (a token failing any of these is never buyable, notify or auto-buy)</div>
 
       <div className="field-inline">
         <label>Max buy tax (bps)</label>
-        <input {...num("maxBuyTaxBps")} min="0" style={{ width: 90 }} />
+        <NumberField {...num("maxBuyTaxBps")} min="0" style={{ width: 90 }} />
         <label>Max sell tax (bps)</label>
-        <input {...num("maxSellTaxBps")} min="0" style={{ width: 90 }} />
+        <NumberField {...num("maxSellTaxBps")} min="0" style={{ width: 90 }} />
       </div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>

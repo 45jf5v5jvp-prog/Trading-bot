@@ -2,6 +2,7 @@ import { useState } from "react";
 import { askQuestion } from "../lib/askQuestion";
 import { buyFromAsk } from "../lib/buyFromAsk";
 import { CHAIN } from "../lib/contracts";
+import NumberField from "./NumberField";
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -115,11 +116,7 @@ export default function AskIcaria({ vaultAddress, getProvider }) {
           {canBuy ? (
             <div className="field-inline" style={{ marginTop: 10 }}>
               <label>{CHAIN.nativeSymbol} to spend</label>
-              <input
-                type="number" min="0" value={buyAmount}
-                onChange={(e) => setBuyAmount(e.target.value)}
-                style={{ width: 110 }}
-              />
+              <NumberField value={buyAmount} onChange={setBuyAmount} style={{ width: 110 }} />
               <button
                 type="button" className="btn btn-small" onClick={handleBuy}
                 disabled={buyState === "pending" || buyState === "requested"}

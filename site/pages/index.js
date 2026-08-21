@@ -10,6 +10,7 @@ import { buyOpportunity } from "../lib/buyOpportunity";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { APP_VERSION } from "../lib/version";
 import { numberFieldProps } from "../lib/numberField";
+import NumberField from "../components/NumberField";
 import { CHAIN } from "../lib/contracts";
 import { pnlForWindow } from "../lib/pnl";
 import RulesList from "../components/RulesList";
@@ -586,7 +587,7 @@ export default function Dashboard() {
               <div className="section-label">Deposit / Withdraw</div>
               <div className="field-inline">
                 <label>Amount ({CHAIN.baseSymbol})</label>
-                <input type="number" onFocus={(e) => e.target.select()} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 160 }} />
+                <NumberField value={amount} onChange={setAmount} asString style={{ width: 160 }} />
                 {/* The exact on-chain balance to full precision - the displayed
                     balance is truncated for reading and typing it back in can
                     never quite empty the vault. */}
@@ -771,7 +772,7 @@ export default function Dashboard() {
                   <div className="section-label">Safety</div>
                   <div className="field-inline">
                     <label>Never let one token exceed</label>
-                    <input {...numberFieldProps(config.maxHoldingPct, (v) => updateConfig({ ...config, maxHoldingPct: v }))}
+                    <NumberField {...numberFieldProps(config.maxHoldingPct, (v) => updateConfig({ ...config, maxHoldingPct: v }))}
                       min="0" max="100" style={{ width: 70 }} />
                     <span style={{ color: "var(--ash)", fontSize: 13 }}>% of the vault</span>
                   </div>

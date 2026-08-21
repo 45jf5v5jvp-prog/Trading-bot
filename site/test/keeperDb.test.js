@@ -61,7 +61,7 @@ setup.exec(`
     source TEXT NOT NULL DEFAULT 'discovery', rsi REAL, macd_histogram REAL, bollinger_percent_b REAL,
     ai_recommend INTEGER, ai_confidence TEXT, ai_reasoning TEXT, ai_suggested_amount_pls REAL,
     price_at_detection REAL, stale INTEGER NOT NULL DEFAULT 0, stale_reason TEXT,
-    atr_pct REAL, vol_ratio REAL
+    atr_pct REAL, vol_ratio REAL, signal_count INTEGER
   );
   CREATE TABLE discovery_actions (
     vault TEXT NOT NULL, opportunity_id INTEGER NOT NULL, ts INTEGER NOT NULL,

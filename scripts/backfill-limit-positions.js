@@ -92,7 +92,17 @@ async function main() {
 
     const transfers = decodeTransfers(receipt);
     const tokenIn = transfers.find((t) => t.to === vault && t.token !== WPLS);
-    const wplsOut = transfers.find((t) => t.from === vault && t.token === WPLS);
+    // BotVault.executeSwap sends TWO separate WPLS transfers out of the vault
+    // on a buy: fee+gasFee to the treasury FIRST, then the much larger
+    // remainder to the router for the actual swap (see BotVault.sol). Taking
+    // only the first match (an earlier version of this script's bug) grabs
+    // the small fee/gas charge, not the real trade size - summing every
+    // vault-outgoing WPLS transfer reconstructs the true full amountIn that
+    // was actually debited, which is what spent_pls means everywhere else in
+    // this codebase (see launch.ts/hunter.ts's own openPosition calls).
+    const wplsOutTotal = transfers
+      .filter((t) => t.from === vault && t.token === WPLS)
+      .reduce((sum, t) => sum + t.value, 0n);
 
     if (!tokenIn) {
       // Nothing non-WPLS arrived at the vault in this transaction - either a
@@ -102,7 +112,7 @@ async function main() {
       continue;
     }
 
-    const spentPls = wplsOut ? Number(ethers.formatEther(wplsOut.value)) : 0;
+    const spentPls = Number(ethers.formatEther(wplsOutTotal));
     console.log(
       `  [${APPLY ? "APPLY" : "DRY RUN"}] vault=${vault} order=${f.order_id} token=${tokenIn.token} ` +
       `tokensOut(raw)=${tokenIn.value.toString()} spentPls=${spentPls} tx=${f.tx_hash}`,

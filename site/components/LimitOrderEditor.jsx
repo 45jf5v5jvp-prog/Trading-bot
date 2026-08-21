@@ -42,9 +42,14 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
     }
   }
 
-  function handlePercentChange(v) {
-    setPercent(v);
-    if (currentPrice !== null) onChange({ ...order, targetPrice: currentPrice * (1 + v / 100) });
+  /** Same "let the field hold '' while editing" fix as lib/numberField.js -
+   * this one can't use that helper directly since clearing/retyping also
+   * needs to recompute targetPrice live, not just commit a plain number. */
+  function handlePercentChange(raw) {
+    setPercent(raw);
+    if (raw === "") return;
+    const v = Number(raw);
+    if (currentPrice !== null && Number.isFinite(v)) onChange({ ...order, targetPrice: currentPrice * (1 + v / 100) });
   }
 
   return (
@@ -107,7 +112,9 @@ export default function LimitOrderEditor({ order, onChange, onRemove }) {
             <input
               type="number" step="any"
               value={percent}
-              onChange={(e) => handlePercentChange(Number(e.target.value))}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => handlePercentChange(e.target.value)}
+              onBlur={(e) => { if (e.target.value === "") handlePercentChange("0"); }}
               style={{ width: 100 }}
             />
             <button type="button" className="btn btn-small" onClick={() => fetchCurrentPrice(true)}>

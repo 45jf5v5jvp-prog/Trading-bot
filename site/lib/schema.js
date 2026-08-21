@@ -31,7 +31,20 @@ const DEFAULT_DISCOVERY = {
   minPriceMovePct: 20, minLiquidityGrowthPct: 15, minLiquidityPls: CHAIN.minLiquidityDefault,
   takeProfitPct: 50, stopLossPct: 35, trailingStopPct: 0, timeExitMin: 60,
   maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true, requireOwnerRenounced: false,
+  // Which Quick Setup wizard answer produced the fields above, if any - null
+  // means "never used the wizard" or "answered manually below," not "no
+  // preference." Purely a site-side memory so the wizard (components/
+  // DiscoverySettings.jsx's QuickSetup) can show a returning owner's prior
+  // answers already collapsed instead of resetting to three blank questions
+  // on every page load - the keeper never reads these three fields, only
+  // the resolved numbers they produced.
+  quickSetupStyle: null, quickSetupRisk: null, quickSetupSize: null,
 };
+
+// Keep in sync with DiscoverySettings.jsx's STYLE_PRESETS/RISK_PRESETS/SIZE_PRESETS keys.
+const QUICK_SETUP_STYLE_KEYS = ["frequent", "balanced", "patient"];
+const QUICK_SETUP_RISK_KEYS = ["tight", "moderate", "loose"];
+const QUICK_SETUP_SIZE_KEYS = ["small", "medium", "large"];
 
 // Hunter Bot: hunts RSI/MACD/Bollinger dip-buying setups across every
 // watched token, trading a dedicated slice of the vault (allocatedPls)
@@ -152,6 +165,12 @@ function normalizeDiscovery(d) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
       throw new Error(`discovery.${field} must be a non-negative number`);
   }
+  if (merged.quickSetupStyle !== null && !QUICK_SETUP_STYLE_KEYS.includes(merged.quickSetupStyle))
+    throw new Error(`discovery.quickSetupStyle must be one of ${QUICK_SETUP_STYLE_KEYS.join(", ")}, or null`);
+  if (merged.quickSetupRisk !== null && !QUICK_SETUP_RISK_KEYS.includes(merged.quickSetupRisk))
+    throw new Error(`discovery.quickSetupRisk must be one of ${QUICK_SETUP_RISK_KEYS.join(", ")}, or null`);
+  if (merged.quickSetupSize !== null && !QUICK_SETUP_SIZE_KEYS.includes(merged.quickSetupSize))
+    throw new Error(`discovery.quickSetupSize must be one of ${QUICK_SETUP_SIZE_KEYS.join(", ")}, or null`);
   return {
     enabled: Boolean(merged.enabled),
     mode: merged.mode,
@@ -168,6 +187,9 @@ function normalizeDiscovery(d) {
     maxSellTaxBps: merged.maxSellTaxBps,
     requireLpLock: Boolean(merged.requireLpLock),
     requireOwnerRenounced: Boolean(merged.requireOwnerRenounced),
+    quickSetupStyle: merged.quickSetupStyle,
+    quickSetupRisk: merged.quickSetupRisk,
+    quickSetupSize: merged.quickSetupSize,
   };
 }
 

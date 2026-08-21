@@ -102,11 +102,18 @@ function Question({ prompt, options, value, onSelect }) {
  * or "trailing stop %" should be. Writes into the SAME config object the
  * manual fields below edit - nothing hidden, nothing that bypasses saving -
  * so the resulting numbers are visible and still hand-tunable afterward.
+ *
+ * The three answers themselves are saved too (discovery.quickSetupStyle/
+ * Risk/Size - see lib/schema.js), not just the numbers they produced, so a
+ * returning owner sees their prior answers already collapsed instead of
+ * three blank questions every time the page loads. Initialized straight
+ * from props rather than a load effect: by the time this mounts, `discovery`
+ * is already the real saved config, never a placeholder default.
  */
 function QuickSetup({ discovery, onChange, vaultBalance }) {
-  const [style, setStyle] = useState(null);
-  const [risk, setRisk] = useState(null);
-  const [size, setSize] = useState(null);
+  const [style, setStyle] = useState(discovery.quickSetupStyle ?? null);
+  const [risk, setRisk] = useState(discovery.quickSetupRisk ?? null);
+  const [size, setSize] = useState(discovery.quickSetupSize ?? null);
   const ready = style && risk && size;
   const amountPls = ready ? Math.round(vaultBalance * SIZE_PRESETS[size].pct) : 0;
 
@@ -125,6 +132,9 @@ function QuickSetup({ discovery, onChange, vaultBalance }) {
       trailingStopPct: s.trailingStopPct,
       timeExitMin: s.timeExitMin,
       stopLossPct: r.stopLossPct,
+      quickSetupStyle: style,
+      quickSetupRisk: risk,
+      quickSetupSize: size,
     });
   }
 

@@ -25,6 +25,28 @@ test("rejects a discovery mode that is not notify or autoBuy", () => {
   assert.throws(() => normalizeConfig({ discovery: { mode: "yolo" } }), /mode/);
 });
 
+test("discovery quickSetup answers default to null (never used the wizard)", () => {
+  const c = emptyConfig();
+  assert.equal(c.discovery.quickSetupStyle, null);
+  assert.equal(c.discovery.quickSetupRisk, null);
+  assert.equal(c.discovery.quickSetupSize, null);
+});
+
+test("discovery quickSetup answers round-trip through normalizeConfig - the actual bug this fixes", () => {
+  const out = normalizeConfig({
+    discovery: { quickSetupStyle: "balanced", quickSetupRisk: "moderate", quickSetupSize: "medium" },
+  });
+  assert.equal(out.discovery.quickSetupStyle, "balanced");
+  assert.equal(out.discovery.quickSetupRisk, "moderate");
+  assert.equal(out.discovery.quickSetupSize, "medium");
+});
+
+test("rejects an unknown discovery quickSetup answer", () => {
+  assert.throws(() => normalizeConfig({ discovery: { quickSetupStyle: "aggressive" } }), /quickSetupStyle/);
+  assert.throws(() => normalizeConfig({ discovery: { quickSetupRisk: "yolo" } }), /quickSetupRisk/);
+  assert.throws(() => normalizeConfig({ discovery: { quickSetupSize: "huge" } }), /quickSetupSize/);
+});
+
 test("rejects a negative discovery threshold", () => {
   assert.throws(() => normalizeConfig({ discovery: { minPriceMovePct: -5 } }), /minPriceMovePct/);
 });

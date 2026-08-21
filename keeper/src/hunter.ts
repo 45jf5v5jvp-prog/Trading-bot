@@ -50,17 +50,20 @@ const ATR_STOP_MAX_PCT = 80;
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
 // How many of {RSI oversold, bullish MACD cross, Bollinger lower band} have
-// to agree before this counts as a real setup at all. One indicator alone
-// is noise a lot of the time; two independent signals landing on the same
-// token together is a much stronger tell. See evaluateWatchedToken and
-// technicalConfidence() below - confidence scales with how many actually hit.
-const MIN_AGREEING_SIGNALS = 2;
+// to agree before this counts as a real setup at all. One real technical
+// signal is real data behind the decision, not a blind buy - it doesn't
+// need multiple indicators to agree with each other. See evaluateWatchedToken
+// and technicalConfidence() below - confidence still scales with how many
+// actually hit, it's just not a requirement to clear the bar at all.
+const MIN_AGREEING_SIGNALS = 1;
 
 /** Confidence grounded in something a person can verify - how many
  * independent technical signals actually agree - rather than only the AI's
  * own self-reported word for it. Never called below MIN_AGREEING_SIGNALS. */
-function technicalConfidence(signalCount: number): "confident" | "high" {
-  return signalCount >= 3 ? "high" : "confident";
+function technicalConfidence(signalCount: number): "signal" | "confident" | "high" {
+  if (signalCount >= 3) return "high";
+  if (signalCount >= 2) return "confident";
+  return "signal";
 }
 
 interface Strictest {
@@ -134,9 +137,12 @@ function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, 
   const volNote = volRatio !== null && Number.isFinite(volRatio)
     ? ` Recent volume is running ${volRatio.toFixed(1)}x its baseline.`
     : "";
-  const confidenceNote = technicalConfidence(triggers.length) === "high"
+  const conf = technicalConfidence(triggers.length);
+  const confidenceNote = conf === "high"
     ? " All three technical signals agree - high confidence."
-    : " Two technical signals agree.";
+    : conf === "confident"
+    ? " Two technical signals agree."
+    : " One technical signal.";
   const base = `${symbol} looks oversold: ${triggers.join("; ")}.${confidenceNote}${volNote}`;
   if (s.verdict !== "pass") return `${base} Screen failed: ${s.reason}.`;
   const screened = `${base} Passed the same honeypot, tax, LP-lock and renounce screen the Launch Bot runs.`;

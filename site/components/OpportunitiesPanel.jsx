@@ -21,15 +21,16 @@ const CONFIDENCE_COLOR = { high: "var(--green, #2e7d32)", medium: "#b8860b", low
 /** Confidence grounded in something checkable - how many of Hunter Bot's
  * independent technical signals (RSI oversold, bullish MACD cross, Bollinger
  * lower band) actually agree on this token - rather than only the AI's own
- * self-reported word for it. An opportunity never reaches the site at all
- * below 2 agreeing signals (see keeper/src/hunter.ts's MIN_AGREEING_SIGNALS),
- * so this is either "Confident" (2 agree) or "High confidence" (all 3 do).
+ * self-reported word for it. One real signal is enough to count as a setup
+ * at all (see keeper/src/hunter.ts's MIN_AGREEING_SIGNALS) - it doesn't
+ * need multiple indicators agreeing with each other, it just needs to be
+ * real data, not a blind buy. Confidence still scales with how many agree.
  * Null for Discovery Bot's rows, which have no technical signals at all. */
 function technicalConfidence(signalCount) {
   if (signalCount === null || signalCount === undefined) return null;
-  return signalCount >= 3
-    ? { label: "High confidence", detail: `all 3 signals agree`, color: CONFIDENCE_COLOR.high }
-    : { label: "Confident", detail: `${signalCount} signals agree`, color: CONFIDENCE_COLOR.medium };
+  if (signalCount >= 3) return { label: "High confidence", detail: "all 3 signals agree", color: CONFIDENCE_COLOR.high };
+  if (signalCount >= 2) return { label: "Confident", detail: `${signalCount} signals agree`, color: CONFIDENCE_COLOR.medium };
+  return { label: "Signal", detail: "1 technical signal", color: "var(--ash)" };
 }
 
 /**
@@ -147,7 +148,7 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
             <p className="hint" style={{ margin: "4px 0 0" }}>{o.narrative}</p>
             {tech && (
               <p className="hint" style={{ margin: "4px 0 0", color: tech.color, fontWeight: 600 }}>
-                {tech.label} — {tech.detail}, not just one indicator alone.
+                {tech.label} — {tech.detail}.
               </p>
             )}
             {o.aiConfidence && (
@@ -253,10 +254,10 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
       </div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Tokens on {CHAIN.dexName} that Discovery Bot spotted moving (price and liquidity climbing
-        together) or Hunter Bot spotted looking oversold on at least 2 of its 3 technical signals
-        (RSI/MACD/Bollinger) at once, and that the AI didn't flag as a bad buy. Turn either bot on
-        above to start seeing new ones. Copy a token's address to look it up yourself before
-        trusting the screen alone, or set your own amount and buy it directly.
+        together) or Hunter Bot spotted looking oversold on at least one of its technical signals
+        (RSI/MACD/Bollinger) - more signals agreeing means more confidence, shown on each one.
+        Turn either bot on above to start seeing new ones. Copy a token's address to look it up
+        yourself before trusting the screen alone, or set your own amount and buy it directly.
       </p>
       {live.length === 0 && (
         <p className="hint">Nothing live right now. This fills in as Discovery Bot or Hunter Bot runs.</p>

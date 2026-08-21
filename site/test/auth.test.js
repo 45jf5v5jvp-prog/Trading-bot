@@ -213,44 +213,44 @@ test("authorizeAskBuy rejects an expired timestamp without ever calling the chai
   assert.equal(readOwner.calls.length, 0);
 });
 
-const REFERRER = "0x" + "f".repeat(40);
+const REFERRAL_CODE = "abcdef0123456789"; // opaque code, not an address - see lib/store.js
 
 test("authorizeReferral accepts a correctly-signed referral binding from the real owner", async () => {
   const ts = Date.now();
-  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRER, ts));
+  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRAL_CODE, ts));
   const readOwner = fakeReader(wallet.address);
-  const result = await authorizeReferral({ vaultAddress: VAULT, referrer: REFERRER, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  const result = await authorizeReferral({ vaultAddress: VAULT, code: REFERRAL_CODE, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
   assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
 });
 
-test("authorizeReferral rejects a signature made for a DIFFERENT referrer (can't retarget a captured signature)", async () => {
+test("authorizeReferral rejects a signature made for a DIFFERENT code (can't retarget a captured signature)", async () => {
   const ts = Date.now();
-  const otherReferrer = "0x" + "1".repeat(40);
-  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRER, ts));
+  const otherCode = "1111111111111111";
+  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRAL_CODE, ts));
   const readOwner = fakeReader(wallet.address);
   await assert.rejects(
-    authorizeReferral({ vaultAddress: VAULT, referrer: otherReferrer, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    authorizeReferral({ vaultAddress: VAULT, code: otherCode, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
     /invalid signature|not this vault's owner/,
   );
 });
 
 test("authorizeReferral rejects when the signer is not the vault's on-chain owner", async () => {
   const ts = Date.now();
-  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRER, ts));
+  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRAL_CODE, ts));
   const someoneElse = Wallet.createRandom();
   const readOwner = fakeReader(someoneElse.address);
   await assert.rejects(
-    authorizeReferral({ vaultAddress: VAULT, referrer: REFERRER, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    authorizeReferral({ vaultAddress: VAULT, code: REFERRAL_CODE, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
     /not this vault's owner/,
   );
 });
 
 test("authorizeReferral rejects an expired timestamp without ever calling the chain reader", async () => {
   const staleTs = Date.now() - 10 * 60 * 1000;
-  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRER, staleTs));
+  const signature = await wallet.signMessage(buildReferralMessage(VAULT, REFERRAL_CODE, staleTs));
   const readOwner = fakeReader(wallet.address);
   await assert.rejects(
-    authorizeReferral({ vaultAddress: VAULT, referrer: REFERRER, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    authorizeReferral({ vaultAddress: VAULT, code: REFERRAL_CODE, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);

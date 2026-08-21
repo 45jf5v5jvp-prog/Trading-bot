@@ -7,7 +7,7 @@ import { loadPortfolio } from "../lib/loadPortfolio";
 import { loadOpportunities } from "../lib/loadOpportunities";
 import { closePosition } from "../lib/closePosition";
 import { buyOpportunity } from "../lib/buyOpportunity";
-import { setReferral, loadReferral, loadReferralEarnings } from "../lib/setReferral";
+import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
@@ -58,13 +58,17 @@ export default function Dashboard() {
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
   const [referralCode, setReferralCode] = useState(""); // captured from ?ref=, or pasted in manually
-  const [myReferrer, setMyReferrer] = useState(null); // who referred THIS vault, once known
+  const [referred, setReferred] = useState(false); // whether THIS vault has a referrer bound, once known
+  const [myReferralCode, setMyReferralCode] = useState(""); // this wallet's own referral link code
   const [referralEarnings, setReferralEarnings] = useState(null); // what THIS wallet has earned referring others
   const [referralCopied, setReferralCopied] = useState(false);
 
-  const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+  // Referral codes are opaque, not addresses - see lib/store.js's
+  // getOrCreateReferralCode (16 lowercase hex chars) - deliberately NOT a
+  // wallet address, so a shared link never exposes which address is yours.
+  const CODE_RE = /^[a-f0-9]{16}$/i;
 
-  // Captures a referral code the moment someone arrives via ?ref=0x... - kept
+  // Captures a referral code the moment someone arrives via ?ref=... - kept
   // in localStorage (not just component state) so it survives the page
   // reload that happens partway through connecting a wallet. Whichever link
   // was clicked most recently wins if more than one ever gets clicked before
@@ -75,20 +79,28 @@ export default function Dashboard() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
-    if (ref && ADDR_RE.test(ref)) {
-      window.localStorage.setItem("icaria_pending_referrer", ref);
+    if (ref && CODE_RE.test(ref)) {
+      window.localStorage.setItem("icaria_pending_referrer", ref.toLowerCase());
     }
     const pending = window.localStorage.getItem("icaria_pending_referrer");
     if (pending) setReferralCode(pending);
   }, []);
 
-  // Who referred this vault, if anyone - read once a vault exists, purely
-  // informational (the binding itself happens at vault-creation time, see
-  // handleCreateVault).
+  // Whether this vault has a referrer bound, if any - read once a vault
+  // exists, purely informational (the binding itself happens at
+  // vault-creation time, see handleCreateVault). Never learns WHICH wallet
+  // referred it - that address is never returned by this endpoint.
   useEffect(() => {
     if (!vaultAddress) return;
-    loadReferral(vaultAddress).then((r) => setMyReferrer(r.referrer)).catch(() => {});
+    loadReferral(vaultAddress).then((r) => setReferred(r.referred)).catch(() => {});
   }, [vaultAddress]);
+
+  // This wallet's own referral link code - created on the server the first
+  // time it's requested, then stable forever after.
+  useEffect(() => {
+    if (!account) return;
+    loadReferralCode(account).then((r) => setMyReferralCode(r.code)).catch(() => {});
+  }, [account]);
 
   // What this wallet has earned referring OTHER people's vaults - doesn't
   // require this wallet to have a vault of its own, just to have referred
@@ -217,11 +229,11 @@ export default function Dashboard() {
       // effort: the vault itself already exists at this point regardless of
       // whether this succeeds, so a referral failure is reported but doesn't
       // look like the vault creation itself failed.
-      const code = referralCode.trim();
-      if (code && ADDR_RE.test(code) && code.toLowerCase() !== addr.toLowerCase()) {
+      const code = referralCode.trim().toLowerCase();
+      if (code && CODE_RE.test(code)) {
         try {
           await setReferral(getProvider, addr, code);
-          setMyReferrer(code.toLowerCase());
+          setReferred(true);
           if (typeof window !== "undefined") window.localStorage.removeItem("icaria_pending_referrer");
           setStatus("Vault created. Referral recorded.");
         } catch (e) {
@@ -317,7 +329,8 @@ export default function Dashboard() {
    * for manual copy on a browser that blocks the clipboard API (some in-app
    * wallet browsers do), rather than failing silently. */
   async function handleCopyReferralLink() {
-    const link = `${window.location.origin}/?ref=${account}`;
+    if (!myReferralCode) return;
+    const link = `${window.location.origin}/?ref=${myReferralCode}`;
     try {
       await navigator.clipboard.writeText(link);
       setReferralCopied(true);
@@ -360,18 +373,19 @@ export default function Dashboard() {
               Share this link. Anyone who creates a vault after visiting it is permanently credited
               to you - you earn {"0.05%"} of everything their vault ever trades (the platform keeps
               {" 0.20%"} instead of its usual {"0.25%"}; they never pay more for having been
-              referred). Earnings are tracked below and paid into your own vault in batches, not
-              automatically on every trade.
+              referred). The link carries an opaque code, not your wallet address, so sharing it
+              never lets anyone trace it back to which address is yours. Earnings are tracked below
+              and paid into your own vault in batches, not automatically on every trade.
             </p>
             <div className="field-inline">
               <input
                 type="text"
                 readOnly
-                value={typeof window !== "undefined" ? `${window.location.origin}/?ref=${account}` : ""}
+                value={myReferralCode && typeof window !== "undefined" ? `${window.location.origin}/?ref=${myReferralCode}` : "Loading..."}
                 onFocus={(e) => e.target.select()}
                 style={{ width: 420 }}
               />
-              <button className="btn btn-small" onClick={handleCopyReferralLink}>
+              <button className="btn btn-small" onClick={handleCopyReferralLink} disabled={!myReferralCode}>
                 {referralCopied ? "Copied!" : "Copy"}
               </button>
             </div>
@@ -418,10 +432,10 @@ export default function Dashboard() {
             <p className="mono-addr" style={{ marginBottom: 14 }}>Connected: {account}</p>
             <p className="lede" style={{ marginBottom: 16 }}>No vault found for this wallet yet.</p>
             <div className="field-inline">
-              <label>Referred by (optional)</label>
+              <label>Referral code (optional)</label>
               <input
                 type="text"
-                placeholder="0x..."
+                placeholder="referral code"
                 value={referralCode}
                 onChange={(e) => setReferralCode(e.target.value)}
                 style={{ width: 340 }}
@@ -470,9 +484,9 @@ export default function Dashboard() {
                 It does not affect deposits or withdrawals, which always stay available to you as
                 the owner.
               </p>
-              {myReferrer && (
+              {referred && (
                 <p className="hint" style={{ marginBottom: 0 }}>
-                  Referred by <span className="mono-addr" style={{ display: "inline" }}>{myReferrer}</span>.
+                  This vault was created via a referral link.
                 </p>
               )}
             </div>

@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -202,4 +202,28 @@ test("recordReferralPayout then getReferralPaidTotal sums across multiple payout
   recordReferralPayout(referrer, 10.5, "0xaaa", Date.now());
   recordReferralPayout(referrer, 4.25, "0xbbb", Date.now());
   assert.equal(getReferralPaidTotal(referrer), 14.75);
+});
+
+test("getOrCreateReferralCode returns the SAME code on repeated calls for the same wallet", () => {
+  const referrer = "0x" + "30".repeat(20);
+  const first = getOrCreateReferralCode(referrer);
+  const second = getOrCreateReferralCode(referrer);
+  assert.equal(first, second);
+  assert.match(first, /^[a-f0-9]{16}$/);
+});
+
+test("getOrCreateReferralCode gives different wallets different codes", () => {
+  const a = getOrCreateReferralCode("0x" + "31".repeat(20));
+  const b = getOrCreateReferralCode("0x" + "32".repeat(20));
+  assert.notEqual(a, b);
+});
+
+test("resolveReferralCode maps a generated code back to its wallet, lowercased", () => {
+  const referrer = ("0x" + "33".repeat(20)).toUpperCase();
+  const code = getOrCreateReferralCode(referrer);
+  assert.equal(resolveReferralCode(code), referrer.toLowerCase());
+});
+
+test("resolveReferralCode is null for a code that was never issued", () => {
+  assert.equal(resolveReferralCode("0000000000000000"), null);
 });

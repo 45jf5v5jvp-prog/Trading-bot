@@ -1,4 +1,5 @@
 const path = require("path");
+const crypto = require("crypto");
 const Database = require("better-sqlite3");
 const { emptyConfig } = require("./schema");
 
@@ -45,6 +46,11 @@ function getDb() {
       amount_pls REAL NOT NULL,
       tx_hash    TEXT NOT NULL,
       paid_at    INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS referral_codes (
+      code       TEXT PRIMARY KEY,
+      referrer   TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
     );
   `);
 
@@ -226,6 +232,51 @@ function recordReferralPayout(referrer, amountPls, txHash, nowMs) {
     .run(referrer.toLowerCase(), amountPls, txHash, nowMs);
 }
 
+/**
+ * Referral links carry an opaque code instead of a wallet address (see
+ * git history: the raw address used to go straight into the shareable
+ * link, which meant pasting the link into an explorer doxxed the referrer).
+ * A code is generated once per wallet, on first request, and is permanent -
+ * the code -> address direction is never returned by any public API, only
+ * resolved server-side when a vault actually binds to a referrer.
+ */
+function getReferralCode(referrer) {
+  const row = getDb()
+    .prepare("SELECT code FROM referral_codes WHERE referrer = ?")
+    .get(referrer.toLowerCase());
+  return row ? row.code : null;
+}
+
+function getOrCreateReferralCode(referrer) {
+  referrer = referrer.toLowerCase();
+  const existing = getReferralCode(referrer);
+  if (existing) return existing;
+  // A collision at 16 hex chars (64 bits) is astronomically unlikely, but
+  // retry on one rather than trust that - the UNIQUE constraint on referrer
+  // makes a collision fail loudly instead of silently handing out someone
+  // else's code.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = crypto.randomBytes(8).toString("hex");
+    try {
+      getDb()
+        .prepare("INSERT INTO referral_codes (code, referrer, created_at) VALUES (?, ?, ?)")
+        .run(code, referrer, Date.now());
+      return code;
+    } catch (e) {
+      if (!String(e.message).includes("UNIQUE")) throw e;
+    }
+  }
+  throw new Error("could not generate a unique referral code");
+}
+
+/** The wallet a referral code belongs to, or null if unknown. */
+function resolveReferralCode(code) {
+  const row = getDb()
+    .prepare("SELECT referrer FROM referral_codes WHERE code = ?")
+    .get(code.toLowerCase());
+  return row ? row.referrer : null;
+}
+
 function resetForTests() {
   db = undefined;
 }
@@ -235,5 +286,6 @@ module.exports = {
   requestDiscoveryBuy, pendingDiscoveryBuyRequests,
   requestAskBuy, pendingAskBuyRequests,
   getReferrer, setReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout,
+  getOrCreateReferralCode, resolveReferralCode,
   resetForTests, DB_PATH,
 };

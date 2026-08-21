@@ -51,11 +51,14 @@ function buildAskBuyMessage(vaultAddress, token, amountPls, timestampMs) {
 
 /** Same shape, for binding a vault's referrer - the vault's owner must sign
  * this, not the referrer, since it's the owner's fee that's being split and
- * the owner who benefits from having been referred. Binds the exact referrer
- * address into the signed message so a captured signature can never be
- * replayed to bind a different referrer later. */
-function buildReferralMessage(vaultAddress, referrer, timestampMs) {
-  return `Icaria: set referrer ${referrer.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+ * the owner who benefits from having been referred. Binds the exact
+ * referral CODE into the signed message, never the referrer's actual
+ * address - the client only ever knows the opaque code, and the server
+ * resolves code -> address itself after the signature checks out (see
+ * lib/store.js's resolveReferralCode). This keeps a referrer's wallet
+ * address out of anything a browser has to handle or sign. */
+function buildReferralMessage(vaultAddress, code, timestampMs) {
+  return `Icaria: set referrer via code ${code} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
 function checkFresh(timestampMs) {
@@ -125,9 +128,9 @@ async function authorizeAskBuy({ vaultAddress, token, amountPls, timestampMs, si
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
-async function authorizeReferral({ vaultAddress, referrer, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+async function authorizeReferral({ vaultAddress, code, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
   checkFresh(timestampMs);
-  const expectedMessage = buildReferralMessage(vaultAddress, referrer, timestampMs);
+  const expectedMessage = buildReferralMessage(vaultAddress, code, timestampMs);
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 

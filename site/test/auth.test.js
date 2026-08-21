@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { Wallet } = require("ethers");
-const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, buildMessage, buildCloseMessage, buildBuyOpportunityMessage } = require("../lib/auth");
+const { Wallet, id } = require("ethers");
+const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeHunterChat, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildHunterChatMessage } = require("../lib/auth");
 
 const VAULT = "0x" + "e".repeat(40);
 const wallet = Wallet.createRandom();
@@ -159,4 +159,35 @@ test("authorizeBuyOpportunity rejects an expired timestamp without ever calling 
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);
+});
+
+test("authorizeHunterChat accepts a correctly-signed chat message from the real owner", async () => {
+  const ts = Date.now();
+  const hash = id("Don't buy anything with liquidity under 5,000,000 ETH");
+  const signature = await wallet.signMessage(buildHunterChatMessage(VAULT, hash, ts));
+  const readOwner = fakeReader(wallet.address);
+  const result = await authorizeHunterChat({ vaultAddress: VAULT, textHash: hash, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+});
+
+test("authorizeHunterChat rejects a signature made for DIFFERENT message text (can't retarget a captured signature)", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildHunterChatMessage(VAULT, id("original message"), ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeHunterChat({ vaultAddress: VAULT, textHash: id("swapped-in message"), timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /invalid signature|not this vault's owner/,
+  );
+});
+
+test("authorizeHunterChat rejects when the signer is not the vault's on-chain owner", async () => {
+  const ts = Date.now();
+  const hash = id("chat message text");
+  const signature = await wallet.signMessage(buildHunterChatMessage(VAULT, hash, ts));
+  const someoneElse = Wallet.createRandom();
+  const readOwner = fakeReader(someoneElse.address);
+  await assert.rejects(
+    authorizeHunterChat({ vaultAddress: VAULT, textHash: hash, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
 });

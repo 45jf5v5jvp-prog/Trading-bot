@@ -99,10 +99,15 @@ export const CFG = {
   // a 60-minute-old trend, so this runs on the slower price-poll-ish cadence
   // rather than the launch scanner's fast one.
   discoveryScanSec: num("DISCOVERY_SCAN_SEC", "90"),
-  // Slower still than discovery's - candle/indicator math is heavier per
-  // token, and a passing candidate may trigger a paid AI call, so this
-  // cadence doubles as a cost throttle, not just a "how fresh" choice.
-  hunterScanSec: num("HUNTER_SCAN_SEC", "300"),
+  // Candle/indicator math is heavier per token, and a passing candidate may
+  // trigger a paid AI call, so this cadence doubles as a cost throttle, not
+  // just a "how fresh" choice. Lowered from 300 to match the same latency
+  // fix applied on the PulseChain keeper - orders taking 3-5 minutes to fire
+  // felt too slow there; this trades more frequent (paid) AI calls for
+  // faster fills. Worth re-confirming this tradeoff is wanted here too
+  // before deploying, since Robinhood Chain's own gas/AI-cost economics may
+  // differ from PulseChain's.
+  hunterScanSec: num("HUNTER_SCAN_SEC", "90"),
 
   simAddress: addr("SIM_ADDRESS", "0x1111111111111111111111111111111111111111"),
   simAmountEth: num("SIM_AMOUNT_ETH", "0.02"),

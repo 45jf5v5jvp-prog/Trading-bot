@@ -3,9 +3,9 @@ import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
-import { loadOpportunities } from "../lib/loadOpportunities";
+import { loadHunterIQ } from "../lib/loadHunterIQ";
+import { loadHunterChat, sendHunterChatMessage } from "../lib/talkToHunter";
 import { closePosition } from "../lib/closePosition";
-import { buyOpportunity } from "../lib/buyOpportunity";
 import { numberFieldProps } from "../lib/numberField";
 import { CHAIN } from "../lib/contracts";
 import RulesList from "../components/RulesList";
@@ -13,10 +13,8 @@ import SnipesList from "../components/SnipesList";
 import PortfolioPanel from "../components/PortfolioPanel";
 import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
-import DiscoverySettings from "../components/DiscoverySettings";
 import HunterSettings from "../components/HunterSettings";
-import OpportunitiesPanel from "../components/OpportunitiesPanel";
-import AskIcaria from "../components/AskIcaria";
+import HunterIQPanel from "../components/HunterIQPanel";
 import HistoryPanel from "../components/HistoryPanel";
 import Sun from "../components/Sun";
 
@@ -44,14 +42,14 @@ export default function Dashboard() {
   const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState(null);
   const [portfolio, setPortfolio] = useState(null);
-  const [opportunities, setOpportunities] = useState(null);
+  const [hunterIQ, setHunterIQ] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
-  const [buyStates, setBuyStates] = useState({}); // { [opportunityId]: "pending" | "requested" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
 
@@ -101,13 +99,25 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
-  // Same polling idea for the Opportunities panel - Discovery Bot's findings
-  // are global (one scanner, shared across every vault), so this is a plain
-  // poll rather than tied to any config the owner set.
+  // Same polling idea for Hunter IQ - the trade-rationale feed and lessons
+  // list refresh on their own so a self-written lesson from a just-closed
+  // position shows up without a manual refresh.
   useEffect(() => {
     if (!vaultAddress) return;
     let cancelled = false;
-    const refresh = () => loadOpportunities(vaultAddress).then((o) => { if (!cancelled) setOpportunities(o.opportunities); }).catch(() => {});
+    const refresh = () => loadHunterIQ(vaultAddress).then((h) => { if (!cancelled) setHunterIQ(h); }).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 20_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [vaultAddress]);
+
+  // Same polling idea for the Talk to Your Hunter thread - so a reply that
+  // came in async (or a lesson the bot wrote to itself) shows up without a
+  // manual refresh, same as Hunter IQ's trade/lessons feed above.
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    const refresh = () => loadHunterChat(vaultAddress).then((c) => { if (!cancelled) setChatMessages(c.messages); }).catch(() => {});
     refresh();
     const id = setInterval(refresh, 20_000);
     return () => { cancelled = true; clearInterval(id); };
@@ -131,12 +141,12 @@ export default function Dashboard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const [, h, p, o] = await Promise.all([
-        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadOpportunities(vaultAddress),
+      const [, h, p, hiq] = await Promise.all([
+        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadHunterIQ(vaultAddress),
       ]);
       setHistory(h);
       setPortfolio(p.portfolio);
-      setOpportunities(o.opportunities);
+      setHunterIQ(hiq);
     } catch (e) {
       setStatus(`Refresh failed: ${e.message}`);
     } finally {
@@ -250,18 +260,18 @@ export default function Dashboard() {
     }
   }
 
-  /** Signs and submits a manual buy request for one Discovery Bot
-   * opportunity. Doesn't buy anything itself - the keeper does that on its
-   * next pass, see lib/buyOpportunity.js. */
-  async function handleBuyOpportunity(opportunityId) {
-    setBuyStates((s) => ({ ...s, [opportunityId]: "pending" }));
-    try {
-      await buyOpportunity(getProvider, vaultAddress, opportunityId);
-      setBuyStates((s) => ({ ...s, [opportunityId]: "requested" }));
-    } catch (e) {
-      setBuyStates((s) => ({ ...s, [opportunityId]: "error" }));
-      setStatus(`Buy request failed: ${e.message}`);
-    }
+  /** Signs and sends one chat message to this vault's Hunter Bot, appends the
+   * owner's own message immediately (no round-trip needed to show it), then
+   * the live reply once it comes back. The same message is also queued as
+   * Hunter IQ feedback server-side (see hunter-chat.js), so it still becomes
+   * a lesson even though the reply itself is generated synchronously here. */
+  async function handleSendChat(text) {
+    setChatMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: "owner", text }]);
+    const { reply } = await sendHunterChatMessage(getProvider, vaultAddress, text);
+    loadHunterChat(vaultAddress).then((c) => setChatMessages(c.messages)).catch(() => {
+      if (reply) setChatMessages((prev) => [...prev, { id: `local-reply-${Date.now()}`, role: "hunter", text: reply }]);
+    });
+    loadHunterIQ(vaultAddress).then(setHunterIQ).catch(() => {});
   }
 
   return (
@@ -434,13 +444,6 @@ export default function Dashboard() {
                 </div>
 
                 <div className="panel">
-                  <DiscoverySettings
-                    discovery={config.discovery}
-                    onChange={(discovery) => updateConfig({ ...config, discovery })}
-                  />
-                </div>
-
-                <div className="panel">
                   <HunterSettings
                     hunter={config.hunter}
                     onChange={(hunter) => updateConfig({ ...config, hunter })}
@@ -448,15 +451,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="panel">
-                  <OpportunitiesPanel
-                    opportunities={opportunities}
-                    onBuy={handleBuyOpportunity}
-                    buyStates={buyStates}
-                  />
-                </div>
-
-                <div className="panel">
-                  <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
+                  <HunterIQPanel hunterIQ={hunterIQ} chatMessages={chatMessages} onSendChat={handleSendChat} />
                 </div>
 
                 <div className="panel">

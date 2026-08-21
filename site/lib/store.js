@@ -34,6 +34,20 @@ function getDb() {
       amount_pls   REAL NOT NULL,
       requested_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS hunter_feedback_requests (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      vault        TEXT NOT NULL,
+      text         TEXT NOT NULL,
+      requested_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS hunter_chat_messages (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      vault      TEXT NOT NULL,
+      role       TEXT NOT NULL,
+      text       TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS hunter_chat_messages_vault_id ON hunter_chat_messages(vault, id);
   `);
   return db;
 }
@@ -136,6 +150,52 @@ function pendingAskBuyRequests(vault) {
     .map((r) => ({ id: r.id, token: r.token, amountPls: r.amount_pls, requestedAt: r.requested_at }));
 }
 
+/**
+ * Records Hunter IQ feedback/coaching for this vault's own Hunter Bot - from
+ * the standalone feedback box, or (now) from a Talk to Your Hunter chat
+ * message, which queues into this exact same pipeline (see hunter-chat.js).
+ * The keeper polls pendingHunterFeedback on its own schedule and turns each
+ * request into a lesson (see keeper/src/hunter.ts's ingestOwnerFeedback) -
+ * same "site writes an intent, keeper's own DB is where it becomes real
+ * bot memory" split as every other request table here.
+ */
+function requestHunterFeedback(vault, text, nowMs) {
+  const info = getDb()
+    .prepare(`INSERT INTO hunter_feedback_requests (vault, text, requested_at) VALUES (?, ?, ?)`)
+    .run(vault.toLowerCase(), text, nowMs);
+  return Number(info.lastInsertRowid);
+}
+
+/** Every feedback request this vault owner has made, handled or not - the
+ * keeper is responsible for only ingesting ones it hasn't already turned
+ * into a lesson (see keeper/src/db.ts's hunterLessons.alreadyIngestedOwnerRequest). */
+function pendingHunterFeedback(vault) {
+  return getDb()
+    .prepare(`SELECT id, text, requested_at FROM hunter_feedback_requests WHERE vault = ? ORDER BY id ASC`)
+    .all(vault.toLowerCase())
+    .map((r) => ({ id: r.id, text: r.text, requestedAt: r.requested_at }));
+}
+
+/** One message in a vault's Talk to Your Hunter thread - role is 'owner' or
+ * 'hunter'. Persisted here (not just shown in the moment) so the whole
+ * conversation survives a page reload, not just whatever was on screen when
+ * the owner left. */
+function addHunterChatMessage(vault, role, text, nowMs) {
+  getDb()
+    .prepare(`INSERT INTO hunter_chat_messages (vault, role, text, created_at) VALUES (?, ?, ?, ?)`)
+    .run(vault.toLowerCase(), role, text, nowMs);
+}
+
+/** The full thread so far, oldest first - capped at `limit` most recent
+ * messages so a very long-running conversation doesn't grow the payload
+ * without bound. */
+function getHunterChatMessages(vault, limit = 200) {
+  const rows = getDb()
+    .prepare(`SELECT id, role, text, created_at FROM hunter_chat_messages WHERE vault = ? ORDER BY id DESC LIMIT ?`)
+    .all(vault.toLowerCase(), limit);
+  return rows.reverse();
+}
+
 function resetForTests() {
   db = undefined;
 }
@@ -144,5 +204,7 @@ module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
   requestDiscoveryBuy, pendingDiscoveryBuyIds,
   requestAskBuy, pendingAskBuyRequests,
+  requestHunterFeedback, pendingHunterFeedback,
+  addHunterChatMessage, getHunterChatMessages,
   resetForTests, DB_PATH,
 };

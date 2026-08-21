@@ -119,6 +119,50 @@ function getDiscoveryActionsForVault(vault) {
   }
 }
 
+/** Hunter IQ's lessons for a vault - owner-typed coaching or the bot's own
+ * self-reflections (see keeper/src/db.ts's hunterLessons and hunter.ts's
+ * reflectOnClosedLosses/reflectOnMissedOpportunities). Returns [] if the
+ * table doesn't exist (a keeper build that predates Hunter IQ). */
+function getHunterLessons(vault, limit = 30) {
+  const d = getDb();
+  if (!d) return [];
+  try {
+    return d.prepare(
+      `SELECT id, source, text, position_id, opportunity_id, ts
+       FROM hunter_lessons WHERE vault = ? ORDER BY ts DESC LIMIT ?`,
+    ).all(vault.toLowerCase(), limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Hunter Bot's own trades, each with the rationale that led to it - what
+ * replaces the Opportunities panel for Hunter (see components/
+ * HunterIQPanel.jsx): a justified trade feed instead of a pending-approval
+ * queue. Joins fires (the actual executed trade) back to the opportunity
+ * that caused it via discovery_actions' tx_hash link (see hunter.ts's
+ * executeHunterBuy) - a fire with no matching opportunity still shows up,
+ * just without a rationale.
+ */
+function getHunterTrades(vault, limit = 30) {
+  const d = getDb();
+  if (!d) return [];
+  try {
+    return d.prepare(`
+      SELECT f.id, f.token, f.ts, f.amount, f.fee, f.tx_hash AS txHash,
+             o.narrative, o.ai_reasoning AS aiReasoning, o.signal_count AS signalCount
+      FROM fires f
+      LEFT JOIN discovery_actions a ON a.vault = f.vault AND a.tx_hash = f.tx_hash AND a.action = 'bought'
+      LEFT JOIN opportunities o ON o.id = a.opportunity_id
+      WHERE f.vault = ? AND f.bot = 'hunter'
+      ORDER BY f.ts DESC LIMIT ?
+    `).all(vault.toLowerCase(), limit);
+  } catch {
+    return [];
+  }
+}
+
 function resetForTests() {
   if (db) db.close();
   db = undefined;
@@ -128,5 +172,6 @@ function resetForTests() {
 module.exports = {
   getPositions, getRecentFires, getV4PoolsForToken,
   getOpportunities, getDiscoveryActionsForVault,
+  getHunterLessons, getHunterTrades,
   resetForTests, resolveDbPath,
 };

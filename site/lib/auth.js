@@ -47,6 +47,16 @@ function buildAskBuyMessage(vaultAddress, token, amountPls, timestampMs) {
   return `Icaria: buy ${amountPls} ETH of ${token.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape, for a Talk to Your Hunter chat message. Binds a hash of the
+ * text rather than the text itself - the signed message a wallet shows the
+ * owner stays a fixed, readable length regardless of how long their message
+ * is, while still making a signature for one message unusable to authorize
+ * any other. The server recomputes the same hash from the text in the
+ * request body and only accepts a match. */
+function buildHunterChatMessage(vaultAddress, textHash, timestampMs) {
+  return `Icaria: talk to Hunter Bot (${textHash}) for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 function checkFresh(timestampMs) {
   if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
   const age = Date.now() - timestampMs;
@@ -114,7 +124,13 @@ async function authorizeAskBuy({ vaultAddress, token, amountPls, timestampMs, si
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeHunterChat({ vaultAddress, textHash, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildHunterChatMessage(vaultAddress, textHash, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeHunterChat, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildHunterChatMessage, MESSAGE_MAX_AGE_MS,
 };

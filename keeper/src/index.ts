@@ -6,7 +6,6 @@ import * as rules from "./rules.js";
 import * as launch from "./launch.js";
 import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
-import * as discovery from "./discovery.js";
 import * as hunter from "./hunter.js";
 import * as ask from "./ask.js";
 import * as positions from "./positions.js";
@@ -89,7 +88,14 @@ async function main(): Promise<void> {
   // so the position-check cadence fits better than the launch scanner's
   // fast pace.
   loop("limits", CFG.positionCheckSec, limits.tick);
-  loop("discovery", CFG.discoveryScanSec, discovery.tick);
+  // Retired: Discovery Bot no longer trades on this repo either, matching
+  // the same call made on the PulseChain keeper - having both an
+  // Opportunities feed AND a separate always-on Hunter Bot was confusing.
+  // Not calling discovery.tick() at all means it stops firing for every
+  // vault immediately, including ones with discovery.enabled=true saved -
+  // their setting is simply never read again, not migrated or cleared.
+  // discovery.ts itself is left in place since hunter.ts still imports its
+  // screenOpportunity()/fetchBuyRequests().
   loop("hunter", CFG.hunterScanSec, hunter.tick);
   // A user waiting on their own "Buy it" click deserves a fast poll, same
   // urgency as snipe/limit orders.

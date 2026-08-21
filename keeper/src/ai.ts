@@ -158,14 +158,25 @@ async function callClaude(
  * amount every time. A recommendation with no maxAmountPls (or one the
  * model didn't size) still requires the caller to fall back to its own
  * default sizing; this never fabricates a number the model didn't provide.
+ *
+ * `guidance`, when given, is this specific vault's own Hunter IQ lessons -
+ * owner-typed feedback and the bot's own past reflections (see hunter.ts's
+ * personalizedOrSharedAi) - oldest first, most recent last. Omitted entirely
+ * for a vault with no lessons yet, which is what lets those vaults keep
+ * sharing one AI call per opportunity across every subscriber instead of
+ * paying for a personalized call each - see hunter.ts's dispatch().
  */
-export async function assess(profile: TokenProfile, maxAmountPls?: number): Promise<AiVerdict | null> {
+export async function assess(profile: TokenProfile, maxAmountPls?: number, guidance?: string[]): Promise<AiVerdict | null> {
   const ceilingLine = maxAmountPls !== undefined
     ? `\n\nYou are authorized to spend up to ${maxAmountPls} ETH on this - size the trade yourself, spending less than the maximum if your confidence is lower.`
     : "";
+  const guidanceLine = guidance && guidance.length > 0
+    ? `\n\nThis vault's owner has been coaching this bot based on past trades - the bot's own reflections are included too. ` +
+      `Weigh this alongside the profile below, oldest first:\n${guidance.map((g, i) => `${i + 1}. ${g}`).join("\n")}`
+    : "";
   const data = await callClaude(
     SYSTEM_PROMPT,
-    `${describeProfile(profile)}\n\nWould you buy this token?${ceilingLine} Report your verdict via give_verdict.`,
+    `${describeProfile(profile)}${guidanceLine}\n\nWould you buy this token?${ceilingLine} Report your verdict via give_verdict.`,
     verdictTool(maxAmountPls),
   );
   if (!data) return null;
@@ -271,6 +282,78 @@ export async function assessExit(position: OpenPositionContext): Promise<ExitVer
   const input = toolUse.input as Partial<ExitVerdict>;
   if (typeof input.sell !== "boolean" || !input.reasoning) return null;
   return { sell: input.sell, reasoning: input.reasoning };
+}
+
+const LESSON_TOOL = {
+  name: "give_lesson",
+  description: "Write one short, concrete, forward-looking lesson from this trade.",
+  input_schema: {
+    type: "object",
+    properties: {
+      lesson: {
+        type: "string",
+        description:
+          "1-2 sentences, plain English, addressed to yourself for next time - what would you " +
+          "actually do differently, not just a restatement of what happened. Cite the specific " +
+          "number that mattered.",
+      },
+    },
+    required: ["lesson"],
+  },
+};
+
+async function callForLesson(system: string, userContent: string): Promise<string | null> {
+  const data = await callClaude(system, userContent, LESSON_TOOL);
+  if (!data) return null;
+  const toolUse = (data.content ?? []).find((b: any) => b.type === "tool_use" && b.name === "give_lesson");
+  const lesson = toolUse?.input?.lesson;
+  return typeof lesson === "string" && lesson.trim() ? lesson.trim() : null;
+}
+
+const LESSON_SYSTEM_PROMPT =
+  "You are the trading logic behind a Robinhood Chain (Uniswap) dip-buying bot, writing a short " +
+  "note to your future self about one of your own past trades. Be honest and specific, not " +
+  "defensive - the point is to actually get better, not to justify what happened. A loss is not " +
+  "always a mistake (some good setups just don't work out) and a miss is not always wrong to have " +
+  "passed on - say so when that's genuinely the case, rather than inventing a lesson that isn't " +
+  "really there.";
+
+/**
+ * Self-reflection on a Hunter position that closed at a real loss - see
+ * hunter.ts's reflectOnClosedLosses. Not every losing close is worth a
+ * lesson (some are just how dip-buying goes); the caller only calls this
+ * for closes past its own loss threshold, and this can still say "nothing
+ * to learn here" in its own words rather than forcing a lesson that isn't
+ * there - callers treat any non-null string as worth recording either way,
+ * since even "this was just bad luck, the setup was sound" is a real,
+ * useful data point for future personalized assessments.
+ */
+export async function reflectOnLoss(input: {
+  symbol: string; token: string; buyNarrative: string; closeReason: string; pnlPct: number; heldMinutes: number;
+}): Promise<string | null> {
+  const content =
+    `You bought ${input.symbol} (${input.token}). At the time: ${input.buyNarrative}\n\n` +
+    `It closed ${input.heldMinutes < 60 ? `${Math.round(input.heldMinutes)} minutes` : `${(input.heldMinutes / 60).toFixed(1)} hours`} later at ${input.pnlPct.toFixed(1)}%, reason: ${input.closeReason}.\n\n` +
+    `Write yourself a lesson from this via give_lesson.`;
+  return callForLesson(LESSON_SYSTEM_PROMPT, content);
+}
+
+/**
+ * Self-reflection on a Hunter opportunity that passed the mechanical screen
+ * but got declined (by the AI gate, or by an owner who never acted on a
+ * notify) - see hunter.ts's reflectOnMissedOpportunities. Only called for
+ * ones that moved meaningfully since being declined, so this is always
+ * looking at a real "would have worked" case, not noise.
+ */
+export async function reflectOnMiss(input: {
+  symbol: string; token: string; detectionNarrative: string; declineReason: string; movePctSinceDeclined: number; daysSinceDeclined: number;
+}): Promise<string | null> {
+  const content =
+    `You saw ${input.symbol} (${input.token}) and passed on it. At the time: ${input.detectionNarrative}\n\n` +
+    `The decision was: ${input.declineReason}\n\n` +
+    `${input.daysSinceDeclined.toFixed(1)} days later, it's up ${input.movePctSinceDeclined.toFixed(0)}% from where it was when you saw it - you missed this one.\n\n` +
+    `Write yourself a lesson from this via give_lesson.`;
+  return callForLesson(LESSON_SYSTEM_PROMPT, content);
 }
 
 /** Free-form answer for Ask Icaria - the user's own question, in their own

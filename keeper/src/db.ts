@@ -131,6 +131,23 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   ts          INTEGER NOT NULL,
   reason      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hunter_lessons (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  vault            TEXT NOT NULL,
+  source           TEXT NOT NULL, -- 'owner' | 'self_loss' | 'self_miss'
+  text             TEXT NOT NULL,
+  position_id      INTEGER,
+  opportunity_id   INTEGER,
+  owner_request_id INTEGER,
+  ts               INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS hunter_lessons_vault_ts ON hunter_lessons(vault, ts DESC);
+
+-- One-shot markers so a closed position or a declined opportunity is only
+-- ever reflected on once, same shape as limitFires/askBuyFires above.
+CREATE TABLE IF NOT EXISTS hunter_reviewed_closes (position_id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS hunter_reviewed_misses (opportunity_id INTEGER PRIMARY KEY);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -145,6 +162,13 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   // an already-open position is managed. NULL for every non-Hunter position.
   if (!cols.some((c) => c.name === "exit_mode")) {
     db.exec("ALTER TABLE positions ADD COLUMN exit_mode TEXT");
+  }
+  // The exact transaction that created this position, when known - traces a
+  // closed Hunter position back to the opportunity/narrative that caused the
+  // original buy (see hunter.ts's reflectOnClosedLosses). NULL for anything
+  // opened before this column existed.
+  if (!cols.some((c) => c.name === "source_tx_hash")) {
+    db.exec("ALTER TABLE positions ADD COLUMN source_tx_hash TEXT");
   }
 }
 
@@ -165,6 +189,20 @@ CREATE TABLE IF NOT EXISTS ai_exit_requests (
   add("ai_confidence", "ai_confidence TEXT");
   add("ai_reasoning", "ai_reasoning TEXT");
   add("ai_suggested_amount_pls", "ai_suggested_amount_pls REAL");
+  // ATR (volatility, as a % of price) and volume confirmation ratio, and how
+  // many of Hunter Bot's technical triggers actually fired together - all
+  // null for discovery.ts's rows (no technical setup involved there) and for
+  // any hunter.ts row from before these existed.
+  add("atr_pct", "atr_pct REAL");
+  add("vol_ratio", "vol_ratio REAL");
+  add("signal_count", "signal_count INTEGER");
+  // The token's own price at detection time, when set - lets a later pass
+  // tell whether a declined opportunity has since moved (see hunter.ts's
+  // reflectOnMissedOpportunities). Not currently populated by this repo's
+  // own hunter.ts insert call, ported as-is from the PulseChain keeper -
+  // see the Robinhood port notes for why reflectOnMissedOpportunities is a
+  // no-op until that's wired up.
+  add("price_at_detection", "price_at_detection REAL");
 }
 
 export const meta = {
@@ -284,6 +322,58 @@ export const aiExitRequests = {
   },
 };
 
+export interface HunterLesson { id: number; vault: string; source: "owner" | "self_loss" | "self_miss"; text: string; ts: number }
+
+/**
+ * Hunter IQ's memory - what a vault's own Hunter Bot has learned, from the
+ * owner directly (source='owner', via the site's chat/feedback pipeline) or
+ * from reflecting on its own trades (source='self_loss'/'self_miss', see
+ * hunter.ts's reflectOnClosedLosses/reflectOnMissedOpportunities). Once a
+ * vault has any lesson at all, future AI reviews for that vault specifically
+ * weigh this history (see hunter.ts's personalizedOrSharedAi and ai.ts's
+ * assess() guidance parameter) instead of sharing the one AI call every
+ * other subscriber uses - this is what makes one vault's Hunter actually
+ * diverge from another's over time.
+ */
+export const hunterLessons = {
+  add(vault: string, source: "owner" | "self_loss" | "self_miss", text: string,
+      opts: { positionId?: number; opportunityId?: number; ownerRequestId?: number } = {}): void {
+    db.prepare(`INSERT INTO hunter_lessons(vault,source,text,position_id,opportunity_id,owner_request_id,ts)
+                VALUES(?,?,?,?,?,?,?)`).run(
+      vault.toLowerCase(), source, text,
+      opts.positionId ?? null, opts.opportunityId ?? null, opts.ownerRequestId ?? null,
+      Math.floor(Date.now() / 1000),
+    );
+  },
+  hasAny(vault: string): boolean {
+    const r = db.prepare("SELECT 1 FROM hunter_lessons WHERE vault=? LIMIT 1").get(vault.toLowerCase());
+    return Boolean(r);
+  },
+  recentForVault(vault: string, limit: number): HunterLesson[] {
+    return db.prepare("SELECT id, vault, source, text, ts FROM hunter_lessons WHERE vault=? ORDER BY ts DESC LIMIT ?")
+      .all(vault.toLowerCase(), limit) as HunterLesson[];
+  },
+  alreadyIngestedOwnerRequest(vault: string, ownerRequestId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM hunter_lessons WHERE vault=? AND owner_request_id=?")
+      .get(vault.toLowerCase(), ownerRequestId);
+    return Boolean(r);
+  },
+  closeAlreadyReviewed(positionId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM hunter_reviewed_closes WHERE position_id=?").get(positionId);
+    return Boolean(r);
+  },
+  markCloseReviewed(positionId: number): void {
+    db.prepare("INSERT OR IGNORE INTO hunter_reviewed_closes(position_id) VALUES(?)").run(positionId);
+  },
+  missAlreadyReviewed(opportunityId: number): boolean {
+    const r = db.prepare("SELECT 1 FROM hunter_reviewed_misses WHERE opportunity_id=?").get(opportunityId);
+    return Boolean(r);
+  },
+  markMissReviewed(opportunityId: number): void {
+    db.prepare("INSERT OR IGNORE INTO hunter_reviewed_misses(opportunity_id) VALUES(?)").run(opportunityId);
+  },
+};
+
 export const watched = {
   add(token: string, symbol: string, decimals: number, pair: string): void {
     db.prepare(`INSERT OR IGNORE INTO watched(token,symbol,decimals,pair,first_seen)
@@ -314,6 +404,20 @@ export interface NewOpportunity {
    * opportunity, so a human approving it spends what the AI sized, not the
    * full ceiling by default. */
   aiSuggestedAmountPls?: number | null;
+  /** ATR as a % of price at detection time, and the recent-vs-baseline
+   * volume ratio (see indicators.ts's atr()/volumeConfirmation()) - stored
+   * so a later manual "Buy Now" on this same opportunity can size an
+   * ATR-based stop-loss off the same numbers detection saw. Null for
+   * discovery.ts's rows and for hunter.ts rows predating these fields. */
+  atrPct?: number | null;
+  volRatio?: number | null;
+  /** How many of Hunter Bot's technical triggers fired together (see
+   * hunter.ts's checkTriggers) - null for discovery.ts's rows, which have no
+   * technical triggers at all. */
+  signalCount?: number | null;
+  /** The token's own price at the moment this opportunity was detected - see
+   * the price_at_detection column note above. */
+  priceAtDetection?: number | null;
 }
 export interface OpportunityRow extends NewOpportunity { id: number; ts: number; source: "discovery" | "hunter" }
 
@@ -326,14 +430,15 @@ export interface OpportunityRow extends NewOpportunity { id: number; ts: number;
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,atr_pct,vol_ratio,signal_count,price_at_detection)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
       o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
       o.rsi ?? null, o.macdHistogram ?? null, o.bollingerPercentB ?? null,
       o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
       o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
+      o.atrPct ?? null, o.volRatio ?? null, o.signalCount ?? null, o.priceAtDetection ?? null,
     );
     return Number(info.lastInsertRowid);
   },
@@ -357,7 +462,9 @@ export const opportunities = {
              owner_renounced AS ownerRenounced, sellable, verdict, reason, narrative,
              source, rsi, macd_histogram AS macdHistogram, bollinger_percent_b AS bollingerPercentB,
              ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
-             ai_suggested_amount_pls AS aiSuggestedAmountPls
+             ai_suggested_amount_pls AS aiSuggestedAmountPls,
+             atr_pct AS atrPct, vol_ratio AS volRatio, signal_count AS signalCount,
+             price_at_detection AS priceAtDetection
       FROM opportunities WHERE id=?
     `).get(id) as any;
     if (!r) return undefined;

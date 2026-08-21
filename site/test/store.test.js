@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyIds, requestHunterFeedback, pendingHunterFeedback } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -109,4 +109,24 @@ test("requestDiscoveryBuy is idempotent - clicking twice does not duplicate the 
   requestDiscoveryBuy(vault, 4, Date.now());
   requestDiscoveryBuy(vault, 4, Date.now());
   assert.deepEqual(pendingDiscoveryBuyIds(vault), [4]);
+});
+
+test("pendingHunterFeedback is empty for a vault with no feedback yet", () => {
+  const vault = "0x6".padEnd(42, "6");
+  assert.deepEqual(pendingHunterFeedback(vault), []);
+});
+
+test("requestHunterFeedback then pendingHunterFeedback round-trips the text", () => {
+  const vault = "0x7".padEnd(42, "7");
+  requestHunterFeedback(vault, "Don't buy anything with liquidity under 5,000,000 ETH", Date.now());
+  const pending = pendingHunterFeedback(vault);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].text, "Don't buy anything with liquidity under 5,000,000 ETH");
+});
+
+test("requestHunterFeedback does not dedup - two separate pieces of feedback are two separate requests", () => {
+  const vault = "0x8".padEnd(42, "8");
+  requestHunterFeedback(vault, "first note", Date.now());
+  requestHunterFeedback(vault, "second note", Date.now());
+  assert.equal(pendingHunterFeedback(vault).length, 2);
 });

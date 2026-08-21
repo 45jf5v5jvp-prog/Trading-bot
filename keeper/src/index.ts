@@ -6,7 +6,6 @@ import * as rules from "./rules.js";
 import * as launch from "./launch.js";
 import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
-import * as discovery from "./discovery.js";
 import * as hunter from "./hunter.js";
 import * as marketSeed from "./marketSeed.js";
 import * as ask from "./ask.js";
@@ -79,7 +78,13 @@ async function main(): Promise<void> {
   // so the position-check cadence (already "how are my holdings doing?")
   // fits better than the launch scanner's fast pace.
   loop("limits", CFG.positionCheckSec, limits.tick);
-  loop("discovery", CFG.discoveryScanSec, discovery.tick);
+  // Discovery Bot retired - Hunter IQ covers what it was for, and having
+  // both was confusing. Not calling discovery.tick() at all means it stops
+  // trading immediately for every vault, including ones that already had
+  // discovery.enabled=true saved - their setting is simply never read again,
+  // not migrated or cleared. See discovery.ts for the retired detection
+  // logic itself, left in place rather than deleted in case it's needed as
+  // reference later.
   loop("hunter", CFG.hunterScanSec, hunter.tick);
   // A user waiting on their own "Buy it" click deserves a fast poll, same
   // urgency as snipe/limit orders.

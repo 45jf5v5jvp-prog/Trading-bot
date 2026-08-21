@@ -4,10 +4,8 @@ import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
-import { loadOpportunities } from "../lib/loadOpportunities";
 import { loadHunterIQ } from "../lib/loadHunterIQ";
 import { closePosition } from "../lib/closePosition";
-import { buyOpportunity } from "../lib/buyOpportunity";
 import { submitHunterFeedback } from "../lib/hunterFeedback";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { APP_VERSION } from "../lib/version";
@@ -20,12 +18,10 @@ import SnipesList from "../components/SnipesList";
 import PortfolioPanel from "../components/PortfolioPanel";
 import LimitOrdersList from "../components/LimitOrdersList";
 import LaunchSettings from "../components/LaunchSettings";
-import DiscoverySettings from "../components/DiscoverySettings";
 import HunterSettings from "../components/HunterSettings";
 import BotCard from "../components/BotCard";
 import InfoButton from "../components/InfoButton";
-import { TradingBotsIcon, LaunchIcon, SniperIcon, DiscoveryIcon, HunterIcon, LimitOrderIcon } from "../components/BotIcons";
-import OpportunitiesPanel from "../components/OpportunitiesPanel";
+import { TradingBotsIcon, LaunchIcon, SniperIcon, HunterIcon, LimitOrderIcon } from "../components/BotIcons";
 import HunterIQPanel from "../components/HunterIQPanel";
 import AskIcaria from "../components/AskIcaria";
 import HistoryPanel from "../components/HistoryPanel";
@@ -87,7 +83,6 @@ export default function Dashboard() {
   const [saveError, setSaveError] = useState(""); // shown IN the fixed unsaved-bar itself - see handleSave
   const [history, setHistory] = useState(null);
   const [portfolio, setPortfolio] = useState(null);
-  const [opportunities, setOpportunities] = useState(null);
   const [hunterIQ, setHunterIQ] = useState(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
@@ -96,7 +91,6 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
   const [stuckWithdrawStates, setStuckWithdrawStates] = useState({}); // { [positionId]: "pending" | "done" | "error" }
-  const [buyStates, setBuyStates] = useState({}); // { [opportunityId]: "pending" | "requested" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
   const [referralCode, setReferralCode] = useState(""); // captured from ?ref=, or pasted in manually
@@ -204,18 +198,6 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
-  // Same polling idea for the Opportunities panel - Discovery Bot's findings
-  // are global (one scanner, shared across every vault), so this is a plain
-  // poll rather than tied to any config the owner set.
-  useEffect(() => {
-    if (!vaultAddress) return;
-    let cancelled = false;
-    const refresh = () => loadOpportunities(vaultAddress).then((o) => { if (!cancelled) setOpportunities(o.opportunities); }).catch(() => {});
-    refresh();
-    const id = setInterval(refresh, 20_000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [vaultAddress]);
-
   // Same polling idea for Hunter IQ - the trade-rationale feed and lessons
   // list refresh on their own so a self-written lesson from a just-closed
   // position shows up without a manual refresh.
@@ -246,13 +228,11 @@ export default function Dashboard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const [, h, p, o, hiq] = await Promise.all([
-        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadOpportunities(vaultAddress),
-        loadHunterIQ(vaultAddress),
+      const [, h, p, hiq] = await Promise.all([
+        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadHunterIQ(vaultAddress),
       ]);
       setHistory(h);
       setPortfolio(p.portfolio);
-      setOpportunities(o.opportunities);
       setHunterIQ(hiq);
     } catch (e) {
       setStatus(`Refresh failed: ${e.message}`);
@@ -445,21 +425,6 @@ export default function Dashboard() {
   async function handleSubmitFeedback(text) {
     await submitHunterFeedback(getProvider, vaultAddress, text);
     loadHunterIQ(vaultAddress).then(setHunterIQ).catch(() => {});
-  }
-
-  /** Signs and submits a manual buy request for one Discovery/Hunter Bot
-   * opportunity, for the amount the owner typed in themselves in
-   * OpportunitiesPanel. Doesn't buy anything itself - the keeper does that
-   * on its next pass, see lib/buyOpportunity.js. */
-  async function handleBuyOpportunity(opportunityId, amountPls) {
-    setBuyStates((s) => ({ ...s, [opportunityId]: "pending" }));
-    try {
-      await buyOpportunity(getProvider, vaultAddress, opportunityId, amountPls);
-      setBuyStates((s) => ({ ...s, [opportunityId]: "requested" }));
-    } catch (e) {
-      setBuyStates((s) => ({ ...s, [opportunityId]: "error" }));
-      setStatus(`Buy request failed: ${e.message}`);
-    }
   }
 
   return (
@@ -716,40 +681,7 @@ export default function Dashboard() {
                 </BotCard>
 
                 <BotCard
-                  title="Discovery Bot"
-                  icon={<DiscoveryIcon />}
-                  active={config.discovery.enabled}
-                  statLine={botStatLine(history, "discovery")}
-                  perfDetail={botPerfDetail(history, "discovery")}
-                  info={
-                    <>
-                      Scans all of {CHAIN.dexName}, not just brand-new launches, for tokens where price
-                      and liquidity are climbing together - a sign of real, organic demand rather than
-                      one wallet pumping the price on thin liquidity. Slower and broader than Launch
-                      Bot, which only ever looks at the moment a pair is created.
-                    </>
-                  }
-                >
-                  <DiscoverySettings
-                    discovery={config.discovery}
-                    onChange={(discovery) => updateConfig({ ...config, discovery })}
-                    vaultBalance={Number(vaultInfo.baseBalance) || 0}
-                  />
-                  {/* Discovery's own findings, kept inside its own card now
-                      that the standalone panel below the bots is Hunter IQ's
-                      home - Hunter's findings need no such queue, since a
-                      setup is either auto-bought outright or shown, already
-                      justified, in the trade feed below. */}
-                  <OpportunitiesPanel
-                    opportunities={(opportunities ?? []).filter((o) => (o.source ?? "discovery") !== "hunter")}
-                    onBuy={handleBuyOpportunity}
-                    buyStates={buyStates}
-                    onCopyFallback={(addr) => setStatus(`Copy this address manually: ${addr}`)}
-                  />
-                </BotCard>
-
-                <BotCard
-                  title="Hunter Bot"
+                  title="Hunter IQ Bot"
                   icon={<HunterIcon />}
                   active={config.hunter.enabled}
                   statLine={botStatLine(history, "hunter")}

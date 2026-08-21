@@ -31,17 +31,18 @@ const DEFAULT_DISCOVERY = {
   minPriceMovePct: 20, minLiquidityGrowthPct: 15, minLiquidityPls: CHAIN.minLiquidityDefault,
   takeProfitPct: 50, stopLossPct: 35, trailingStopPct: 0, timeExitMin: 60,
   maxBuyTaxBps: 1000, maxSellTaxBps: 1000, requireLpLock: true, requireOwnerRenounced: false,
-  // Which Quick Setup wizard answer produced the fields above, if any - null
-  // means "never used the wizard" or "answered manually below," not "no
-  // preference." Purely a site-side memory so the wizard (components/
-  // DiscoverySettings.jsx's QuickSetup) can show a returning owner's prior
-  // answers already collapsed instead of resetting to three blank questions
-  // on every page load - the keeper never reads these three fields, only
-  // the resolved numbers they produced.
+  // Which Quick Setup wizard answer produced the fields above, if any - kept
+  // for shape-compatibility with any vault's already-saved config even
+  // though Discovery Bot's own settings UI (formerly components/
+  // DiscoverySettings.jsx) was removed along with the bot itself - the
+  // keeper never runs discovery.tick() anymore (see keeper/src/index.ts),
+  // so this section is inert, not read as bot behavior.
   quickSetupStyle: null, quickSetupRisk: null, quickSetupSize: null,
 };
 
-// Keep in sync with DiscoverySettings.jsx's STYLE_PRESETS/RISK_PRESETS/SIZE_PRESETS keys.
+// Historical preset keys DEFAULT_DISCOVERY's quickSetup* fields could hold,
+// from Discovery Bot's now-removed settings UI - kept only so an old saved
+// config still normalizes without error.
 const QUICK_SETUP_STYLE_KEYS = ["frequent", "balanced", "patient"];
 const QUICK_SETUP_RISK_KEYS = ["tight", "moderate", "loose"];
 const QUICK_SETUP_SIZE_KEYS = ["small", "medium", "large"];

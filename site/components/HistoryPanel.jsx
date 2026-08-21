@@ -327,7 +327,7 @@ const DEFAULT_VISIBLE_POSITIONS = 3;
 
 export default function HistoryPanel({ history, onClosePosition, closeStates, onWithdrawStuckToken, withdrawStuckStates }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
-  const [showAllTrades, setShowAllTrades] = useState(false);
+  const [showTradesScreen, setShowTradesScreen] = useState(false);
   const [showMorePositions, setShowMorePositions] = useState(false);
   const [showClosedScreen, setShowClosedScreen] = useState(false);
   const [botFilter, setBotFilter] = useState("all");
@@ -435,34 +435,39 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
       </DrillInScreen>
 
       {fires.length > 0 && (
-        <>
-          <div className="sub-label">Recent Trades</div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount ({unit})</th><th>Tx</th></tr></thead>
-              <tbody>
-                {(showAllTrades ? fires : fires.slice(0, 8)).map((f) => (
-                  <tr key={f.id}>
-                    <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTsShort(f.ts)}</td>
-                    <td>{fmtAmount(f.amount)}</td>
-                    <td>{f.tx_hash
-                      ? (EXPLORER_URL
-                        ? <a href={`${EXPLORER_URL}/tx/${f.tx_hash}`} target="_blank" rel="noreferrer">{short(f.tx_hash)}</a>
-                        : short(f.tx_hash))
-                      : "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {fires.length > 8 && (
-            <button type="button" className="btn btn-small" style={{ marginTop: 8 }}
-              onClick={() => setShowAllTrades((s) => !s)}>
-              {showAllTrades ? "Show fewer" : `Show all ${fires.length}`}
-            </button>
-          )}
-        </>
+        <button type="button" className="archive-link" onClick={() => setShowTradesScreen(true)}>
+          See {fires.length} recent trade{fires.length === 1 ? "" : "s"}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
       )}
+
+      <DrillInScreen
+        title="Recent Trades"
+        subtitle={`${fires.length} trade${fires.length === 1 ? "" : "s"}`}
+        open={showTradesScreen}
+        onClose={() => setShowTradesScreen(false)}
+      >
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount ({unit})</th><th>Tx</th></tr></thead>
+            <tbody>
+              {fires.map((f) => (
+                <tr key={f.id}>
+                  <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTsShort(f.ts)}</td>
+                  <td>{fmtAmount(f.amount)}</td>
+                  <td>{f.tx_hash
+                    ? (EXPLORER_URL
+                      ? <a href={`${EXPLORER_URL}/tx/${f.tx_hash}`} target="_blank" rel="noreferrer">{short(f.tx_hash)}</a>
+                      : short(f.tx_hash))
+                    : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </DrillInScreen>
     </div>
   );
 }

@@ -117,6 +117,7 @@ export default function HunterIQPanel({ hunterIQ, onSubmitFeedback }) {
         its own too, from its own wins, losses, and misses.
       </p>
 
+      <div className="sub-label" style={{ marginTop: 0 }}>Hunter IQ Feedback</div>
       <form onSubmit={handleSubmit} className="feedback-box">
         <textarea
           className="feedback-input"

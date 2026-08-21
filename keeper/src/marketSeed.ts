@@ -68,6 +68,15 @@ async function classifyPair(pairAddr: string, usdPerPls: number): Promise<{ liqU
   }
 }
 
+// A pair-index chunk fully classified before the checkpoint advances - see
+// the loop below. Small enough that a keeper restart mid-sweep (a routine
+// deploy, a crash) loses at most one chunk's worth of RPC calls, not the
+// whole multi-hour sweep - the original version of this only checkpointed
+// once at the very end, which meant restarting the keeper for an unrelated
+// deploy while a sweep was still running silently threw away all of its
+// progress and started the next attempt over from index 0.
+const CLASSIFY_CHUNK_SIZE = 1000;
+
 export async function seedMarket(): Promise<void> {
   const total = Number(await factory.allPairsLength());
   if (total === 0) return;
@@ -98,35 +107,44 @@ export async function seedMarket(): Promise<void> {
   // Classify whatever pair indices are new since the last pass. New pairs
   // are already caught immediately by launch.ts - this is a completeness
   // backstop, and after the first run it's normally a small, fast increment.
-  const classifiedUpTo = Number(meta.get("marketSeedClassifiedUpTo", "0"));
-  if (classifiedUpTo < total) {
-    const toClassify = total - classifiedUpTo;
-    log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; classifying ${toClassify} new pair(s) (index ${classifiedUpTo}..${total - 1}) for liquidity >= $${floor.toLocaleString()} (PLS/USD ~$${usdPerPls})`);
-    const indices = Array.from({ length: toClassify }, (_, k) => classifiedUpTo + k);
+  const classifiedUpTo0 = Number(meta.get("marketSeedClassifiedUpTo", "0"));
+  if (classifiedUpTo0 < total) {
+    const toClassify = total - classifiedUpTo0;
+    log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; classifying ${toClassify} new pair(s) (index ${classifiedUpTo0}..${total - 1}) for liquidity >= $${floor.toLocaleString()} (PLS/USD ~$${usdPerPls})`);
     let checked = 0;
     let newWplsPairs = 0;
-    await mapLimit(indices, CFG.keeperConcurrency, async (i) => {
-      try {
-        const pairAddr: string = await factory.allPairs(i);
-        const info = await classifyPair(pairAddr, usdPerPls);
-        checked++;
-        if (checked % 2000 === 0) log("debug", "marketSeed", `Classified ${checked}/${toClassify} new pairs, ${added} tokens added so far`);
-        if (!info) return; // not a WPLS pair - never re-checked again
-        wplsPairs.insert(i, pairAddr, info.token, info.plsFirst);
-        newWplsPairs++;
-        if (info.liqUsd < floor) return;
-        aboveFloor++;
-        if (alreadyWatched.has(info.token)) return;
-        if (await ensureWatched(info.token)) added++;
-      } catch {
-        // One bad pair index (a transient RPC error, a malformed pair
-        // contract) shouldn't stop the sweep. It's not retried - the
-        // checkpoint advances past it below regardless - but a token missed
-        // this way still gets caught by launch.ts if it's a new pair, or by
-        // a rule/snipe/Ask Icaria lookup if a user points at it directly.
-      }
-    });
-    meta.set("marketSeedClassifiedUpTo", String(total));
+    let chunkStart = classifiedUpTo0;
+    while (chunkStart < total) {
+      const chunkEnd = Math.min(chunkStart + CLASSIFY_CHUNK_SIZE, total);
+      const indices = Array.from({ length: chunkEnd - chunkStart }, (_, k) => chunkStart + k);
+      await mapLimit(indices, CFG.keeperConcurrency, async (i) => {
+        try {
+          const pairAddr: string = await factory.allPairs(i);
+          const info = await classifyPair(pairAddr, usdPerPls);
+          checked++;
+          if (!info) return; // not a WPLS pair - never re-checked again
+          wplsPairs.insert(i, pairAddr, info.token, info.plsFirst);
+          newWplsPairs++;
+          if (info.liqUsd < floor) return;
+          aboveFloor++;
+          if (alreadyWatched.has(info.token)) return;
+          if (await ensureWatched(info.token)) added++;
+        } catch {
+          // One bad pair index (a transient RPC error, a malformed pair
+          // contract) shouldn't stop the sweep. It's not retried - the
+          // checkpoint advances past it below regardless - but a token
+          // missed this way still gets caught by launch.ts if it's a new
+          // pair, or by a rule/snipe/Ask Icaria lookup if a user points at
+          // it directly.
+        }
+      });
+      // Checkpoint after every chunk, not just once at the very end - see
+      // CLASSIFY_CHUNK_SIZE's comment. Safe because mapLimit above only
+      // returns once every index in this chunk has actually finished.
+      meta.set("marketSeedClassifiedUpTo", String(chunkEnd));
+      chunkStart = chunkEnd;
+      log("debug", "marketSeed", `Classified ${checked}/${toClassify} new pairs, ${added} tokens added so far (checkpoint at index ${chunkEnd})`);
+    }
     log("info", "marketSeed", `Market seed pass done: ${aboveFloor} of ${known.length + newWplsPairs} known WPLS pairs are above $${floor.toLocaleString()} liquidity (${added} newly added to watched this pass)`);
   } else {
     log("info", "marketSeed", `Re-checked ${known.length} known WPLS pairs; no new pairs since the last classification pass. ${aboveFloor} are above $${floor.toLocaleString()} liquidity (${added} newly added to watched this pass)`);

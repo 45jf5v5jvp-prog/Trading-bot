@@ -644,6 +644,15 @@ export default function Dashboard() {
                   active={config.launch.enabled}
                   statLine={botStatLine(history, "launch")}
                   perfDetail={botPerfDetail(history, "launch")}
+                  info={
+                    <>
+                      Watches {CHAIN.dexName} for brand-new pairs the moment they're created and can
+                      buy automatically the instant one clears your safety screen - buy/sell tax, LP
+                      lock, how much supply the deployer holds, and a minimum liquidity floor. Built
+                      for speed: a launch is judged and acted on within its first few blocks of
+                      existing, before most people even see it.
+                    </>
+                  }
                 >
                   <LaunchSettings
                     launch={config.launch}
@@ -663,6 +672,14 @@ export default function Dashboard() {
                   active={config.discovery.enabled}
                   statLine={botStatLine(history, "discovery")}
                   perfDetail={botPerfDetail(history, "discovery")}
+                  info={
+                    <>
+                      Scans all of {CHAIN.dexName}, not just brand-new launches, for tokens where price
+                      and liquidity are climbing together - a sign of real, organic demand rather than
+                      one wallet pumping the price on thin liquidity. Slower and broader than Launch
+                      Bot, which only ever looks at the moment a pair is created.
+                    </>
+                  }
                 >
                   <DiscoverySettings
                     discovery={config.discovery}
@@ -676,6 +693,14 @@ export default function Dashboard() {
                   active={config.hunter.enabled}
                   statLine={botStatLine(history, "hunter")}
                   perfDetail={botPerfDetail(history, "hunter")}
+                  info={
+                    <>
+                      Watches tokens already trading for technical dips - RSI oversold, a bullish MACD
+                      cross, or price riding the lower Bollinger band. A setup still has to clear the
+                      same honeypot/tax/LP-lock screen Launch Bot uses, and can optionally require an
+                      AI sanity check before it's allowed to auto-buy.
+                    </>
+                  }
                 >
                   <HunterSettings
                     hunter={config.hunter}

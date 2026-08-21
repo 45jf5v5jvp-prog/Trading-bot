@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { CHAIN } from "../lib/contracts";
+import DrillInScreen from "./DrillInScreen";
+import InfoButton from "./InfoButton";
 
 function short(addr) {
   if (!addr) return "-";
@@ -179,18 +181,36 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
  * that's no longer real.
  */
 export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, onCopyFallback }) {
+  const [showOldScreen, setShowOldScreen] = useState(false);
   // A mechanical pass (verdict === "pass", the only kind that reaches this
   // list at all) still gets an AI opinion layered on top for Hunter Bot and
   // Discovery Bot in Full AI mode. Showing every mechanically-passed token
   // including ones the AI itself flagged as bad buys made the feed read like
   // generic token info instead of a "here's what to buy" list - so anything
-  // the AI explicitly said not to buy is hidden here, not just deprioritized.
+  // the AI explicitly said not to buy is hidden here, not just deprioritized
+  // (and never archived either - it was never a real opportunity to miss).
   // A token with no AI opinion at all (AI review off, or not yet run) still
   // shows, since "no opinion" isn't the same as "don't buy".
-  const shown = opportunities?.filter((o) => o.aiConfidence == null || o.aiRecommend);
+  const passesAiFilter = (o) => o.aiConfidence == null || o.aiRecommend;
+  const isDone = (o) => o.stale || o.action === "bought";
+  const live = opportunities?.filter((o) => passesAiFilter(o) && !isDone(o)) ?? [];
+  // Once a signal expires or gets bought, a Buy Now button on it is either
+  // wrong or pointless - it moves here instead of lingering in the live feed
+  // (or, before this, disappearing with no record at all).
+  const old = opportunities?.filter((o) => passesAiFilter(o) && isDone(o)) ?? [];
+  const boughtCount = old.filter((o) => o.action === "bought").length;
+
   return (
     <div>
-      <div className="section-label">Opportunities</div>
+      <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+        <div className="section-label" style={{ margin: 0 }}>Opportunities</div>
+        <InfoButton title="What's an opportunity?">
+          A token one of your bots found and screened for honeypot, tax, and LP-lock risk. Showing
+          up here means it passed that screen - it doesn't mean it was bought automatically, unless
+          that bot's own auto-buy mode is turned on. Otherwise it just waits here for you to Buy
+          Now, or moves to Old Opportunities if nobody acts on it in time.
+        </InfoButton>
+      </div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Tokens on {CHAIN.dexName} that Discovery Bot spotted moving (price and liquidity climbing
         together) or Hunter Bot spotted looking oversold (RSI/MACD/Bollinger), and that the AI
@@ -198,12 +218,32 @@ export default function OpportunitiesPanel({ opportunities, onBuy, buyStates, on
         token's address to look it up yourself before trusting the screen alone, or set your own
         amount and buy it directly.
       </p>
-      {(!shown || shown.length === 0) && (
-        <p className="hint">Nothing found yet. This fills in as Discovery Bot or Hunter Bot runs.</p>
+      {live.length === 0 && (
+        <p className="hint">Nothing live right now. This fills in as Discovery Bot or Hunter Bot runs.</p>
       )}
-      {shown?.map((o) => (
+      {live.map((o) => (
         <OpportunityRow key={o.id} o={o} onBuy={onBuy} buyState={buyStates?.[o.id]} onCopyFallback={onCopyFallback} />
       ))}
+
+      {old.length > 0 && (
+        <button type="button" className="archive-link" onClick={() => setShowOldScreen(true)}>
+          See {old.length} old opportunit{old.length === 1 ? "y" : "ies"}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+      )}
+
+      <DrillInScreen
+        title="Old Opportunities"
+        subtitle={`${boughtCount} bought · ${old.length - boughtCount} expired unactioned`}
+        open={showOldScreen}
+        onClose={() => setShowOldScreen(false)}
+      >
+        {old.map((o) => (
+          <OpportunityRow key={o.id} o={o} onBuy={onBuy} buyState={buyStates?.[o.id]} onCopyFallback={onCopyFallback} />
+        ))}
+      </DrillInScreen>
     </div>
   );
 }

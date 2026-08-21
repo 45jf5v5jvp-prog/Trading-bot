@@ -2,6 +2,7 @@ import { useState } from "react";
 import LimitOrderEditor from "./LimitOrderEditor";
 import { addLimitOrder, removeLimitOrderAt, updateLimitOrderAt } from "../lib/limitOrdersListOps";
 import { CHAIN } from "../lib/contracts";
+import InfoButton from "./InfoButton";
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -49,7 +50,15 @@ export default function LimitOrdersList({ orders, onChange }) {
 
   return (
     <div>
-      <div className="section-label">Limit Orders</div>
+      <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+        <div className="section-label" style={{ margin: 0 }}>Limit Orders</div>
+        <InfoButton title="What are Limit Orders?">
+          A resting buy or sell order on a token you already hold or already trust - you set the
+          price, it fires the instant the market reaches it. No honeypot or tax screening runs on
+          these, since the assumption is you already know the token. You can have as many
+          outstanding at once as you want; each one stays collapsed until you tap it.
+        </InfoButton>
+      </div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Hold a token in this vault (deposit it, or let a buy order fill) and set the exact price
         you want to sell at or buy more at. Each order fires the instant the market gets there -

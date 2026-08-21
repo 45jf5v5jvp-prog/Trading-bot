@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CHAIN, EXPLORER_URL } from "../lib/contracts";
+import DrillInScreen from "./DrillInScreen";
 
 function fmtTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -75,6 +76,21 @@ function fmtPnl(pct) {
   if (pct === null || pct === undefined) return "price unavailable";
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(1)}%`;
+}
+
+function fmtSignedAmount(v) {
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${fmtAmount(v)}`;
+}
+
+/** Realized P&L summed across a set of closed positions - only ones that
+ * actually sold for something (a "stuck" position never got proceeds, so it
+ * contributes nothing rather than a fabricated loss). */
+function totalRealizedPls(closed) {
+  return closed.reduce((sum, p) => {
+    if (p.proceeds_pls === null || p.proceeds_pls === undefined) return sum;
+    return sum + (p.proceeds_pls - p.spent_pls);
+  }, 0);
 }
 
 /** Copies the full (untruncated) token address - what's shown next to it is
@@ -214,10 +230,16 @@ function botsPresent(history) {
  * Discovery Bot is doing" - without hiding anything, since "All" stays the
  * default view.
  */
+// Shown by default before "Show N more" - big enough to see what actually
+// matters without scrolling, small enough that a vault with a dozen open
+// positions doesn't turn this into the whole page.
+const DEFAULT_VISIBLE_POSITIONS = 3;
+
 export default function HistoryPanel({ history, onClosePosition, closeStates }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
-  const [showAllClosed, setShowAllClosed] = useState(false);
   const [showAllTrades, setShowAllTrades] = useState(false);
+  const [showMorePositions, setShowMorePositions] = useState(false);
+  const [showClosedScreen, setShowClosedScreen] = useState(false);
   const [botFilter, setBotFilter] = useState("all");
   if (!history) return null;
   const unit = CHAIN.nativeSymbol;
@@ -229,8 +251,14 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
     closed: history.positions.closed.filter((p) => matches(p.bot)),
   };
   const fires = history.fires.filter((f) => matches(f.bot));
-  const priced = positions.open.filter((p) => !hasNoLiquidity(p));
+  // Largest current value first - the position worth the most (or losing the
+  // most) is the one most worth seeing without having to scroll for it.
+  const priced = positions.open
+    .filter((p) => !hasNoLiquidity(p))
+    .sort((a, b) => (b.valueNowPls ?? 0) - (a.valueNowPls ?? 0));
   const noLiquidity = positions.open.filter(hasNoLiquidity);
+  const visiblePriced = showMorePositions ? priced : priced.slice(0, DEFAULT_VISIBLE_POSITIONS);
+  const hiddenPricedCount = priced.length - visiblePriced.length;
 
   return (
     <div>
@@ -261,9 +289,19 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
       {!noHistoryYet && priced.length === 0 && noLiquidity.length > 0 && (
         <p className="hint">Nothing open worth showing right now - {noLiquidity.length} {noLiquidity.length === 1 ? "position" : "positions"} with no liquidity below.</p>
       )}
-      {priced.map((p) => (
+      {visiblePriced.map((p) => (
         <HoldingCard key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
       ))}
+      {hiddenPricedCount > 0 && (
+        <button type="button" className="btn btn-small" style={{ marginBottom: 14 }} onClick={() => setShowMorePositions(true)}>
+          Show {hiddenPricedCount} more position{hiddenPricedCount === 1 ? "" : "s"}
+        </button>
+      )}
+      {showMorePositions && priced.length > DEFAULT_VISIBLE_POSITIONS && (
+        <button type="button" className="btn btn-small" style={{ marginBottom: 14 }} onClick={() => setShowMorePositions(false)}>
+          Show fewer
+        </button>
+      )}
 
       {noLiquidity.length > 0 && (
         <div className="dead-positions">
@@ -281,21 +319,26 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
       )}
 
       {positions.closed.length > 0 && (
-        <>
-          <div className="sub-label">Closed Positions</div>
-          <div className="closed-list">
-            {(showAllClosed ? positions.closed : positions.closed.slice(0, 8)).map((p) => (
-              <ClosedPositionRow key={p.id} p={p} />
-            ))}
-          </div>
-          {positions.closed.length > 8 && (
-            <button type="button" className="btn btn-small" style={{ marginTop: 8 }}
-              onClick={() => setShowAllClosed((s) => !s)}>
-              {showAllClosed ? "Show fewer" : `Show all ${positions.closed.length}`}
-            </button>
-          )}
-        </>
+        <button type="button" className="archive-link" onClick={() => setShowClosedScreen(true)}>
+          See {positions.closed.length} closed position{positions.closed.length === 1 ? "" : "s"}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
       )}
+
+      <DrillInScreen
+        title="Closed Positions"
+        subtitle={`${positions.closed.length} closed · ${fmtSignedAmount(totalRealizedPls(positions.closed))} ${unit} total realized`}
+        open={showClosedScreen}
+        onClose={() => setShowClosedScreen(false)}
+      >
+        <div className="closed-list">
+          {positions.closed.map((p) => (
+            <ClosedPositionRow key={p.id} p={p} />
+          ))}
+        </div>
+      </DrillInScreen>
 
       {fires.length > 0 && (
         <>

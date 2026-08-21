@@ -1,5 +1,6 @@
 import { useState } from "react";
 import BotStatusBadge from "./BotStatusBadge";
+import InfoButton from "./InfoButton";
 
 /**
  * Collapsible shell for one bot's section - Launch/Hunter/Discovery all
@@ -11,7 +12,7 @@ import BotStatusBadge from "./BotStatusBadge";
  * hidden until asked for. Most people checking "how's Hunter doing" never
  * need to see a single input field.
  */
-export default function BotCard({ title, active, statLine, perfDetail, children, defaultOpen = false }) {
+export default function BotCard({ title, active, statLine, perfDetail, info, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -28,6 +29,7 @@ export default function BotCard({ title, active, statLine, perfDetail, children,
         <div className="bot-card-titles">
           <div className="row" style={{ gap: 8 }}>
             <span className="bot-card-title">{title}</span>
+            {info && <InfoButton title={title}>{info}</InfoButton>}
             <BotStatusBadge active={active} />
           </div>
           {statLine && <div className="bot-card-stat">{statLine}</div>}

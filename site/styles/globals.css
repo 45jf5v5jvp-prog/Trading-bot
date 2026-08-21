@@ -260,6 +260,81 @@ input::placeholder { color: #6b6c76; }
 .bot-card-settings { padding-top: 14px; }
 @media (prefers-reduced-motion: reduce) { .settings-disclosure svg { transition: none; } }
 
+/* "See closed positions" / "See old opportunities" - a real drill-in screen
+   rather than another thing sitting in the main scroll (v3.0). */
+.archive-link {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; background: none; border: none; border-top: 1px solid var(--edge);
+  color: var(--ash); font: inherit; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.1em; font-weight: 600; cursor: pointer; padding: 12px 0 2px; margin-top: 6px;
+}
+.archive-link:hover { color: var(--amber); }
+.archive-link svg { width: 13px; height: 13px; }
+
+.drill-in-overlay {
+  position: fixed; inset: 0; z-index: 200; background: var(--bg); overflow-y: auto;
+}
+.drill-in-head {
+  display: flex; align-items: center; gap: 10px; padding: 18px 20px;
+  border-bottom: 1px solid var(--edge); position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+.drill-in-back {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  background: var(--chip); border: 1px solid var(--edge); color: var(--text); cursor: pointer;
+}
+.drill-in-back:hover { border-color: var(--amber); }
+.drill-in-back svg { width: 16px; height: 16px; }
+.drill-in-title { font-size: 15px; font-weight: 700; }
+.drill-in-sub { font-size: 11.5px; color: var(--ash); margin-top: 1px; }
+.drill-in-body { padding: 4px 20px 40px; max-width: 720px; margin: 0 auto; }
+
+/* Info buttons + their shared modal shape (v3.0) - a small "i" next to a
+   bot's name or Opportunities, explaining what it actually does. */
+.info-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  background: none; border: 1px solid var(--ash); color: var(--ash);
+  cursor: pointer; padding: 0; font: inherit; vertical-align: middle;
+}
+.info-btn svg { width: 9px; height: 9px; }
+.info-btn:hover { border-color: var(--amber); color: var(--amber); }
+.info-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.info-modal-backdrop {
+  position: fixed; inset: 0; z-index: 300; background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+@media (min-width: 520px) { .info-modal-backdrop { align-items: center; } }
+.info-modal {
+  width: 100%; max-width: 460px; background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 20px 20px 0 0; padding: 20px 20px 26px;
+}
+@media (min-width: 520px) { .info-modal { border-radius: 16px; margin: 0 16px; } }
+.info-modal-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.info-modal-title { font-size: 15px; font-weight: 700; }
+.info-modal-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+  background: var(--chip); border: 1px solid var(--edge); color: var(--ash); cursor: pointer;
+}
+.info-modal-close:hover { color: var(--text); border-color: var(--amber); }
+.info-modal-body { font-size: 13.5px; color: var(--ash); line-height: 1.55; }
+
+/* Individual limit orders (v3.0) - collapsed to one summary row until
+   tapped, however many are outstanding. */
+.order-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; background: var(--chip); border: 1px solid var(--edge); border-radius: 12px;
+  padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; text-align: left;
+}
+.order-toggle:hover { border-color: var(--amber); }
+.order-toggle:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+.order-toggle-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.order-toggle-name { font-size: 13.5px; font-weight: 600; }
+.order-toggle-meta { font-size: 11.5px; color: var(--ash); margin-top: 1px; }
+.order-chevron { width: 15px; height: 15px; flex-shrink: 0; color: var(--ash); }
+
 .sub-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ash); margin: 14px 0 8px; }
 
 .pnl-pos { color: var(--good); font-weight: 600; }

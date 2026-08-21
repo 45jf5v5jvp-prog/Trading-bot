@@ -45,6 +45,7 @@ export default function Dashboard() {
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState(""); // shown IN the fixed unsaved-bar itself - see handleSave
   const [history, setHistory] = useState(null);
   const [portfolio, setPortfolio] = useState(null);
   const [opportunities, setOpportunities] = useState(null);
@@ -121,6 +122,7 @@ export default function Dashboard() {
   function updateConfig(next) {
     setConfig(next);
     setDirty(true);
+    setSaveError(""); // a fresh edit supersedes whatever the last save attempt reported
   }
 
   useEffect(() => {
@@ -207,13 +209,19 @@ export default function Dashboard() {
   async function handleSave() {
     setSaving(true);
     setStatus("");
+    setSaveError("");
     try {
       const saved = await saveConfig(getProvider, vaultAddress, config);
       setConfig(saved);
       setDirty(false);
       setStatus("Saved. The keeper picks this up on its next refresh cycle.");
     } catch (e) {
-      setStatus(`Save failed: ${e.message}`);
+      // Shown INSIDE the fixed unsaved-bar (see below), not just the
+      // page-bottom status line - that line sits right where the fixed bar
+      // pins itself, so a failure there was invisible: dirty stayed true,
+      // the bar kept showing its generic reminder, and the actual reason
+      // was hidden underneath it the whole time.
+      setSaveError(e.message);
     } finally {
       setSaving(false);
     }
@@ -629,8 +637,12 @@ export default function Dashboard() {
                     warning scrolls away, and an unsaved launch bot someone believes
                     is live is the single most confusing failure this UI can produce. */}
                 {dirty && (
-                  <div className="unsaved-bar">
-                    <span>Your changes are NOT live yet - the bot is still running the old settings.</span>
+                  <div className={saveError ? "unsaved-bar unsaved-bar-error" : "unsaved-bar"}>
+                    <span>
+                      {saveError
+                        ? `Save failed: ${saveError}`
+                        : "Your changes are NOT live yet - the bot is still running the old settings."}
+                    </span>
                     <button className="btn btn-primary btn-small" onClick={handleSave} disabled={saving}>
                       {saving ? "Saving..." : "Save now"}
                     </button>

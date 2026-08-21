@@ -250,6 +250,14 @@ td { color: var(--text); }
   color: var(--amber); font-size: 13.5px; font-weight: 600;
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.45);
 }
+/* A save that actually failed reads differently from "just unsaved" - same
+   fixed position (it has to stay visible regardless of scroll, which is the
+   whole point: the page-bottom status line this used to fall back on sits
+   exactly where this bar covers it), but red instead of amber so the two
+   states are never mistaken for each other. */
+.unsaved-bar-error {
+  border-top-color: var(--bad); color: var(--bad);
+}
 
 .closed-list { font-size: 13px; }
 .closed-row {

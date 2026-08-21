@@ -88,6 +88,7 @@ export default function Dashboard() {
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
+  const [stuckWithdrawStates, setStuckWithdrawStates] = useState({}); // { [positionId]: "pending" | "done" | "error" }
   const [buyStates, setBuyStates] = useState({}); // { [opportunityId]: "pending" | "requested" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
@@ -369,6 +370,25 @@ export default function Dashboard() {
     }
   }
 
+  /** Direct escape hatch for a "stuck" position - one the keeper gave up
+   * retrying and will never revisit on its own (see keeper/src/positions.ts's
+   * MAX_STRUCTURAL_EXIT_FAILURES). Pulls that token straight to the owner's
+   * wallet, same underlying call as the manual withdraw field below, just
+   * pre-targeted at the specific token this row already knows about so
+   * there's no address to hunt down and copy in by hand. */
+  async function handleWithdrawStuckToken(positionId, tokenAddress) {
+    setStuckWithdrawStates((s) => ({ ...s, [positionId]: "pending" }));
+    setStatus("");
+    try {
+      await withdrawToken(tokenAddress, setStatus);
+      setStuckWithdrawStates((s) => ({ ...s, [positionId]: "done" }));
+      setStatus(`Withdrew all of ${tokenAddress} to your wallet.`);
+    } catch (e) {
+      setStuckWithdrawStates((s) => ({ ...s, [positionId]: "error" }));
+      setStatus(`Token withdraw failed: ${e.message}`);
+    }
+  }
+
   /** Signs and submits a close request for one open position. Doesn't sell
    * anything itself - the keeper does that on its next pass, see
    * lib/closePosition.js. */
@@ -602,7 +622,10 @@ export default function Dashboard() {
             </div>
 
             <div className="panel">
-              <HistoryPanel history={history} onClosePosition={handleClosePosition} closeStates={closeStates} />
+              <HistoryPanel
+                history={history} onClosePosition={handleClosePosition} closeStates={closeStates}
+                onWithdrawStuckToken={handleWithdrawStuckToken} withdrawStuckStates={stuckWithdrawStates}
+              />
             </div>
 
             <div className="panel">

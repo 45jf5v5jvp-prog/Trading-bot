@@ -52,10 +52,18 @@ function realizedPnlPls(p) {
   return p.proceeds_pls - p.spent_pls;
 }
 
-function ClosedPositionRow({ p }) {
+/** A "stuck" position is one the keeper gave up retrying (see positions.ts's
+ * MAX_STRUCTURAL_EXIT_FAILURES / retirePosition) - it never sold, so it has
+ * no proceeds, and nothing will ever retry it automatically. The tokens are
+ * still sitting in the vault; this is the only recorded status where a
+ * direct-withdraw button is the actual next step. */
+function ClosedPositionRow({ p, onWithdrawStuckToken, withdrawState }) {
   const pnlPls = realizedPnlPls(p);
   const pnlPct = realizedPnlPct(p);
   const unit = CHAIN.nativeSymbol;
+  const stuck = p.status === "stuck";
+  const withdrawing = withdrawState === "pending";
+  const withdrawn = withdrawState === "done";
   return (
     <div className="closed-row" title={p.close_reason || ""}>
       <div className="closed-row-top">
@@ -71,6 +79,18 @@ function ClosedPositionRow({ p }) {
         </span>
         <span className="closed-reason">{shortReason(p.close_reason, p.status)}</span>
       </div>
+      {stuck && (
+        <div className="closed-row-action">
+          <button
+            type="button"
+            className="btn btn-small btn-danger"
+            onClick={() => onWithdrawStuckToken(p.id, p.token)}
+            disabled={withdrawing || withdrawn}
+          >
+            {withdrawn ? "Withdrawn" : withdrawing ? "Withdrawing..." : "Withdraw to Wallet"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -253,7 +273,7 @@ function botsPresent(history) {
 // positions doesn't turn this into the whole page.
 const DEFAULT_VISIBLE_POSITIONS = 3;
 
-export default function HistoryPanel({ history, onClosePosition, closeStates }) {
+export default function HistoryPanel({ history, onClosePosition, closeStates, onWithdrawStuckToken, withdrawStuckStates }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
   const [showAllTrades, setShowAllTrades] = useState(false);
   const [showMorePositions, setShowMorePositions] = useState(false);
@@ -353,7 +373,11 @@ export default function HistoryPanel({ history, onClosePosition, closeStates }) 
       >
         <div className="closed-list">
           {positions.closed.map((p) => (
-            <ClosedPositionRow key={p.id} p={p} />
+            <ClosedPositionRow
+              key={p.id} p={p}
+              onWithdrawStuckToken={onWithdrawStuckToken}
+              withdrawState={withdrawStuckStates?.[p.id]}
+            />
           ))}
         </div>
       </DrillInScreen>

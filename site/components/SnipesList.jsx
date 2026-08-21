@@ -7,10 +7,9 @@ import { addSnipe, removeSnipeAt, updateSnipeAt } from "../lib/snipesListOps";
 export default function SnipesList({ snipes, onChange }) {
   return (
     <div>
-      <div className="section-label">Target Snipe</div>
       <p className="hint" style={{ marginBottom: 14 }}>
         Have a specific contract address you want to buy the second it's tradeable? Add it here.
-        Each one watches independently of the Launch Bot above.
+        Each one watches independently of the Launch Bot.
       </p>
       {snipes.length === 0 && <p className="hint">No targets yet. Add one to start watching an address.</p>}
       {snipes.map((s, i) => (

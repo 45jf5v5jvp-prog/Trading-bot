@@ -655,12 +655,24 @@ export default function Dashboard() {
                   </p>
                 </div>
 
-                <div className="panel">
+                <BotCard
+                  title="Trading Bots"
+                  active={(config.rules ?? []).some((r) => r.enabled)}
+                  statLine={botStatLine(history, "trading")}
+                  perfDetail={botPerfDetail(history, "trading")}
+                  info={
+                    <>
+                      Each one watches a single token you pick and buys the dip (or the top) on
+                      its own, independently of every other bot. Add as many as you want - one
+                      per token you want to run a rule against.
+                    </>
+                  }
+                >
                   <RulesList
                     rules={config.rules}
                     onChange={(rules) => updateConfig({ ...config, rules })}
                   />
-                </div>
+                </BotCard>
 
                 <BotCard
                   title="Launch Bot"
@@ -683,12 +695,24 @@ export default function Dashboard() {
                   />
                 </BotCard>
 
-                <div className="panel">
+                <BotCard
+                  title="Sniper Bot"
+                  active={(config.snipes ?? []).some((s) => s.enabled)}
+                  statLine={botStatLine(history, "snipe")}
+                  perfDetail={botPerfDetail(history, "snipe")}
+                  info={
+                    <>
+                      Have a specific contract address you want to buy the second it's tradeable?
+                      Add it here and this bot watches that one address, independently of Launch
+                      Bot's own discovery - for a token you spotted before its pool even exists.
+                    </>
+                  }
+                >
                   <SnipesList
                     snipes={config.snipes ?? []}
                     onChange={(snipes) => updateConfig({ ...config, snipes })}
                   />
-                </div>
+                </BotCard>
 
                 <BotCard
                   title="Discovery Bot"
@@ -744,12 +768,25 @@ export default function Dashboard() {
                   <AskIcaria vaultAddress={vaultAddress} getProvider={getProvider} />
                 </div>
 
-                <div className="panel">
+                <BotCard
+                  title="Limit Order Bot"
+                  active={(config.limitOrders ?? []).some((o) => o.enabled)}
+                  statLine={botStatLine(history, "limit")}
+                  perfDetail={botPerfDetail(history, "limit")}
+                  info={
+                    <>
+                      A resting buy or sell order on a token you already hold or already trust -
+                      you set the price, it fires the instant the market reaches it. No honeypot
+                      or tax screening runs on these, since the assumption is you already know
+                      the token. Have as many outstanding at once as you want.
+                    </>
+                  }
+                >
                   <LimitOrdersList
                     orders={config.limitOrders ?? []}
                     onChange={(limitOrders) => updateConfig({ ...config, limitOrders })}
                   />
-                </div>
+                </BotCard>
 
                 <button className={dirty ? "btn btn-primary" : "btn"} onClick={handleSave} disabled={saving}>
                   {saving ? "Saving..." : dirty ? "Save All Settings (unsaved changes)" : "Save All Settings"}

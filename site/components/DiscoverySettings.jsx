@@ -62,6 +62,40 @@ function ChoiceGroup({ options, value, onSelect }) {
 }
 
 /**
+ * A question in the wizard collapses to a one-line summary the moment it's
+ * answered - the full option list (with its multi-line descriptions) is
+ * only useful while still deciding. Clicking the summary reopens it, so
+ * changing an earlier answer is still one click away.
+ */
+function Question({ prompt, options, value, onSelect }) {
+  if (value) {
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(null)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+          background: "none", border: "1px solid var(--edge)", borderRadius: 6, cursor: "pointer",
+          padding: "8px 12px", marginBottom: 14, textAlign: "left", font: "inherit", color: "inherit",
+        }}
+      >
+        <span>
+          <span className="hint" style={{ fontWeight: 600 }}>{prompt} </span>
+          <span style={{ fontSize: 13 }}>{options[value].label}</span>
+        </span>
+        <span className="hint" style={{ fontSize: 11.5, flexShrink: 0, marginLeft: 12 }}>Change</span>
+      </button>
+    );
+  }
+  return (
+    <>
+      <p className="hint" style={{ fontWeight: 600, marginBottom: 6 }}>{prompt}</p>
+      <ChoiceGroup options={options} value={value} onSelect={onSelect} />
+    </>
+  );
+}
+
+/**
  * Quick Setup: three questions instead of nine raw fields, for turning Auto
  * mode on with sane numbers instead of guessing at what "min price move %"
  * or "trailing stop %" should be. Writes into the SAME config object the
@@ -103,14 +137,9 @@ function QuickSetup({ discovery, onChange, vaultBalance }) {
         honeypot/tax/LP-lock screen below is never affected by any of this.
       </p>
 
-      <p className="hint" style={{ fontWeight: 600, marginBottom: 6 }}>1. Would you rather...</p>
-      <ChoiceGroup options={STYLE_PRESETS} value={style} onSelect={setStyle} />
-
-      <p className="hint" style={{ fontWeight: 600, marginBottom: 6 }}>2. How much room should a losing trade get?</p>
-      <ChoiceGroup options={RISK_PRESETS} value={risk} onSelect={setRisk} />
-
-      <p className="hint" style={{ fontWeight: 600, marginBottom: 6 }}>3. How big should each trade be?</p>
-      <ChoiceGroup options={SIZE_PRESETS} value={size} onSelect={setSize} />
+      <Question prompt="1. Would you rather..." options={STYLE_PRESETS} value={style} onSelect={setStyle} />
+      <Question prompt="2. How much room should a losing trade get?" options={RISK_PRESETS} value={risk} onSelect={setRisk} />
+      <Question prompt="3. How big should each trade be?" options={SIZE_PRESETS} value={size} onSelect={setSize} />
 
       {ready && (
         <>

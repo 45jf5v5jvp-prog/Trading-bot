@@ -46,6 +46,18 @@ function CopyAddress({ address, onFallback }) {
   );
 }
 
+// The narrative is a full paragraph (and doubles again with the AI's own
+// reasoning tacked on) - fine for one opportunity, unreadable stacked ten
+// deep. This is just the first sentence, which always leads with the
+// token's own symbol and the specific trigger ("PTIGER looks oversold:
+// Bollinger %B -0.16 is riding the lower band."), so the collapsed view
+// still says something real instead of just an address.
+function firstSentence(text) {
+  if (!text) return "";
+  const m = text.match(/^[^.]*\./);
+  return m ? m[0] : text;
+}
+
 /**
  * One opportunity Discovery Bot or Hunter Bot found - always a passed screen
  * (see keeperDb.js's getOpportunities: failed ones are filtered out before
@@ -54,12 +66,18 @@ function CopyAddress({ address, onFallback }) {
  * rather than trusting that filter blindly here too. `action` is this
  * vault's own status for it ("notified", "bought", or none yet), read from
  * the keeper's discovery_actions table.
+ *
+ * Collapsed by default - a feed of full narrative-plus-AI-reasoning
+ * paragraphs, one per opportunity, ate the whole screen after a few hours of
+ * either bot running. Collapsed shows just enough to decide whether to look
+ * closer (symbol, trigger, AI verdict); the full writeup is one tap away.
  */
 function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
   const passed = o.verdict === "pass";
   const busy = buyState === "pending";
   const bought = o.action === "bought" || buyState === "requested";
   const isHunter = o.source === "hunter";
+  const [expanded, setExpanded] = useState(false);
   // Pre-filled with the AI's own sizing when there is one (already shown in
   // the narrative below), so accepting its suggestion is a single click -
   // but always editable, since the whole point is choosing your own amount
@@ -69,8 +87,15 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
 
   return (
     <div className="row-between dead-position-row">
-      <div>
-        <div className="row" style={{ gap: 8 }}>
+      <div style={{ minWidth: 0 }}>
+        <div
+          className="row"
+          style={{ gap: 8, cursor: "pointer" }}
+          onClick={() => setExpanded((e) => !e)}
+          role="button"
+          aria-expanded={expanded}
+        >
+          <span className="hint" style={{ margin: 0, width: 14 }}>{expanded ? "▾" : "▸"}</span>
           <CopyAddress address={o.token} onFallback={onCopyFallback} />
           <span
             className="hint"
@@ -80,19 +105,33 @@ function OpportunityRow({ o, onBuy, buyState, onCopyFallback }) {
           </span>
           <span className="hint" style={{ margin: 0 }}>{fmtTs(o.ts)}</span>
         </div>
-        <p className="hint" style={{ margin: "4px 0 0" }}>{o.narrative}</p>
-        {o.aiConfidence && (
-          <p className="hint" style={{ margin: "4px 0 0", color: CONFIDENCE_COLOR[o.aiConfidence] }}>
-            AI: would buy ({o.aiConfidence} confidence)
-            {o.aiSuggestedAmountPls
-              ? ` — sizing this at ${Math.round(o.aiSuggestedAmountPls).toLocaleString()} ${CHAIN.nativeSymbol}`
-              : ""}
+        {!expanded && (
+          <p
+            className="hint"
+            style={{ margin: "4px 0 0 22px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {firstSentence(o.narrative)}
+            {o.aiConfidence && <span style={{ color: CONFIDENCE_COLOR[o.aiConfidence] }}> — AI would buy ({o.aiConfidence})</span>}
+            {o.stale && !bought && <span style={{ color: "var(--red, #c0392b)" }}> — Expired</span>}
           </p>
         )}
-        {o.stale && !bought && (
-          <p className="hint" style={{ margin: "4px 0 0", color: "var(--red, #c0392b)" }}>
-            Expired: {o.staleReason || "too much time has passed since this was flagged."}
-          </p>
+        {expanded && (
+          <div style={{ marginLeft: 22 }}>
+            <p className="hint" style={{ margin: "4px 0 0" }}>{o.narrative}</p>
+            {o.aiConfidence && (
+              <p className="hint" style={{ margin: "4px 0 0", color: CONFIDENCE_COLOR[o.aiConfidence] }}>
+                AI: would buy ({o.aiConfidence} confidence)
+                {o.aiSuggestedAmountPls
+                  ? ` — sizing this at ${Math.round(o.aiSuggestedAmountPls).toLocaleString()} ${CHAIN.nativeSymbol}`
+                  : ""}
+              </p>
+            )}
+            {o.stale && !bought && (
+              <p className="hint" style={{ margin: "4px 0 0", color: "var(--red, #c0392b)" }}>
+                Expired: {o.staleReason || "too much time has passed since this was flagged."}
+              </p>
+            )}
+          </div>
         )}
       </div>
       {passed && !bought && !o.stale && (

@@ -1,12 +1,38 @@
+import { useState } from "react";
 import Link from "next/link";
 import { CHAIN } from "../lib/contracts";
 import Sun from "../components/Sun";
 
+/** One collapsed-by-default question. Click the row (or the caret) to
+ * expand - only the question text shows until then, which reads much
+ * cleaner than a page of permanently-open answers. */
 function Q({ q, children }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div style={{ marginBottom: 22 }}>
-      <div className="sub-label" style={{ marginBottom: 6 }}>{q}</div>
-      <div className="hint" style={{ fontSize: 13.5, lineHeight: 1.6 }}>{children}</div>
+    <div style={{ borderBottom: "1px solid var(--edge)" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+          background: "none", border: "none", cursor: "pointer", padding: "14px 0",
+          textAlign: "left", font: "inherit", color: "inherit",
+        }}
+      >
+        <span className="sub-label" style={{ margin: 0 }}>{q}</span>
+        <span
+          aria-hidden="true"
+          style={{
+            color: "var(--amber)", fontSize: 12, marginLeft: 12, flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s ease",
+          }}
+        >
+          &#9660;
+        </span>
+      </button>
+      {open && (
+        <div className="hint" style={{ fontSize: 13.5, lineHeight: 1.6, paddingBottom: 16 }}>{children}</div>
+      )}
     </div>
   );
 }

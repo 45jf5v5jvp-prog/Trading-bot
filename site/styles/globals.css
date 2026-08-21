@@ -403,6 +403,46 @@ input::placeholder { color: #6b6c76; }
 .holding-pnl { font-size: 20px; }
 .holding-meta { color: var(--ash); font-size: 12.5px; margin-top: 6px; }
 
+/* Where an open position sits between its stop-loss floor and take-profit
+   target - see HistoryPanel.jsx's ExitProgress. */
+.exit-progress { margin-top: 12px; }
+.exit-progress-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--edge);
+  overflow: hidden;
+}
+.exit-progress-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.exit-progress-fill-pos { background: var(--good); }
+.exit-progress-fill-neg { background: var(--bad); }
+.exit-progress-zero {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--text);
+  opacity: 0.35;
+  transform: translateX(-1px);
+}
+.exit-progress-marker {
+  position: absolute;
+  top: -3px;
+  width: 10px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--text);
+  transform: translateX(-5px);
+  box-shadow: 0 0 0 2px var(--chip);
+}
+.exit-progress-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ash);
+  font-size: 11px;
+  margin-top: 5px;
+}
+
 /* Collapsed rugged/-100% positions (see components/HistoryPanel.jsx isDead) -
    deliberately much lighter-weight than .holding-card so a wall of rugs
    doesn't push the positions still worth deciding about off the screen. */

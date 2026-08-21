@@ -36,7 +36,7 @@ function getPositions(vault) {
   if (!d) return { open: [], closed: [] };
   const rows = d.prepare(
     `SELECT id, bot, token, opened_at, entry_price, spent_pls, tokens_held, high_water,
-            tp_pct, sl_pct, trail_pct, time_exit_min, status, closed_at, proceeds_pls, close_reason
+            tp_pct, sl_pct, trail_pct, time_exit_min, exit_mode, status, closed_at, proceeds_pls, close_reason
      FROM positions WHERE vault = ? ORDER BY opened_at DESC LIMIT 100`,
   ).all(vault.toLowerCase());
   return {

@@ -62,10 +62,13 @@ export const CFG = {
   // whose liquidity grows into range later). Pair-list size makes a full
   // pass expensive, so it runs far less often than everything else.
   marketSeedRefreshHours: num("MARKET_SEED_REFRESH_HOURS", "6"),
-  // Slower still than discovery's - candle/indicator math is heavier per
-  // token, and a passing candidate may trigger a paid AI call, so this
-  // cadence doubles as a cost throttle, not just a "how fresh" choice.
-  hunterScanSec: num("HUNTER_SCAN_SEC", "300"),
+  // Candle/indicator math is heavier per token than discovery's checks, and
+  // a passing candidate may trigger a paid AI call, so this cadence doubles
+  // as a cost throttle, not just a "how fresh" choice - lower it further
+  // than this only with that tradeoff in mind (was 300s; 90s roughly
+  // triples worst-case detection latency without multiplying AI spend as
+  // much as going lower would).
+  hunterScanSec: num("HUNTER_SCAN_SEC", "90"),
 
   simAddress: addr("SIM_ADDRESS", "0x1111111111111111111111111111111111111111"),
   simAmountPls: num("SIM_AMOUNT_PLS", "100000"),

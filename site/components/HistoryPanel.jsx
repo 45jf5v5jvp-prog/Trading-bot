@@ -196,6 +196,57 @@ function NoLiquidityPositionRow({ p, onClose, closeState }) {
   );
 }
 
+/**
+ * Where an open position sits between its stop-loss floor and take-profit
+ * target - the same numbers positions.ts's sellSignal() checks every tick to
+ * decide whether to actually exit, drawn as a bar instead of two percentages
+ * someone has to do the subtraction on themselves. The marker is today's
+ * live P&L; the bar fills from breakeven (the thin center tick) toward
+ * whichever side it's currently on.
+ *
+ * A Hunter position in Auto Full mode has no fixed take-profit at all - the
+ * AI re-judges every cycle instead (see hunter.ts's reviewFullModePositions)
+ * - so there's nothing to show progress toward on the upside. Its stop-loss
+ * floor is still real and still mandatory, so that side still renders.
+ */
+function ExitProgress({ p }) {
+  const pnl = p.pnlPct;
+  if (pnl === null || pnl === undefined) return null;
+  const tp = p.tp_pct || 0;
+  const sl = p.sl_pct || 0;
+  const aiManaged = p.bot === "hunter" && p.exit_mode === "full";
+  if (!tp && !sl) return null; // nothing configured to show progress toward
+
+  // Span: stop-loss floor on the left, take-profit target on the right. A
+  // side with nothing configured gets a little headroom around the live P&L
+  // instead, so the bar isn't degenerate.
+  const left = sl > 0 ? -sl : Math.min(pnl - 5, -5);
+  const right = tp > 0 ? tp : Math.max(pnl + 5, 5);
+  const span = right - left;
+  const clampPct = (v) => ((Math.min(right, Math.max(left, v)) - left) / span) * 100;
+  const pnlAt = clampPct(pnl);
+  const zeroAt = clampPct(0);
+
+  return (
+    <div className="exit-progress">
+      <div className="exit-progress-track">
+        <div className="exit-progress-zero" style={{ left: `${zeroAt}%` }} />
+        <div
+          className={`exit-progress-fill ${pnl >= 0 ? "exit-progress-fill-pos" : "exit-progress-fill-neg"}`}
+          style={pnl >= 0
+            ? { left: `${zeroAt}%`, width: `${Math.max(0, pnlAt - zeroAt)}%` }
+            : { left: `${pnlAt}%`, width: `${Math.max(0, zeroAt - pnlAt)}%` }}
+        />
+        <div className="exit-progress-marker" style={{ left: `${pnlAt}%` }} />
+      </div>
+      <div className="exit-progress-labels">
+        <span>{sl > 0 ? `stop -${sl}%` : "no stop"}</span>
+        <span>{tp > 0 ? `target +${tp}%` : aiManaged ? "AI-managed target" : "no target"}</span>
+      </div>
+    </div>
+  );
+}
+
 /** One currently-held token: what the bot bought, what it's worth right now
  * (a live DEX quote, not a cached price), and whether that's up or down
  * since entry. This is the "should I close this?" view. */
@@ -223,6 +274,7 @@ function HoldingCard({ p, onClose, closeState }) {
           ? ` · worth ${fmtAmount(p.valueNowPls)} ${unit} now`
           : ""}
       </div>
+      <ExitProgress p={p} />
       <div className="row" style={{ marginTop: 10 }}>
         <button
           type="button"

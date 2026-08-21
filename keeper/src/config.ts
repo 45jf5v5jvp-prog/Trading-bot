@@ -51,6 +51,17 @@ export const CFG = {
   // a 60-minute-old trend, so this runs on the slower price-poll-ish cadence
   // rather than the launch scanner's fast one.
   discoveryScanSec: num("DISCOVERY_SCAN_SEC", "90"),
+  // How many outbound dollars of liquidity a token needs before market-wide
+  // seeding will even add it to `watched` at all - see marketSeed.ts. A
+  // dollar figure, not a raw PLS one, since PLS's own price swings enough
+  // that a fixed PLS floor would silently tighten or loosen over time.
+  minSeedLiquidityUsd: num("MIN_SEED_LIQUIDITY_USD", "5000"),
+  // How often the full PulseX pair list gets re-walked for tokens that
+  // crossed the liquidity floor since the last pass (a brand-new pair is
+  // still caught immediately by launch.ts - this is for pre-existing tokens
+  // whose liquidity grows into range later). Pair-list size makes a full
+  // pass expensive, so it runs far less often than everything else.
+  marketSeedRefreshHours: num("MARKET_SEED_REFRESH_HOURS", "6"),
   // Slower still than discovery's - candle/indicator math is heavier per
   // token, and a passing candidate may trigger a paid AI call, so this
   // cadence doubles as a cost throttle, not just a "how fresh" choice.

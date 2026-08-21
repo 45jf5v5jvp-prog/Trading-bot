@@ -8,6 +8,7 @@ import * as snipe from "./snipe.js";
 import * as limits from "./limits.js";
 import * as discovery from "./discovery.js";
 import * as hunter from "./hunter.js";
+import * as marketSeed from "./marketSeed.js";
 import * as ask from "./ask.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
@@ -65,6 +66,11 @@ async function main(): Promise<void> {
   loop("registry", CFG.registryRefreshSec, async () => { await refresh(); });
   loop("prices", CFG.pricePollSec, pollAll);
   loop("launch", CFG.pairScanSec, launch.scan);
+  // Fires immediately on startup, then re-walks the whole PulseX pair list
+  // every marketSeedRefreshHours - see marketSeed.ts. This is what lets
+  // Hunter/Discovery Bot see established tokens (HEX, INC, PLSX, ...), not
+  // just fresh launches, without slowing down anything else in this loop.
+  loop("marketSeed", CFG.marketSeedRefreshHours * 3600, marketSeed.seedMarket);
   // Same cadence as the launch scanner - a target snipe is racing other
   // buyers into a token the moment its pool exists, so it checks on every
   // pass rather than a slower dedicated interval.

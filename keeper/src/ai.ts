@@ -267,8 +267,17 @@ const EXIT_SYSTEM_PROMPT =
   "failed; only treat this as a real reason to cut it if there's a genuine technical breakdown behind " +
   "it (RSI/MACD/Bollinger clearly turning against the position, not just sitting near neutral) or the " +
   "loss is closing in on the stop-loss, not because the position happens to be slightly red at the " +
-  "moment you were asked. Be concrete: cite the specific numbers you're weighing, including how long " +
-  "this has actually been held.";
+  "moment you were asked. " +
+  "Closing at a loss is a bad outcome, not a neutral one - it is money that is actually gone, not just " +
+  "a number on a screen, and it should be treated as something to avoid, not something you're indifferent " +
+  "to. There is no such symmetry on the other side: taking a genuine, well-earned profit is always fine, " +
+  "but recommending a sell while the position is currently at a net loss should be rare and should " +
+  "require you to name specific evidence (which indicator, what it's doing, how that differs from normal " +
+  "noise) - 'this doesn't look great' is not enough to lock in a loss the position might otherwise " +
+  "recover from. When genuinely torn on a position that's currently red, the default is hold, not sell - " +
+  "the stop-loss already exists as the backstop for a real breakdown; you do not need to pre-empt it on " +
+  "a hunch. " +
+  "Be concrete: cite the specific numbers you're weighing, including how long this has actually been held.";
 
 /**
  * Periodic re-judgment of an open position - used only by Hunter Bot's

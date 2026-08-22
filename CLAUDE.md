@@ -202,23 +202,61 @@ each trade's real result directly - a closed trade's actual % and PLS
 back, or "STILL OPEN" - and the system prompt explicitly warns the model
 not to confuse a configured target with a realized outcome.
 
+A fifth finding, the same day, once the fee/gas fix (bug #6) was actually
+live: the owner asked to see real Hunter Bot Positions data to check
+whether the bot was profitable, and the closed-positions total read net
+positive (+170,865 PLS across 25 closes) despite nearly every individual
+visible row being a loss. Tracing it down: `proceeds_pls` on every close
+that happened *before* bug #6's fix landed (`e4c57d3`, 2026-08-22
+08:51:43 UTC) was still the old pre-trade quote estimate, not the real
+`Traded` event amount - that fix has no backfill, so old rows keep their
+inflated proceeds forever, and summed totals computed from them (like the
+dashboard's "total realized" figure) inherit the inflation. The owner
+correctly called this: "there has been no profit made from the hunter
+bot. It's only been losing money" - the positive total was leftover
+bug residue, not real performance. Once that was untangled, a real,
+separate problem underneath it: even judging positions on fully accurate,
+fee/gas/tax-netted numbers (bug #6 confirmed working correctly in
+`reviewFullModePositions`), Auto Full's AI exit judgment had no floor on
+how small a real net gain had to be before it would call it a "solid
+profit" worth taking, and no asymmetry treating a loss-side sell as
+something to avoid rather than something to shrug at - so a lot of
+genuinely-net-positive-but-trivial "wins" plus ordinary small losses could
+net out negative even with every number the AI saw being correct. Fixed
+two ways: `ai.ts`'s `EXIT_SYSTEM_PROMPT` now explicitly says closing at a
+loss is a bad outcome to avoid, not a neutral one, and requires the AI to
+name specific breaking evidence before recommending a loss-side sell
+rather than a vague "doesn't look great." Mechanically, `hunter.ts`'s
+`reviewFullModePositions` now only acts on a loss-side sell verdict the
+*second* time in a row the AI recommends it (tracked via `positions
+.loss_sell_pending`) - a real breakdown reads the same way again next
+review and still goes through, one review later, still backstopped by the
+mandatory stop-loss regardless; a one-off misread of ordinary noise as a
+"breakdown" no longer locks in a loss on its own. Profit-side sells are
+untouched by this and still execute immediately, same as before - the
+asymmetry is deliberate, matching the owner's own framing: "we have to
+make Hunter IQ think that selling for a loss is terrible."
+
 All six numbered bugs share the quote-blindness shape; the AI-patience
-finding, the mislabeled-trade-history finding, and the chat-confabulation
-finding are different kinds of bug from the same run of live
-conversations, included here because each was just as real and just as
-much a live-money (or live-trust) problem. All were found by re-reading
-with a specific question in mind (#4, #5, #6, and the three that followed
-it were all reported live, from the same owner watching the same bot -
-first a position that closed at a real 2% loss after the bot believed, and
-told its owner, it was up 40%, then a second one the owner flagged as
-"exited early... doesn't make sense" that turned out to be a completely
-different bug hiding behind a similar-looking symptom, then a third time
-as a *pattern* across many positions rather than one confusing trade, then
-a fourth time as numbers in the trade history that didn't add up at all,
-then a fifth time as the chat itself stating a trade's outcome that wasn't
-real). Assume more exist. The Launch Bot buys tokens that are hostile by
-assumption, so anything touching arbitrary ERC20 behaviour deserves
-suspicion.
+finding, the mislabeled-trade-history finding, the chat-confabulation
+finding, and the stale-proceeds/loss-aversion finding are different kinds
+of bug from the same run of live conversations, included here because
+each was just as real and just as much a live-money (or live-trust)
+problem. All were found by re-reading with a specific question in mind
+(#4, #5, #6, and the four that followed it were all reported live, from
+the same owner watching the same bot - first a position that closed at a
+real 2% loss after the bot believed, and told its owner, it was up 40%,
+then a second one the owner flagged as "exited early... doesn't make
+sense" that turned out to be a completely different bug hiding behind a
+similar-looking symptom, then a third time as a *pattern* across many
+positions rather than one confusing trade, then a fourth time as numbers
+in the trade history that didn't add up at all, then a fifth time as the
+chat itself stating a trade's outcome that wasn't real, then a sixth time
+as a dashboard total that looked profitable but was actually stale bug
+residue sitting on top of a bot that, once untangled, still had no real
+aversion to locking in a loss). Assume more exist. The Launch Bot buys
+tokens that are hostile by assumption, so anything touching arbitrary
+ERC20 behaviour deserves suspicion.
 
 ## What would help most, in order
 

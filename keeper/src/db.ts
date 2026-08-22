@@ -237,6 +237,18 @@ CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY 
   if (!cols.some((c) => c.name === "last_ai_review_at")) {
     db.exec("ALTER TABLE positions ADD COLUMN last_ai_review_at INTEGER");
   }
+  // Set when Auto Full's AI recommends selling a position that is currently
+  // at a net loss, and cleared the moment it isn't (a hold verdict, or the
+  // position turning green) - see hunter.ts's reviewFullModePositions. A
+  // loss-side sell verdict is only actually acted on the second time it
+  // comes back in a row, so one AI review reading a temporary dip as a
+  // "breakdown" can't lock in a loss on its own; a real breakdown still
+  // reads the same way on the next review and goes through. Profit-side
+  // sells never touch this - taking a genuine gain always executes
+  // immediately, same as before.
+  if (!cols.some((c) => c.name === "loss_sell_pending")) {
+    db.exec("ALTER TABLE positions ADD COLUMN loss_sell_pending INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 // Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request

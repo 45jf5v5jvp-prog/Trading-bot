@@ -424,7 +424,7 @@ async function evaluateWatchedToken(
 
 interface FullModeRow {
   id: number; vault: string; token: string; opened_at: number; entry_price: number;
-  spent_pls: number; high_water: number; last_ai_review_at: number | null;
+  spent_pls: number; high_water: number; last_ai_review_at: number | null; loss_sell_pending: number;
 }
 
 /**
@@ -440,7 +440,7 @@ interface FullModeRow {
  */
 async function reviewFullModePositions(): Promise<void> {
   const rows = db.prepare(
-    `SELECT id, vault, token, opened_at, entry_price, spent_pls, high_water, last_ai_review_at
+    `SELECT id, vault, token, opened_at, entry_price, spent_pls, high_water, last_ai_review_at, loss_sell_pending
      FROM positions WHERE bot='hunter' AND status='open' AND exit_mode='full'`,
   ).all() as FullModeRow[];
   if (rows.length === 0) return;
@@ -529,8 +529,25 @@ async function reviewFullModePositions(): Promise<void> {
       const verdict = await assessExit(context);
       db.prepare("UPDATE positions SET last_ai_review_at = ? WHERE id = ?").run(nowSec, r.id);
       if (verdict?.sell) {
-        aiExitRequests.request(r.id, verdict.reasoning);
-        log("info", "hunter", `Position #${r.id} (${context.symbol}): AI exit judgment - ${verdict.reasoning}`);
+        const atALoss = context.pnlPct < 0;
+        // A loss-side sell only actually fires the second time in a row the
+        // AI recommends it - see db.ts's loss_sell_pending comment. Taking a
+        // real profit is never held back this way; this exists purely to
+        // stop one review's read of ordinary noise as a "breakdown" from
+        // locking in a loss the position might have recovered from. A
+        // genuine breakdown reads the same way again next review and goes
+        // through with one review's extra delay, which the mandatory
+        // stop-loss still backstops regardless.
+        if (atALoss && !r.loss_sell_pending) {
+          db.prepare("UPDATE positions SET loss_sell_pending = 1 WHERE id = ?").run(r.id);
+          log("info", "hunter", `Position #${r.id} (${context.symbol}): AI leans toward selling at a loss (${verdict.reasoning}) - holding one more review to confirm before locking it in`);
+        } else {
+          if (atALoss) db.prepare("UPDATE positions SET loss_sell_pending = 0 WHERE id = ?").run(r.id);
+          aiExitRequests.request(r.id, verdict.reasoning);
+          log("info", "hunter", `Position #${r.id} (${context.symbol}): AI exit judgment - ${verdict.reasoning}`);
+        }
+      } else if (r.loss_sell_pending) {
+        db.prepare("UPDATE positions SET loss_sell_pending = 0 WHERE id = ?").run(r.id);
       }
     } catch (e) {
       log("error", "hunter", `Exit review for position #${r.id}: ${(e as Error).message}`);

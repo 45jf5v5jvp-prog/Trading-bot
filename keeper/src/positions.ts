@@ -98,7 +98,17 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
       if (held === 0n) return null;
       const venue = await findBestSellVenue(r.token, held);
       if (!venue) return null;
-      return { token: r.token.toLowerCase(), value: Number(formatEther(venue.amountOut)) };
+      // venue.amountOut is pure quote arithmetic - it has no idea a token
+      // takes a cut on transfer, so it overstates a taxed token's real
+      // value. Discounted by the same measured sell_tax_bps executor.ts's
+      // own minOut already uses, same fix as markToMarket below - this
+      // feeds the holding-cap check, and an overstated value there
+      // under-protects against one token eating the whole vault.
+      const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+        .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+      const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+      const afterTax = (venue.amountOut * BigInt(10_000 - taxBps)) / 10_000n;
+      return { token: r.token.toLowerCase(), value: Number(formatEther(afterTax)) };
     } catch { return null; } // unpriceable right now, skip
   });
   for (const v of values) {
@@ -131,6 +141,16 @@ type MarkResult =
  * Checks every venue (see findBestSellVenue), not just V2 - a position
  * bought via V3 has no V2 pool to fall back to at all, and hardcoding V2
  * here would just silently never be able to mark (or exit) it.
+ *
+ * `value` is discounted by any measured sell tax on file before it's
+ * returned - venue.amountOut itself is pure quote arithmetic with no idea a
+ * token takes a cut on transfer, so left undiscounted it overstates what a
+ * real sale would actually return. That mismatch is exactly what let a
+ * position read as up 40% right up until the real sale (which does account
+ * for tax, since it's an actual on-chain swap through executor.ts's own
+ * already-tax-aware minOut) came back at a real loss. `venue` itself is
+ * returned unchanged - checkAndClose only reads its kind/fee/key to route
+ * the exit, never its amountOut, so the actual sell still executes fresh.
  */
 async function markToMarket(r: Row): Promise<MarkResult> {
   let held: bigint;
@@ -144,7 +164,11 @@ async function markToMarket(r: Row): Promise<MarkResult> {
   try {
     const venue = await findBestSellVenue(r.token, held);
     if (!venue) return { ok: false, reason: "unpriceable" };
-    return { ok: true, value: Number(formatEther(venue.amountOut)), held, venue };
+    const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+      .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+    const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+    const afterTax = (venue.amountOut * BigInt(10_000 - taxBps)) / 10_000n;
+    return { ok: true, value: Number(formatEther(afterTax)), held, venue };
   } catch {
     return { ok: false, reason: "unpriceable" };
   }

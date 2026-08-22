@@ -5,7 +5,7 @@ import { ERC20_ABI } from "./abis.js";
 import { registry, type LimitOrder, type VaultRecord } from "./registry.js";
 import { findBestVenue, findBestSellVenue } from "./venues.js";
 import { executeSwap, executeSwapMultiVenue, type TradeVenue } from "./executor.js";
-import { limitFires } from "./db.js";
+import { limitFires, db } from "./db.js";
 import { log } from "./log.js";
 
 /**
@@ -66,7 +66,19 @@ async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
     }
     venue = await findBestSellVenue(token, raw);
     if (!venue) return;
-    const price = Number(formatEther(venue.amountOut)) / Number(formatUnits(raw, decimals));
+    // venue.amountOut is pure quote arithmetic - it has no idea this token
+    // might take a cut on transfer, so it overstates what a real sale
+    // returns. A resting sell order is a manual take-profit target, so
+    // deciding it's been hit on an untaxed quote is the same bug fixed in
+    // positions.ts's markToMarket: discounted by any measured sell tax on
+    // file (no screening runs for limit-order tokens by design - see the
+    // module comment - so this is best-effort, same convention as
+    // executor.ts's own use of this table).
+    const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+      .get(token) as { sell_tax_bps: number } | undefined;
+    const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+    const afterTax = (venue.amountOut * BigInt(10_000 - taxBps)) / 10_000n;
+    const price = Number(formatEther(afterTax)) / Number(formatUnits(raw, decimals));
     if (price < o.targetPrice) return; // best price right now still below target
     amountIn = raw;
   }

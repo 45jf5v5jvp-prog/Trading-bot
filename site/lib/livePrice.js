@@ -1,6 +1,6 @@
 const { JsonRpcProvider, Contract, formatEther, formatUnits, parseUnits } = require("ethers");
 const { CHAIN } = require("./chain");
-const { getV4PoolsForToken } = require("./keeperDb");
+const { getV4PoolsForToken, getSellTaxBps } = require("./keeperDb");
 
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -129,12 +129,25 @@ async function quoteV4(token, amountRaw) {
  * prices worse at size than at a small probe amount, and the dashboard
  * should show what the position would actually sell for right now, not a
  * misleadingly good mid price.
+ *
+ * The V2 leg is discounted by the keeper's own measured sell tax before
+ * comparing venues, same fix as positions.ts's markToMarket and hunter.ts's
+ * reviewFullModePositions: quote arithmetic has no idea a token takes a cut
+ * on transfer, so an undiscounted quote reads as far more than a real sale
+ * would return - exactly what could show a position as up 40% on this
+ * dashboard while a real sale actually locks in a loss. V3/V4 aren't
+ * discounted since this codebase has no way to measure tax on those venues
+ * (see the keeper's own screener.ts - same limitation there).
  */
 async function quotePlsValue(token, tokensHeldRaw) {
   const held = BigInt(tokensHeldRaw);
   if (held === 0n) return 0;
   const [v2, v3, v4] = await Promise.all([quoteV2(token, held), quoteV3(token, held), quoteV4(token, held)]);
-  const candidates = [v2, v3, v4].filter((v) => v !== null);
+  const sellTaxBps = getSellTaxBps(token);
+  const v2AfterTax = v2 !== null && sellTaxBps
+    ? (v2 * BigInt(10_000 - Math.min(sellTaxBps, 5000))) / 10_000n
+    : v2;
+  const candidates = [v2AfterTax, v3, v4].filter((v) => v !== null);
   // No venue could price this at all (thin/rugged pair, or simply no pool
   // anywhere) - distinct from a real zero-value quote, and the caller needs
   // to tell those apart the same way the old single-venue code did (via a

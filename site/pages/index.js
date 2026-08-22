@@ -592,22 +592,31 @@ export default function Dashboard() {
 
             <div className="panel">
               <div className="section-label">Deposit / Withdraw</div>
+              <p className="hint" style={{ marginTop: 0 }}>
+                Wallet balance: {fmtBalance(vaultInfo.walletBaseBalance)} {CHAIN.baseSymbol}
+              </p>
               <div className="field-inline">
                 <label>Amount ({CHAIN.baseSymbol})</label>
                 <NumberField value={amount} onChange={setAmount} asString style={{ width: 160 }} />
-                {/* The exact on-chain balance to full precision - the displayed
-                    balance is truncated for reading and typing it back in can
-                    never quite empty the vault. */}
-                <button type="button" className="btn btn-small" onClick={() => setAmount(vaultInfo.baseBalance)}>
-                  Max
-                </button>
               </div>
               <div className="row">
                 <button className="btn btn-primary" onClick={handleDeposit} disabled={txBusy || !amount}>
                   {txBusy ? "Working..." : "Deposit"}
                 </button>
+                {/* The exact on-chain balance to full precision - the displayed
+                    balance is truncated for reading and typing it back in
+                    could otherwise leave a dust amount unsendable. Wallet
+                    balance for deposit, vault balance for withdraw - they're
+                    two different pools of WPLS and mixing them up is exactly
+                    what left people depositing blind before this existed. */}
+                <button type="button" className="btn btn-small" onClick={() => setAmount(vaultInfo.walletBaseBalance)}>
+                  Max
+                </button>
                 <button className="btn" onClick={handleWithdraw} disabled={txBusy || !amount}>
                   {txBusy ? "Working..." : "Withdraw"}
+                </button>
+                <button type="button" className="btn btn-small" onClick={() => setAmount(vaultInfo.baseBalance)}>
+                  Max
                 </button>
               </div>
             </div>

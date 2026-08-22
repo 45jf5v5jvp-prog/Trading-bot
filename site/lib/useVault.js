@@ -46,7 +46,7 @@ export function useVault() {
   // "multiVenue" (trades V2 + V3) or "v2" (V2 only) - which factory the
   // connected vault was actually found through, not a guess.
   const [vaultKind, setVaultKind] = useState(null);
-  const [vaultInfo, setVaultInfo] = useState(null); // { owner, executor, paused, baseBalance }
+  const [vaultInfo, setVaultInfo] = useState(null); // { owner, executor, paused, baseBalance, walletBaseBalance }
   const [connecting, setConnecting] = useState(false);
   // True only during the very first silent-reconnect attempt after a page
   // load - lets index.js hold off showing "Connect Wallet" for the split
@@ -63,15 +63,29 @@ export function useVault() {
     return new BrowserProvider(rawProviderRef.current);
   }, []);
 
-  const refreshVaultInfo = useCallback(async (addr) => {
+  // walletAddr is explicit, not read from the account state, because this is
+  // called during the connect flow itself (right after setAccount, before
+  // that state update has actually landed) - relying on the closure would
+  // read a stale null there. Every other call site just passes the account
+  // state through, which by then is settled.
+  const refreshVaultInfo = useCallback(async (addr, walletAddr) => {
     const provider = getProvider();
     const vault = new Contract(addr, VAULT_ABI, provider);
     const wrapped = new Contract(WRAPPED, ERC20_ABI, provider);
-    const [owner, executor, paused, baseBalance] = await Promise.all([
+    const wallet = walletAddr ?? account;
+    const [owner, executor, paused, baseBalance, walletBaseBalance] = await Promise.all([
       vault.owner(), vault.executor(), vault.paused(), wrapped.balanceOf(addr),
+      wallet ? wrapped.balanceOf(wallet) : Promise.resolve(0n),
     ]);
-    setVaultInfo({ owner, executor, paused, baseBalance: formatEther(baseBalance) });
-  }, [getProvider]);
+    setVaultInfo({
+      owner, executor, paused,
+      baseBalance: formatEther(baseBalance),
+      // What's actually sitting in the connected wallet, not the vault -
+      // shown next to Deposit so someone isn't guessing how much they can
+      // send in, the way vaultInfo.baseBalance already does for Withdraw.
+      walletBaseBalance: formatEther(walletBaseBalance),
+    });
+  }, [getProvider, account]);
 
   /** Shared finish-up once ANY connection method has produced accounts on a raw provider. */
   const finishConnecting = useCallback(async (rawProvider, accounts) => {
@@ -111,7 +125,7 @@ export function useVault() {
     } else {
       setVaultAddress(addr);
       setVaultKind(kind);
-      await refreshVaultInfo(addr);
+      await refreshVaultInfo(addr, accounts[0]);
     }
   }, [refreshVaultInfo]);
 

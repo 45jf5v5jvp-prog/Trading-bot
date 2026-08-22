@@ -8,7 +8,7 @@ import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./dis
 import { candlesForToken } from "./candles.js";
 import { snapshot, liquidityDropIsSuspicious } from "./indicators.js";
 import { assess, assessExit, reflectOnLoss, reflectOnMiss, type TokenProfile, type AiVerdict, type OpenPositionContext } from "./ai.js";
-import { executeSwap } from "./executor.js";
+import { executeSwap, netOfExitCosts } from "./executor.js";
 import { openPosition, positionsValuePls } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
@@ -378,7 +378,7 @@ async function evaluateWatchedToken(
   await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile);
 }
 
-interface FullModeRow { id: number; vault: string; token: string; opened_at: number; entry_price: number; high_water: number }
+interface FullModeRow { id: number; vault: string; token: string; opened_at: number; entry_price: number; spent_pls: number; high_water: number }
 
 /**
  * Auto Full's periodic re-judgment - every open Hunter position whose owner
@@ -393,7 +393,7 @@ interface FullModeRow { id: number; vault: string; token: string; opened_at: num
  */
 async function reviewFullModePositions(): Promise<void> {
   const rows = db.prepare(
-    `SELECT id, vault, token, opened_at, entry_price, high_water FROM positions WHERE bot='hunter' AND status='open' AND exit_mode='full'`,
+    `SELECT id, vault, token, opened_at, entry_price, spent_pls, high_water FROM positions WHERE bot='hunter' AND status='open' AND exit_mode='full'`,
   ).all() as FullModeRow[];
   if (rows.length === 0) return;
 
@@ -415,7 +415,21 @@ async function reviewFullModePositions(): Promise<void> {
       const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
         .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
       const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
-      const realizablePrice = latest.price * (1 - taxBps / 10_000);
+      const taxAdjustedPrice = latest.price * (1 - taxBps / 10_000);
+
+      // Still a raw market price - a real close also pays the platform fee
+      // and gas reimbursement (see executor.ts's netOfExitCosts), which
+      // this AI judgment had no visibility into. Converts to a total value
+      // at the position's own size (spent_pls/entry_price backs out the
+      // token quantity without needing a separate decimals lookup - same
+      // relationship openPosition used to derive entry_price in the first
+      // place), nets out the real exit costs, then converts back to a
+      // per-token price so pnlPct/currentPrice reflect what the position
+      // would actually realize, not what the market alone would pay.
+      const tokensHeldApprox = r.spent_pls / r.entry_price;
+      const realizablePrice = tokensHeldApprox > 0
+        ? (await netOfExitCosts(taxAdjustedPrice * tokensHeldApprox, r.vault)) / tokensHeldApprox
+        : taxAdjustedPrice;
 
       const candles = candlesForToken(r.token, from, CANDLE_MINUTES * 60);
       const snap = candles.length ? snapshot(candles) : null;

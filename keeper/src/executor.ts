@@ -164,12 +164,91 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
         .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now,
              Number(formatEther(req.amountIn)), fee, tx.hash);
       log("info", "exec", `${req.bot} filled ${req.tokenLabel} tx=${tx.hash} block=${rc?.blockNumber}`);
-      return { ok: true, amountOut: quoted, txHash: tx.hash };
+      // `quoted` is a pre-trade estimate - on a sell the contract deducts the
+      // platform fee AND gas reimbursement from it afterward (BotVault.sol's
+      // executeSwap, non-payingIn branch), which this quote never accounted
+      // for, so it always overstates what the vault actually kept. The
+      // Traded event is the contract's own record of the real amount, for
+      // both directions - read it instead of trusting the estimate, so
+      // whatever calls this (proceeds_pls on a sell, tokensOut/entry_price
+      // on a buy) reflects what actually happened, not what was predicted.
+      let realAmountOut = quoted;
+      try {
+        for (const entry of rc?.logs ?? []) {
+          if (entry.address.toLowerCase() !== req.vault.toLowerCase()) continue;
+          const parsed = vault.interface.parseLog(entry);
+          if (parsed?.name === "Traded") { realAmountOut = parsed.args.amountOut as bigint; break; }
+        }
+      } catch (e) {
+        log("warn", "exec", `Could not read the real Traded amount for ${tx.hash}, using the pre-trade estimate: ${(e as Error).message}`);
+      }
+      return { ok: true, amountOut: realAmountOut, txHash: tx.hash };
     } catch (e) {
       log("error", "exec", `Swap failed on ${req.vault}: ${(e as Error).message.slice(0, 160)}`);
       return { ok: false, amountOut: 0n, reason: (e as Error).message.slice(0, 160) };
     }
   });
+}
+
+// --- Real-cost-aware valuation for open-position decisions ---------------
+
+// maxGasFeeBps rarely changes for a given vault (an owner setting, not
+// per-trade), so it's cheap to cache for a while rather than re-read it on
+// every position-check tick for every open position.
+const maxGasFeeBpsCache = new Map<string, { bps: number; at: number }>();
+const MAX_GAS_FEE_BPS_TTL_MS = 10 * 60 * 1000;
+
+async function cachedMaxGasFeeBps(vaultAddr: string): Promise<number> {
+  const key = vaultAddr.toLowerCase();
+  const cached = maxGasFeeBpsCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.at < MAX_GAS_FEE_BPS_TTL_MS) return cached.bps;
+  const vault = new Contract(vaultAddr, VAULT_ABI, provider) as Dyn;
+  const bps = Number(await vault.maxGasFeeBps());
+  maxGasFeeBpsCache.set(key, { bps, at: now });
+  return bps;
+}
+
+// Gas price moves slowly enough that re-fetching it fresh for every open
+// position on every check tick (positions.ts's markToMarket runs this once
+// per position) would just be needless RPC load - a short TTL keeps this
+// close to live without that cost. Kept separate from estimateGasFee's own
+// fresh-every-call read above, which backs the real trade path and should
+// stay as accurate as possible right before broadcasting.
+let cachedGasPriceWei: { value: bigint; at: number } | null = null;
+const GAS_PRICE_TTL_MS = 30_000;
+
+async function cachedGasPrice(): Promise<bigint> {
+  const now = Date.now();
+  if (cachedGasPriceWei && now - cachedGasPriceWei.at < GAS_PRICE_TTL_MS) return cachedGasPriceWei.value;
+  const fee = await provider.getFeeData();
+  const value = fee.gasPrice ?? 0n;
+  cachedGasPriceWei = { value, at: now };
+  return value;
+}
+
+/**
+ * What a real close of this position would actually keep, in PLS, after the
+ * two charges every real exit pays (see BotVault.sol's executeSwap,
+ * non-payingIn branch): the platform fee, and gas reimbursement capped at
+ * the vault's own maxGasFeeBps(). A raw AMM quote - even one already
+ * discounted for transfer tax - says what the market would give for the
+ * tokens; it says nothing about what the vault keeps once those two charges
+ * come out of that on the way out. Every place that reads a position's
+ * current value to decide whether to exit (the plain take-profit/stop-loss/
+ * trailing/time ratio check, Hunter Auto Full's AI exit judgment, the
+ * holding-cap check) was comparing a cost-free number against the entry
+ * cost - so a position sitting at "roughly flat" by that comparison was
+ * already a small guaranteed loss the moment it was actually sold. Uses the
+ * same non-urgent gas estimate a patient (non-launch) real exit would.
+ */
+export async function netOfExitCosts(rawValuePls: number, vaultAddr: string): Promise<number> {
+  if (rawValuePls <= 0) return rawValuePls;
+  const [gasPrice, maxGasFeeBps] = await Promise.all([cachedGasPrice(), cachedMaxGasFeeBps(vaultAddr)]);
+  const gasFeePls = Number(formatEther((400_000n * gasPrice * 115n) / 100n));
+  const gasFeeCappedPls = Math.min(gasFeePls, (rawValuePls * maxGasFeeBps) / 10_000);
+  const feePls = (rawValuePls * CFG.feeBps) / 10_000;
+  return Math.max(0, rawValuePls - feePls - gasFeeCappedPls);
 }
 
 export { parseEther, formatEther, provider };

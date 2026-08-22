@@ -40,6 +40,7 @@ export const VAULT_ABI = [
   "function minInterval() view returns (uint256)",
   "function lastTradeAt() view returns (uint256)",
   "function executeSwap(address[] path, uint256 amountIn, uint256 amountOutMin, uint256 gasFee) returns (uint256)",
+  "event Traded(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee, uint256 gasFee)",
 ];
 
 export const VAULT_FACTORY_ABI = [

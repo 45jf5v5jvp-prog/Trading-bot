@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   }
   const vault = address.toLowerCase();
   const positions = getPositions(vault);
-  const open = await priceOpenPositions(positions.open);
+  const open = await priceOpenPositions(positions.open, vault);
   res.status(200).json({
     positions: { open, closed: positions.closed },
     fires: getRecentFires(vault),

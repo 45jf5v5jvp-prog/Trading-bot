@@ -2,7 +2,7 @@ import { Contract, formatEther, formatUnits } from "ethers";
 import { CFG } from "./config.js";
 import { provider, routerRead, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
-import { executeSwap } from "./executor.js";
+import { executeSwap, netOfExitCosts } from "./executor.js";
 import { sellSignal } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
 import { db, aiExitRequests } from "./db.js";
@@ -117,7 +117,8 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
         .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
       const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
       const afterTax = (quoted * BigInt(10_000 - taxBps)) / 10_000n;
-      return { token: r.token.toLowerCase(), value: Number(formatEther(afterTax)) };
+      const net = await netOfExitCosts(Number(formatEther(afterTax)), vault);
+      return { token: r.token.toLowerCase(), value: net };
     } catch { return null; } // unpriceable right now, skip
   });
   for (const v of values) {
@@ -172,7 +173,14 @@ async function markToMarket(r: Row): Promise<MarkResult> {
       .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
     const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
     const afterTax = (quoted * BigInt(10_000 - taxBps)) / 10_000n;
-    return { ok: true, value: Number(formatEther(afterTax)), held };
+    // Tax-discounted is still a raw market quote - a real close also pays
+    // the platform fee and gas reimbursement (see executor.ts's
+    // netOfExitCosts), which this hadn't accounted for. Every TP/SL/
+    // trailing/time check and every Auto Full AI judgment reads this value,
+    // so leaving those costs out meant a position sitting at "roughly flat"
+    // here was already a small guaranteed loss the moment it was really sold.
+    const net = await netOfExitCosts(Number(formatEther(afterTax)), r.vault);
+    return { ok: true, value: net, held };
   } catch {
     return { ok: false, reason: "unpriceable" };
   }

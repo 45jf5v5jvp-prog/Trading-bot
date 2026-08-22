@@ -25,6 +25,10 @@ const V3_QUOTER_ABI = [
 const V4_PROBE_ABI = [
   "function quote((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bool zeroForOne, uint256 amountIn) returns (uint256 amountOut)",
 ];
+const VAULT_FEE_ABI = [
+  "function feeBps() view returns (uint16)",
+  "function maxGasFeeBps() view returns (uint16)",
+];
 
 let providerSingleton;
 function getProvider() {
@@ -121,6 +125,67 @@ async function quoteV4(token, amountRaw) {
   return best;
 }
 
+// A vault's feeBps/maxGasFeeBps are an owner setting, not something that
+// changes trade-to-trade, so caching them for a while avoids two extra RPC
+// calls on every single position/portfolio-token repriced on every dashboard
+// poll. Gas price gets a much shorter TTL since it actually moves.
+const vaultFeeCache = new Map();
+const VAULT_FEE_TTL_MS = 10 * 60 * 1000;
+let cachedGasPriceWei = null;
+let cachedGasPriceAt = 0;
+const GAS_PRICE_TTL_MS = 30_000;
+
+async function cachedVaultFees(vaultAddress) {
+  const key = vaultAddress.toLowerCase();
+  const cached = vaultFeeCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.at < VAULT_FEE_TTL_MS) return cached;
+  const vault = new Contract(vaultAddress, VAULT_FEE_ABI, getProvider());
+  const [feeBps, maxGasFeeBps] = await Promise.all([
+    withTimeout(vault.feeBps(), 8000),
+    withTimeout(vault.maxGasFeeBps(), 8000),
+  ]);
+  const entry = { feeBps: Number(feeBps), maxGasFeeBps: Number(maxGasFeeBps), at: now };
+  vaultFeeCache.set(key, entry);
+  return entry;
+}
+
+async function cachedGasPrice() {
+  const now = Date.now();
+  if (cachedGasPriceWei !== null && now - cachedGasPriceAt < GAS_PRICE_TTL_MS) return cachedGasPriceWei;
+  const fee = await withTimeout(getProvider().getFeeData(), 8000);
+  cachedGasPriceWei = fee.gasPrice ?? 0n;
+  cachedGasPriceAt = now;
+  return cachedGasPriceWei;
+}
+
+/**
+ * What a real close of this vault's position would actually keep, in PLS,
+ * after the platform fee and gas reimbursement every real exit pays (see
+ * BotVault.sol's executeSwap, non-payingIn branch, and keeper/src/
+ * executor.ts's identical netOfExitCosts) - a raw AMM quote says what the
+ * market would give for the tokens, not what the vault keeps once those two
+ * charges come out on the way out. Without this, the dashboard could show a
+ * position as roughly flat or up right up until the keeper actually closed
+ * it at a real, structural loss - the same "displayed P&L doesn't match
+ * reality" shape as the tax-blindness bug above, different cause. Falls
+ * back to the raw value on any RPC failure rather than blanking the number.
+ */
+async function netOfExitCostsPls(rawValuePls, vaultAddress) {
+  if (rawValuePls <= 0) return rawValuePls;
+  try {
+    const [{ feeBps, maxGasFeeBps }, gasPrice] = await Promise.all([
+      cachedVaultFees(vaultAddress), cachedGasPrice(),
+    ]);
+    const gasFeePls = Number(formatEther((400_000n * gasPrice * 115n) / 100n));
+    const gasFeeCappedPls = Math.min(gasFeePls, (rawValuePls * maxGasFeeBps) / 10_000);
+    const feePls = (rawValuePls * feeBps) / 10_000;
+    return Math.max(0, rawValuePls - feePls - gasFeeCappedPls);
+  } catch {
+    return rawValuePls;
+  }
+}
+
 /**
  * Live value of a held token amount in the chain's base units (PLS or ETH),
  * quoted straight off whichever venue prices it best right now - V2, V3, or
@@ -141,7 +206,7 @@ async function quoteV4(token, amountRaw) {
  * their probes don't return a tax figure at all, same limitation the
  * keeper's own screener.ts has).
  */
-async function quotePlsValue(token, tokensHeldRaw) {
+async function quotePlsValue(token, tokensHeldRaw, vaultAddress) {
   const held = BigInt(tokensHeldRaw);
   if (held === 0n) return 0;
   const [v2, v3, v4] = await Promise.all([quoteV2(token, held), quoteV3(token, held), quoteV4(token, held)]);
@@ -156,7 +221,8 @@ async function quotePlsValue(token, tokensHeldRaw) {
   // thrown error, caught below).
   if (candidates.length === 0) throw new Error("no venue could price this token");
   const best = candidates.reduce((a, b) => (b > a ? b : a));
-  return Number(formatEther(best));
+  const rawValuePls = Number(formatEther(best));
+  return vaultAddress ? netOfExitCostsPls(rawValuePls, vaultAddress) : rawValuePls;
 }
 
 // Decimals and symbol never change for a given token - cached per server
@@ -187,14 +253,14 @@ async function getTokenMeta(token) {
  * null rather than throwing - one unpriceable token shouldn't blank out the
  * whole dashboard.
  */
-async function priceOpenPositions(openPositions) {
+async function priceOpenPositions(openPositions, vaultAddress) {
   return Promise.all(openPositions.map(async (p) => {
     let valueNowPls = null;
     let pnlPct = null;
     let tokensHeld = null;
     let symbol = null;
     try {
-      valueNowPls = await quotePlsValue(p.token, p.tokens_held);
+      valueNowPls = await quotePlsValue(p.token, p.tokens_held, vaultAddress);
       pnlPct = p.spent_pls > 0 ? ((valueNowPls - p.spent_pls) / p.spent_pls) * 100 : null;
     } catch { /* leave valueNowPls/pnlPct null */ }
     try {
@@ -224,7 +290,7 @@ async function getPortfolioToken(vaultAddress, token) {
     const balance = Number(formatUnits(balanceRaw, decimals));
     let valuePls = null;
     if (balanceRaw > 0n) {
-      try { valuePls = await quotePlsValue(token, balanceRaw.toString()); } catch { /* leave null */ }
+      try { valuePls = await quotePlsValue(token, balanceRaw.toString(), vaultAddress); } catch { /* leave null */ }
     }
     return { token: token.toLowerCase(), symbol, decimals, balance, valuePls };
   } catch {

@@ -26,7 +26,7 @@ keeper implementation. See HANDOFF.md section 6.
 
 ## The bug pattern to hunt
 
-Five separate bugs of the same shape have already been found and fixed here:
+Six separate bugs of the same shape have already been found and fixed here:
 
 > **buying works, selling reverts, position is stuck forever**
 
@@ -78,15 +78,47 @@ Five separate bugs of the same shape have already been found and fixed here:
    than through `entry_price` - so this skewed what the AI *believed*, never
    what actually executed or what the dashboard showed. Fixed by looking up
    the token's real decimals from `watched` before computing `entry_price`.
+6. A third live report of the same symptom family, this time not about one
+   confusing exit but a pattern: Hunter Bot's Auto Full positions kept
+   closing at a real loss clustered tightly around 1.3%-1.9%, on plenty of
+   different tokens, too consistent to be market noise. Root cause was
+   different again: `markToMarket`/`positionsValuePls`/`reviewFullModePositions`
+   (already fixed for tax-blindness in bug 4) still quoted a raw AMM price
+   with no idea that a REAL close also pays two more charges - the 0.15%
+   platform fee and a gas reimbursement (up to 1% of the trade, contract-
+   capped) - both taken out of the WPLS proceeds by `BotVault.sol`'s
+   `executeSwap` itself, on the way out, not visible to any `getAmountsOut`
+   call. So a position the AI believed was roughly flat was already a small
+   guaranteed loss the moment it was actually sold - explaining both why the
+   loss was consistent (fee+gas are close to a fixed % of a similarly-sized
+   trade) and why it happened across unrelated tokens (the blind spot is
+   structural, not token-specific). A second, compounding bug sat right next
+   to it: `executor.ts` recorded `proceeds_pls` from its own pre-trade quote
+   estimate rather than the vault contract's actual `Traded` event, so the
+   very P&L numbers being used to sanity-check this were themselves
+   overstating what the vault really kept. Fixed by adding `executor.ts`'s
+   `netOfExitCosts` (mirrored on the site as `livePrice.js`'s
+   `netOfExitCostsPls`) - reads the vault's own `feeBps`/`maxGasFeeBps` and a
+   live gas estimate, nets both out the same way the contract will - applied
+   everywhere a position's current value gets decided (`markToMarket`,
+   `positionsValuePls`, Hunter's AI review, the site's own P&L display), and
+   by reading the real on-chain `Traded.amountOut` for `proceeds_pls`/
+   `tokensOut` instead of trusting the pre-trade quote. `limits.ts`'s sell-
+   side orders are the one deliberate carve-out again, same reason as bug
+   4's: its `currentPrice()` quotes a per-unit price before it knows the
+   trade size a resting order would actually sell, so there's no total value
+   to net real costs out of at that point - would need restructuring
+   `fireOrder`'s call order to fix properly, not done yet.
 
-All five were found by re-reading with a specific question in mind (#4 and
-#5 were both reported live, from the same owner watching the same bot -
+All six were found by re-reading with a specific question in mind (#4, #5,
+and #6 were all reported live, from the same owner watching the same bot -
 first a position that closed at a real 2% loss after the bot believed, and
 told its owner, it was up 40%, then a second one the owner flagged as
 "exited early... doesn't make sense" that turned out to be a completely
-different bug hiding behind a similar-looking symptom). Assume more exist. The
-Launch Bot buys tokens that are hostile by assumption, so anything touching
-arbitrary ERC20 behaviour deserves suspicion.
+different bug hiding behind a similar-looking symptom, then a third time as
+a *pattern* across many positions rather than one confusing trade). Assume
+more exist. The Launch Bot buys tokens that are hostile by assumption, so
+anything touching arbitrary ERC20 behaviour deserves suspicion.
 
 ## What would help most, in order
 

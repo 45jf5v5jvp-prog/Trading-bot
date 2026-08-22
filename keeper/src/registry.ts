@@ -256,7 +256,7 @@ const DEFAULT_HUNTER: HunterConfig = {
   exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
-  minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  minLiquidityPls: 12, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
   requireAiApproval: true, minAiConfidence: "medium",
   takeProfitPct: 40, stopLossPct: 25, trailingStopPct: 0, timeExitMin: 0,

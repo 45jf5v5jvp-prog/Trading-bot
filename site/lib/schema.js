@@ -44,7 +44,7 @@ const DEFAULT_HUNTER = {
   exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
-  minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  minLiquidityPls: CHAIN.hunterMinLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
   requireAiApproval: true, minAiConfidence: "medium",
   takeProfitPct: 40, stopLossPct: 25, trailingStopPct: 0, timeExitMin: 0,

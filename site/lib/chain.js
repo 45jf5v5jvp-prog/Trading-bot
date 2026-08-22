@@ -56,6 +56,9 @@ const PRESETS = {
     valueMaxDecimals: 0,
     // PLS-scale liquidity floor (see keeper's screener).
     minLiquidityDefault: 2_000_000,
+    // Hunter Bot gets its own floor default - same PLS scale here since
+    // there's no reason to diverge from the shared one on PulseChain.
+    hunterMinLiquidityDefault: 2_000_000,
     walletConnectFallbackUrl: "https://bots.icaria.pro",
   },
   robinhood: {
@@ -93,6 +96,11 @@ const PRESETS = {
     balanceMaxDecimals: 6,
     valueMaxDecimals: 6,
     minLiquidityDefault: 5,
+    // Hunter Bot's own floor, raised well above the general default per
+    // owner request (2026-08-22) - Discovery Bot is being retired so this
+    // is Hunter-only, and Launch Bot's floor stays whatever the owner picks
+    // per vault at setup rather than a forced default.
+    hunterMinLiquidityDefault: 12,
     walletConnectFallbackUrl: "",
   },
 };
@@ -131,6 +139,9 @@ const CHAIN = {
   balanceMaxDecimals: p.balanceMaxDecimals,
   valueMaxDecimals: p.valueMaxDecimals,
   minLiquidityDefault: p.minLiquidityDefault,
+  hunterMinLiquidityDefault: process.env.NEXT_PUBLIC_HUNTER_MIN_LIQUIDITY_DEFAULT
+    ? Number(process.env.NEXT_PUBLIC_HUNTER_MIN_LIQUIDITY_DEFAULT)
+    : p.hunterMinLiquidityDefault,
   walletConnectFallbackUrl: p.walletConnectFallbackUrl,
 };
 

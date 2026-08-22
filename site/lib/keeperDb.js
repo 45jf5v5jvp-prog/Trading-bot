@@ -205,18 +205,35 @@ function getHunterLessons(vault, limit = 30) {
  * executeHunterBuy) - a fire with no matching opportunity still shows up,
  * just without a rationale.
  */
+/**
+ * Hunter's real trade history for the chat to talk about - the actual
+ * open/close economics from the positions table (entry_price, spent_pls,
+ * proceeds_pls, status, close_reason), not just the buy-side fires row.
+ * Reading only fires (as this used to) meant the chat backend never had a
+ * real outcome for any trade at all, open or closed - the only percentage
+ * anywhere in its context was the *configured* take-profit target from
+ * settings, so asked how a trade did, the model had nothing real to point
+ * to and reached for that instead, describing a target as an outcome. The
+ * buy-time narrative/reasoning is still joined in via fires.tx_hash (a
+ * position's own source_tx_hash, when known - NULL for anything opened
+ * before that column existed, same best-effort convention as elsewhere).
+ */
 function getHunterTrades(vault, limit = 30) {
   const d = getDb();
   if (!d) return [];
   try {
     return d.prepare(`
-      SELECT f.id, f.token, f.ts, f.amount, f.fee, f.tx_hash AS txHash,
+      SELECT p.id, p.token, p.opened_at, p.entry_price, p.spent_pls, p.status,
+             p.closed_at, p.proceeds_pls, p.close_reason,
+             COALESCE(f.ts, p.opened_at) AS ts, COALESCE(f.amount, p.spent_pls) AS amount,
+             f.tx_hash AS txHash,
              o.narrative, o.ai_reasoning AS aiReasoning, o.signal_count AS signalCount
-      FROM fires f
+      FROM positions p
+      LEFT JOIN fires f ON f.tx_hash = p.source_tx_hash
       LEFT JOIN discovery_actions a ON a.vault = f.vault AND a.tx_hash = f.tx_hash AND a.action = 'bought'
       LEFT JOIN opportunities o ON o.id = a.opportunity_id
-      WHERE f.vault = ? AND f.bot = 'hunter'
-      ORDER BY f.ts DESC LIMIT ?
+      WHERE p.vault = ? AND p.bot = 'hunter'
+      ORDER BY p.opened_at DESC LIMIT ?
     `).all(vault.toLowerCase(), limit);
   } catch {
     return [];

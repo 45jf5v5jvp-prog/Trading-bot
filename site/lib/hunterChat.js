@@ -72,10 +72,21 @@ function describeHunterContext({ hunterConfig, trades, lessons }) {
   }
 
   if (trades.length > 0) {
-    lines.push(`\nYour ${trades.length} most recent trades:`);
+    lines.push(`\nYour ${trades.length} most recent trades - real numbers, not targets:`);
     for (const t of trades.slice(0, 8)) {
-      const when = new Date(t.ts * 1000).toISOString().slice(0, 16).replace("T", " ");
-      lines.push(`- ${when}: bought ${Math.round(t.amount).toLocaleString()} ${CHAIN.nativeSymbol} of ${t.token}${t.narrative ? ` - ${t.narrative}` : ""}`);
+      const opened = new Date(t.opened_at * 1000).toISOString().slice(0, 16).replace("T", " ");
+      const spent = Math.round(t.spent_pls).toLocaleString();
+      if (t.status === "open") {
+        lines.push(`- ${opened}: bought ${spent} ${CHAIN.nativeSymbol} of ${t.token}, STILL OPEN (no exit yet, so no real P&L to report)${t.narrative ? ` - ${t.narrative}` : ""}`);
+      } else {
+        const closed = t.closed_at ? new Date(t.closed_at * 1000).toISOString().slice(0, 16).replace("T", " ") : "unknown time";
+        const proceeds = t.proceeds_pls;
+        const pnlPct = proceeds !== null && t.spent_pls > 0 ? ((proceeds - t.spent_pls) / t.spent_pls) * 100 : null;
+        const pnlStr = pnlPct !== null
+          ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}% (${Math.round(proceeds).toLocaleString()} ${CHAIN.nativeSymbol} back)`
+          : "unknown outcome";
+        lines.push(`- ${opened}: bought ${spent} ${CHAIN.nativeSymbol} of ${t.token}, closed ${closed}: ${pnlStr}, reason: ${t.close_reason || "unrecorded"}${t.narrative ? ` - opened because: ${t.narrative}` : ""}`);
+      }
     }
   } else {
     lines.push("\nYou have not made any trades on this vault yet.");
@@ -98,7 +109,12 @@ const SYSTEM_PROMPT =
   "person about your own trading (\"I bought\", \"I've been\", \"I'll weigh that\"), not as a " +
   "third party describing the bot. You are given your actual current settings, your real " +
   "trade history on this vault, and what you've already learned - stay grounded in that real " +
-  "data, never invent a trade or a setting you weren't given. When the owner gives you " +
+  "data, never invent a trade or a setting you weren't given. Your take-profit/stop-loss " +
+  "percentages in the settings line are TARGETS, not results - never describe a trade's actual " +
+  "outcome using those numbers. Each trade in your history already states its real result " +
+  "directly (a closed trade's real % and PLS back, or 'STILL OPEN' if it hasn't exited) - " +
+  "always use that number when asked how a trade did, never the configured target, and if a " +
+  "trade is still open say so rather than guessing what it'll close at. When the owner gives you " +
   "guidance, engage with it honestly: agree when it's sound, and push back with specifics " +
   "when you have a real reason to (e.g. \"that would have blocked 3 of my last 4 winning " +
   "trades\") rather than just agreeing to please them - a bot that only ever says yes isn't " +

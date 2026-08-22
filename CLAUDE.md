@@ -179,21 +179,46 @@ beyond display accuracy, since `fires.fee` is exactly what the referral
 program sums to calculate a referrer's payout. Already-recorded history
 was left untouched; only new trades get the corrected numbers.
 
+A fourth finding, from the owner noticing Talk to Your Hunter would
+describe a trade as a 25% or 40% profit that was nowhere close to real -
+"it makes me think they are trading on one chart but looking at another."
+Not a quote bug at all: `site/lib/keeperDb.js`'s `getHunterTrades` (what
+feeds the chat's trade-history context) only ever read the `fires` table -
+the buy-side fill and its narrative - and never looked at `positions`,
+where the real entry/exit economics actually live. So the chat's context
+for every trade, open or closed, was just "I bought X PLS of TOKEN -
+[buy-time reasoning]" - no exit price, no proceeds, no real P&L, not even
+whether it had closed yet. The only percentage anywhere in the model's
+context was the *configured* take-profit target from settings (35-40%) -
+asked how a trade did, with no real outcome to point to, it reached for
+that instead and described a target as a result. Fixed by rewriting
+`getHunterTrades` to read from `positions` (entry_price, spent_pls,
+proceeds_pls, status, close_reason - the same source of truth the
+dashboard's own Positions panel uses), still joined back to `fires`/
+`opportunities` via `positions.source_tx_hash` for the buy-time narrative
+and to keep the dashboard's separate Hunter IQ trade-feed panel working
+unchanged. `describeHunterContext` (`site/lib/hunterChat.js`) now states
+each trade's real result directly - a closed trade's actual % and PLS
+back, or "STILL OPEN" - and the system prompt explicitly warns the model
+not to confuse a configured target with a realized outcome.
+
 All six numbered bugs share the quote-blindness shape; the AI-patience
-finding and the mislabeled-trade-history finding are different kinds of
-bug from the same run of live conversations, included here because each
-was just as real and just as much a live-money (or live-trust) problem.
-All were found by re-reading with a specific question in mind (#4, #5, #6,
-and the two that followed it were all reported live, from the same owner
-watching the same bot - first a position that closed at a real 2% loss
-after the bot believed, and told its owner, it was up 40%, then a second
-one the owner flagged as "exited early... doesn't make sense" that turned
-out to be a completely different bug hiding behind a similar-looking
-symptom, then a third time as a *pattern* across many positions rather
-than one confusing trade, then a fourth time as numbers in the trade
-history that didn't add up at all). Assume more exist. The Launch Bot buys
-tokens that are hostile by assumption, so anything touching arbitrary
-ERC20 behaviour deserves suspicion.
+finding, the mislabeled-trade-history finding, and the chat-confabulation
+finding are different kinds of bug from the same run of live
+conversations, included here because each was just as real and just as
+much a live-money (or live-trust) problem. All were found by re-reading
+with a specific question in mind (#4, #5, #6, and the three that followed
+it were all reported live, from the same owner watching the same bot -
+first a position that closed at a real 2% loss after the bot believed, and
+told its owner, it was up 40%, then a second one the owner flagged as
+"exited early... doesn't make sense" that turned out to be a completely
+different bug hiding behind a similar-looking symptom, then a third time
+as a *pattern* across many positions rather than one confusing trade, then
+a fourth time as numbers in the trade history that didn't add up at all,
+then a fifth time as the chat itself stating a trade's outcome that wasn't
+real). Assume more exist. The Launch Bot buys tokens that are hostile by
+assumption, so anything touching arbitrary ERC20 behaviour deserves
+suspicion.
 
 ## What would help most, in order
 

@@ -60,6 +60,7 @@ export function openPosition(a: OpenArgs): void {
 interface Row {
   id: number; vault: string; token: string; opened_at: number; entry_price: number;
   spent_pls: number; tokens_held: string; high_water: number;
+  bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask";
   tp_pct: number | null; sl_pct: number | null; trail_pct: number | null; time_exit_min: number | null;
   fail_count: number | null; exit_mode: string | null;
 }
@@ -254,7 +255,7 @@ async function checkAndClose(
 
   log("info", "positions", `Closing ${r.token} for ${r.vault}: ${reason}`);
   const res = await executeSwap({
-    vault: r.vault, bot: "launch", path: [r.token, CFG.wpls],
+    vault: r.vault, bot: r.bot, path: [r.token, CFG.wpls],
     amountIn: m.held, tokenLabel: r.token,
     // On the way out, take the fill. A stop that will not execute is not a stop.
     slippageBps: Math.max(CFG.maxSlippageBps, 500),

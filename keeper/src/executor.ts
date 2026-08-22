@@ -1,4 +1,4 @@
-import { Contract, formatEther, parseEther } from "ethers";
+import { Contract, formatEther, formatUnits, parseEther } from "ethers";
 import { CFG } from "./config.js";
 import { keeper, provider, routerRead, txQueue, tradeRateLimiter, gasOk, type Dyn } from "./chain.js";
 import { VAULT_ABI } from "./abis.js";
@@ -159,29 +159,47 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
         gasLimit: (est * 130n) / 100n,
       });
       const rc = await tx.wait();
-      const fee = Number(formatEther(req.amountIn)) * (CFG.feeBps / 10_000);
-      db.prepare(`INSERT INTO fires(vault,bot,token,ts,amount,fee,tx_hash) VALUES(?,?,?,?,?,?,?)`)
-        .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now,
-             Number(formatEther(req.amountIn)), fee, tx.hash);
-      log("info", "exec", `${req.bot} filled ${req.tokenLabel} tx=${tx.hash} block=${rc?.blockNumber}`);
+
       // `quoted` is a pre-trade estimate - on a sell the contract deducts the
       // platform fee AND gas reimbursement from it afterward (BotVault.sol's
       // executeSwap, non-payingIn branch), which this quote never accounted
       // for, so it always overstates what the vault actually kept. The
-      // Traded event is the contract's own record of the real amount, for
-      // both directions - read it instead of trusting the estimate, so
+      // Traded event is the contract's own record of both the real proceeds
+      // AND the real fee - read it instead of trusting an estimate, so
       // whatever calls this (proceeds_pls on a sell, tokensOut/entry_price
-      // on a buy) reflects what actually happened, not what was predicted.
+      // on a buy, and the fires row logged below) reflects what actually
+      // happened, not what was predicted.
       let realAmountOut = quoted;
+      let realFeeWei: bigint | null = null;
       try {
         for (const entry of rc?.logs ?? []) {
           if (entry.address.toLowerCase() !== req.vault.toLowerCase()) continue;
           const parsed = vault.interface.parseLog(entry);
-          if (parsed?.name === "Traded") { realAmountOut = parsed.args.amountOut as bigint; break; }
+          if (parsed?.name === "Traded") {
+            realAmountOut = parsed.args.amountOut as bigint;
+            realFeeWei = parsed.args.fee as bigint; // always WPLS-denominated on both sides - see BotVault.sol
+            break;
+          }
         }
       } catch (e) {
         log("warn", "exec", `Could not read the real Traded amount for ${tx.hash}, using the pre-trade estimate: ${(e as Error).message}`);
       }
+
+      // req.amountIn is WPLS (18 decimals, always) on a buy, but the risky
+      // token being sold - decimals unknown, HEX is 8, plenty are 6 or 9 -
+      // on a sell. formatEther always assumes 18, which is exactly the bug
+      // that skewed entry_price before (see positions.ts's openPosition):
+      // same fix here, look up the real decimals rather than assume them.
+      const isWplsIn = req.path[0]!.toLowerCase() === CFG.wpls.toLowerCase();
+      const inDecimals = isWplsIn ? 18 : (db.prepare("SELECT decimals FROM watched WHERE token = ?")
+        .get(req.path[0]!.toLowerCase()) as { decimals: number } | undefined)?.decimals ?? 18;
+      const amountLogged = Number(formatUnits(req.amountIn, inDecimals));
+      const feeLogged = realFeeWei !== null
+        ? Number(formatEther(realFeeWei))
+        : amountLogged * (CFG.feeBps / 10_000); // pre-trade fallback if the event couldn't be read
+      db.prepare(`INSERT INTO fires(vault,bot,token,ts,amount,fee,tx_hash) VALUES(?,?,?,?,?,?,?)`)
+        .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now, amountLogged, feeLogged, tx.hash);
+      log("info", "exec", `${req.bot} filled ${req.tokenLabel} tx=${tx.hash} block=${rc?.blockNumber}`);
       return { ok: true, amountOut: realAmountOut, txHash: tx.hash };
     } catch (e) {
       log("error", "exec", `Swap failed on ${req.vault}: ${(e as Error).message.slice(0, 160)}`);

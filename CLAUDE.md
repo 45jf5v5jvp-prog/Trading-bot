@@ -135,18 +135,45 @@ comfortably above the fee/gas floor above and ordinary noise) - a position
 already up by a real margin gets evaluated for profit-taking immediately,
 no matter how young.
 
-All six numbered bugs share the quote-blindness shape; this last one is a
-different kind of finding from the same investigation, included here
-because it was just as real and just as much a live-money problem. Both
-found by re-reading with a specific question in mind (#4, #5, and #6 were
-and #6 were all reported live, from the same owner watching the same bot -
-first a position that closed at a real 2% loss after the bot believed, and
-told its owner, it was up 40%, then a second one the owner flagged as
-"exited early... doesn't make sense" that turned out to be a completely
-different bug hiding behind a similar-looking symptom, then a third time as
-a *pattern* across many positions rather than one confusing trade). Assume
-more exist. The Launch Bot buys tokens that are hostile by assumption, so
-anything touching arbitrary ERC20 behaviour deserves suspicion.
+A third finding, this time from the owner noticing Launch Bot's real PLS
+spend in the trade history looked nothing like its configured
+`perLaunchPls` (150,000) - amounts like 0, 2, 347, and 2,292,913 PLS on
+different rows. Launch Bot itself was fine; the trade log was lying.
+`positions.ts`'s shared `checkAndClose` hardcoded `bot: "launch"` on every
+exit's `fires` row regardless of which bot actually opened the position -
+so a Hunter (or Discovery, Rules, Snipe) position closing showed up
+mislabeled as a Launch trade. Compounding it, `executor.ts` recorded that
+row's `amount` via `formatEther(req.amountIn)` - correct on a buy (input is
+always WPLS, 18 decimals) but wrong on a sell, where the input is the
+token being sold, whose real decimals vary (HEX is 8, plenty are 6 or 9) -
+same `formatEther`-assumes-18 mistake as bug 5, applied to a different
+field. Cross-checked against the owner's own earlier "-1.4%/-1.6%/-1.9%"
+Hunter closes: the mislabeled rows matched those exact tokens and
+timestamps. Fixed by using the position's real `r.bot` instead of a
+hardcoded string, and by reading the true input-token decimals (WPLS for
+a buy, `watched.decimals` for a sell) instead of assuming 18. Also fixed
+the row's `fee` the same way `proceeds_pls` was fixed in bug 6 - reading
+the real fee off the trade's own `Traded` event instead of estimating it
+from the (now known to be sometimes-wrong-unit) `amountIn` - which matters
+beyond display accuracy, since `fires.fee` is exactly what the referral
+program sums to calculate a referrer's payout. Already-recorded history
+was left untouched; only new trades get the corrected numbers.
+
+All six numbered bugs share the quote-blindness shape; the AI-patience
+finding and the mislabeled-trade-history finding are different kinds of
+bug from the same run of live conversations, included here because each
+was just as real and just as much a live-money (or live-trust) problem.
+All were found by re-reading with a specific question in mind (#4, #5, #6,
+and the two that followed it were all reported live, from the same owner
+watching the same bot - first a position that closed at a real 2% loss
+after the bot believed, and told its owner, it was up 40%, then a second
+one the owner flagged as "exited early... doesn't make sense" that turned
+out to be a completely different bug hiding behind a similar-looking
+symptom, then a third time as a *pattern* across many positions rather
+than one confusing trade, then a fourth time as numbers in the trade
+history that didn't add up at all). Assume more exist. The Launch Bot buys
+tokens that are hostile by assumption, so anything touching arbitrary
+ERC20 behaviour deserves suspicion.
 
 ## What would help most, in order
 

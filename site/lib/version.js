@@ -10,4 +10,4 @@
  * PulseChain is on v2 of the contracts; Robinhood (a separate deployment)
  * is still on v1.
  */
-export const APP_VERSION = "3.21";
+export const APP_VERSION = "3.22";

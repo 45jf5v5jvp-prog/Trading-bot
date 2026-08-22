@@ -85,6 +85,19 @@ export default function HunterSettings({ hunter, onChange }) {
         <NumberField {...num("minLiquidityPls")} min="0" style={{ width: 110 }} />
       </div>
 
+      <div className="field-inline">
+        <label>Min trades in the last 24h</label>
+        <NumberField {...num("minTrades24h")} min="0" style={{ width: 70 }} />
+        <span className="hint" style={{ margin: 0 }}>(0 = off)</span>
+      </div>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        How many separate trades this token needs recently for the bot to trust it's actually being
+        traded, not just sitting still with one stale sale from days ago that happens to look
+        oversold. Counted by number of trades, not dollar volume - a token like HEX or INC trades
+        very differently than a small cap day to day, so a real trade count is a fairer bar than
+        a fixed PLS amount.
+      </p>
+
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
         <input
           type="checkbox" checked={hunter.requireVolumeConfirmation}

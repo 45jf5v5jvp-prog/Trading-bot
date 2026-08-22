@@ -154,6 +154,15 @@ export interface HunterConfig {
   // does.
   requireVolumeConfirmation: boolean;
   minVolumeRatio: number;
+
+  // How many separate trades (matched Swap events, not their $ size) this
+  // token needs in the last 24 hours to even be considered - see hunter.ts's
+  // minTrades24h check. A token can show real PLS volume off one big trade
+  // while otherwise dead, or modest volume while genuinely trading often;
+  // trade count answers "is this actually being traded right now" without
+  // needing a per-token dollar guess (HEX/INC's normal daily volume looks
+  // nothing like a small cap's). 0 disables the check.
+  minTrades24h: number;
 }
 
 /**
@@ -272,6 +281,10 @@ const DEFAULT_HUNTER: HunterConfig = {
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
   trailingStopPct: 0, timeExitMin: 0,
   requireVolumeConfirmation: false, minVolumeRatio: 1.5,
+  // Same "no default this deployment hasn't earned yet" reasoning as
+  // requireVolumeConfirmation just above - off until an owner turns it on
+  // and picks a number for their own risk tolerance.
+  minTrades24h: 0,
 };
 
 const cache = new Map<string, VaultRecord>();

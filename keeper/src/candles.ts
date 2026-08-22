@@ -19,6 +19,13 @@ export interface Candle {
   // indicators.ts's volumeConfirmation() treats a real zero and "no data
   // yet" identically, both read as "no confirming volume."
   vol: number;
+  // Count of matched Swap events across every tick in the bucket - same
+  // summed-over-the-interval reasoning as vol, but a trade count rather
+  // than a PLS amount. See hunter.ts's minTrades24h: a token can show real
+  // $ volume off one whale trade while otherwise dead, or modest $ volume
+  // while genuinely trading often - trade count answers "is this actually
+  // being traded" without needing a per-token dollar guess.
+  trades: number;
 }
 
 /**
@@ -38,15 +45,16 @@ export function toCandles(rows: PricePoint[], bucketSeconds: number): Candle[] {
   }
   return [...buckets.keys()].sort((a, b) => a - b).map((k) => {
     const ticks = buckets.get(k)!;
-    let high = -Infinity, low = Infinity, vol = 0;
+    let high = -Infinity, low = Infinity, vol = 0, trades = 0;
     for (const t of ticks) {
       if (t.price > high) high = t.price;
       if (t.price < low) low = t.price;
       vol += t.vol ?? 0;
+      trades += t.trades ?? 0;
     }
     return {
       ts: k, open: ticks[0]!.price, high, low,
-      close: ticks[ticks.length - 1]!.price, liq: ticks[ticks.length - 1]!.liq, vol,
+      close: ticks[ticks.length - 1]!.price, liq: ticks[ticks.length - 1]!.liq, vol, trades,
     };
   });
 }

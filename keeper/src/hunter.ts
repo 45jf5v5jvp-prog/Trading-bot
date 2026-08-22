@@ -121,6 +121,7 @@ interface Strictest {
   requireBollinger: boolean; bollingerPercentBMax: number;
   requireVolumeConfirmation: boolean; minVolumeRatio: number;
   minLiquidityPls: number;
+  minTrades24h: number;
   maxBuyTaxBps: number; maxSellTaxBps: number;
   requireLpLock: boolean; requireOwnerRenounced: boolean;
   anyRequireAi: boolean;
@@ -349,6 +350,23 @@ async function evaluateWatchedToken(
   // opportunity - unlike the liquidity-pull check below, "not enough volume
   // yet" isn't itself an interesting finding, it just means try again later.
   if (strictest.requireVolumeConfirmation && (snap.volRatio === null || snap.volRatio < strictest.minVolumeRatio)) return;
+
+  // Liveness gate: is this token actually being traded, at all, right now -
+  // as opposed to sitting still with one stale trade from days ago that
+  // happens to leave the price looking "oversold" with nothing behind it.
+  // A token this young can't have a full 24h of coverage yet, so this
+  // extrapolates from whatever's actually available in the last day rather
+  // than requiring a complete window - MIN_CANDLES above already guarantees
+  // at least 9 hours of real data by this point, enough for a reasonable
+  // estimate without making every freshly-watched token wait a full day.
+  if (strictest.minTrades24h > 0) {
+    const dayAgo = Math.floor(Date.now() / 1000) - 24 * 3600;
+    const recent = candles.filter((c) => c.ts >= dayAgo);
+    const tradesRecent = recent.reduce((sum, c) => sum + c.trades, 0);
+    const hoursAvailable = recent.length ? Math.max(1, (Math.floor(Date.now() / 1000) - recent[0]!.ts) / 3600) : 0;
+    const trades24hEquivalent = hoursAvailable > 0 ? (tradesRecent / hoursAvailable) * 24 : 0;
+    if (trades24hEquivalent < strictest.minTrades24h) return;
+  }
 
   // Hard gate, not configurable - the exact trap this bot exists to avoid.
   // Recorded and shown rather than silently dropped, same as a failed
@@ -737,6 +755,7 @@ export async function tick(): Promise<void> {
     // bollingerPercentBMax above, where a bigger number is the looser one.
     minVolumeRatio: volSubs.length ? Math.min(...volSubs.map((c) => c.hunter.minVolumeRatio)) : 0,
     minLiquidityPls: Math.min(...candidates.map((c) => c.hunter.minLiquidityPls)),
+    minTrades24h: Math.min(...candidates.map((c) => c.hunter.minTrades24h)),
     maxBuyTaxBps: Math.max(...candidates.map((c) => c.hunter.maxBuyTaxBps)),
     maxSellTaxBps: Math.max(...candidates.map((c) => c.hunter.maxSellTaxBps)),
     // Always false here, NOT candidates.every(...) - that was a real bug.

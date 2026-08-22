@@ -14,12 +14,18 @@ CREATE TABLE IF NOT EXISTS prices (
 );
 CREATE INDEX IF NOT EXISTS prices_token_ts ON prices(token, ts DESC);
 
--- Drains into a price tick's vol column each poll, then resets to 0 - see
--- prices.ts's scanSwapVolume/pollAll. A running total between polls, not a
--- history of its own.
+-- Drains into a price tick's vol/trades columns each poll, then resets to 0 -
+-- see prices.ts's scanSwapVolume/pollAll. A running total between polls, not
+-- a history of its own. trades is a plain count of matched Swap events -
+-- how many separate trades happened, independent of their size - see
+-- hunter.ts's minTrades24h: a token can show real PLS volume off one whale
+-- trade while otherwise dead, or modest volume while genuinely trading
+-- often: trade count, not $ volume, is what answers "is this actually being
+-- traded" without needing a per-token-scale dollar guess.
 CREATE TABLE IF NOT EXISTS token_volume_accum (
-  token TEXT PRIMARY KEY,
-  vol   REAL NOT NULL DEFAULT 0
+  token  TEXT PRIMARY KEY,
+  vol    REAL NOT NULL DEFAULT 0,
+  trades INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS watched (
@@ -252,6 +258,18 @@ CREATE TABLE IF NOT EXISTS hunter_reviewed_misses (opportunity_id INTEGER PRIMAR
   if (!cols.some((c) => c.name === "vol")) {
     db.exec("ALTER TABLE prices ADD COLUMN vol REAL NOT NULL DEFAULT 0");
   }
+  if (!cols.some((c) => c.name === "trades")) {
+    db.exec("ALTER TABLE prices ADD COLUMN trades INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
+// Additive migration: same reasoning, for token_volume_accum's trades
+// column - added alongside the minTrades24h liveness check.
+{
+  const cols = db.prepare("PRAGMA table_info(token_volume_accum)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "trades")) {
+    db.exec("ALTER TABLE token_volume_accum ADD COLUMN trades INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 // Additive migration: a watched row from before pls_first existed reads
@@ -288,17 +306,17 @@ export const wplsPairs = {
   },
 };
 
-export interface PricePoint { ts: number; price: number; liq: number; vol: number }
+export interface PricePoint { ts: number; price: number; liq: number; vol: number; trades: number }
 
 export const prices = {
-  insert: db.prepare("INSERT OR REPLACE INTO prices(token,ts,price,liq,vol) VALUES(?,?,?,?,?)"),
+  insert: db.prepare("INSERT OR REPLACE INTO prices(token,ts,price,liq,vol,trades) VALUES(?,?,?,?,?,?)"),
 
   since(token: string, fromTs: number): PricePoint[] {
-    return db.prepare("SELECT ts,price,liq,vol FROM prices WHERE token=? AND ts>=? ORDER BY ts ASC")
+    return db.prepare("SELECT ts,price,liq,vol,trades FROM prices WHERE token=? AND ts>=? ORDER BY ts ASC")
       .all(token.toLowerCase(), fromTs) as PricePoint[];
   },
   latest(token: string): PricePoint | undefined {
-    return db.prepare("SELECT ts,price,liq,vol FROM prices WHERE token=? ORDER BY ts DESC LIMIT 1")
+    return db.prepare("SELECT ts,price,liq,vol,trades FROM prices WHERE token=? ORDER BY ts DESC LIMIT 1")
       .get(token.toLowerCase()) as PricePoint | undefined;
   },
   /** How many hours of history exist. Decides whether a rule can arm. */
@@ -314,28 +332,31 @@ export const prices = {
 };
 
 /**
- * Running WPLS-denominated Swap volume per token, accumulated as
- * prices.ts's scanSwapVolume() scans chain logs, then drained into that
- * interval's prices.vol on the next poll and reset to 0 - see pollAll().
- * Decouples the block-based log scan from the price-poll cadence: either
- * can run more or less often than the other without losing or double-
- * counting volume, since a swap always lands in exactly one drain no matter
- * when it's scanned relative to the poll tick.
+ * Running WPLS-denominated Swap volume AND trade count per token,
+ * accumulated as prices.ts's scanSwapVolume() scans chain logs (one add()
+ * call per matched Swap event, so trades is just a count of how many calls
+ * happened), then drained into that interval's prices.vol/trades on the
+ * next poll and reset to 0 - see pollAll(). Decouples the block-based log
+ * scan from the price-poll cadence: either can run more or less often than
+ * the other without losing or double-counting volume, since a swap always
+ * lands in exactly one drain no matter when it's scanned relative to the
+ * poll tick.
  */
 export const volumeAccum = {
   add(token: string, wplsAmount: number): void {
-    db.prepare(`INSERT INTO token_volume_accum(token,vol) VALUES(?,?)
-                ON CONFLICT(token) DO UPDATE SET vol = vol + excluded.vol`)
+    db.prepare(`INSERT INTO token_volume_accum(token,vol,trades) VALUES(?,?,1)
+                ON CONFLICT(token) DO UPDATE SET vol = vol + excluded.vol, trades = trades + 1`)
       .run(token.toLowerCase(), wplsAmount);
   },
-  /** Reads the current total and resets it to 0 in the same call - callers
-   * must persist the returned value themselves (see pollAll()), since once
-   * drained it's gone from the accumulator either way. */
-  drain(token: string): number {
+  /** Reads the current totals and resets them to 0 in the same call -
+   * callers must persist the returned values themselves (see pollAll()),
+   * since once drained they're gone from the accumulator either way. */
+  drain(token: string): { vol: number; trades: number } {
     const t = token.toLowerCase();
-    const r = db.prepare("SELECT vol FROM token_volume_accum WHERE token=?").get(t) as { vol: number } | undefined;
-    if (r) db.prepare("UPDATE token_volume_accum SET vol=0 WHERE token=?").run(t);
-    return r?.vol ?? 0;
+    const r = db.prepare("SELECT vol, trades FROM token_volume_accum WHERE token=?")
+      .get(t) as { vol: number; trades: number } | undefined;
+    if (r) db.prepare("UPDATE token_volume_accum SET vol=0, trades=0 WHERE token=?").run(t);
+    return { vol: r?.vol ?? 0, trades: r?.trades ?? 0 };
   },
 };
 

@@ -144,7 +144,8 @@ export async function pollAll(): Promise<void> {
     const plsFirst = await resolvePlsFirst(w);
     const r = await readPair(w.pair, w.decimals, plsFirst);
     if (!r) continue;
-    prices.insert.run(w.token, ts, r.price, r.liq, volumeAccum.drain(w.token));
+    const drained = volumeAccum.drain(w.token);
+    prices.insert.run(w.token, ts, r.price, r.liq, drained.vol, drained.trades);
     ok++;
   }
   log("debug", "prices", `Sampled ${ok}/${list.length} tokens`);

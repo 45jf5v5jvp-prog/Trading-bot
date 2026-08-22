@@ -180,6 +180,7 @@ function NoLiquidityPositionRow({ p, onClose, closeState }) {
   return (
     <div className="row-between dead-position-row">
       <div className="row" style={{ gap: 10 }}>
+        {p.symbol && <span className="holding-symbol" style={{ fontSize: 12.5 }}>{p.symbol}</span>}
         <span className="holding-token" style={{ fontSize: 12.5 }}>{short(p.token)}</span>
         <CopyAddressButton address={p.token} />
         <span className="hint" style={{ margin: 0 }}>{p.bot} · spent {fmtAmount(p.spent_pls)} {CHAIN.nativeSymbol} · {label}</span>
@@ -258,6 +259,7 @@ function HoldingCard({ p, onClose, closeState }) {
       <div className="holding-card-top">
         <div>
           <div className="row" style={{ gap: 8 }}>
+            {p.symbol && <span className="holding-symbol">{p.symbol}</span>}
             <span className="holding-token">{short(p.token)}</span>
             <CopyAddressButton address={p.token} />
           </div>

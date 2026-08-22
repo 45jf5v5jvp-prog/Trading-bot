@@ -400,6 +400,7 @@ input::placeholder { color: #6b6c76; }
 }
 .holding-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .holding-token { font-family: ui-monospace, monospace; font-size: 14px; color: var(--text); }
+.holding-symbol { font-size: 14px; font-weight: 600; color: var(--amber); }
 .holding-pnl { font-size: 20px; }
 .holding-meta { color: var(--ash); font-size: 12.5px; margin-top: 6px; }
 

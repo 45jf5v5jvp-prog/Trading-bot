@@ -263,8 +263,12 @@ const EXIT_SYSTEM_PROMPT =
   "just asked. You will be asked about this same position again soon, every time it's still open - " +
   "a young position sitting close to its entry price is not fading, it is normal short-term noise " +
   "that hasn't resolved yet, and is not itself a reason to sell; weigh minutesHeld before reading " +
-  "meaning into a small move. Be concrete: cite the specific numbers you're weighing, including how " +
-  "long this has actually been held.";
+  "meaning into a small move. A small loss by itself - a percent or two - is not evidence the setup " +
+  "failed; only treat this as a real reason to cut it if there's a genuine technical breakdown behind " +
+  "it (RSI/MACD/Bollinger clearly turning against the position, not just sitting near neutral) or the " +
+  "loss is closing in on the stop-loss, not because the position happens to be slightly red at the " +
+  "moment you were asked. Be concrete: cite the specific numbers you're weighing, including how long " +
+  "this has actually been held.";
 
 /**
  * Periodic re-judgment of an open position - used only by Hunter Bot's

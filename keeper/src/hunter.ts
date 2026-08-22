@@ -61,6 +61,17 @@ const MIN_HOLD_MINUTES_BEFORE_AI_REVIEW = 20;
 // carries (see netOfExitCosts) and above ordinary tick-to-tick wobble, so
 // this can't be satisfied by noise alone - only an actual move qualifies.
 const EARLY_REVIEW_MIN_GAIN_PCT = 5;
+// Even past the floor above, re-reviewing a flat/marginal position on every
+// tick (as often as every 90s) doesn't add real information - the
+// technicals it's judged on (RSI/MACD/Bollinger) come from 15-minute
+// candles, so most of those reviews are re-judging nearly-identical data.
+// Asked often enough, ordinary noise eventually produces a "sell" that
+// isn't a real signal, just the law of large numbers - a position gets
+// asked dozens of times an hour and only needs one unlucky-looking moment.
+// Throttling non-gaining reviews to roughly once per candle cuts how many
+// chances noise gets, without slowing down real profit-taking, which still
+// bypasses this (see the roughGainPct check below).
+const MIN_REVIEW_GAP_MINUTES = CANDLE_MINUTES;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
@@ -393,7 +404,10 @@ async function evaluateWatchedToken(
   await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile);
 }
 
-interface FullModeRow { id: number; vault: string; token: string; opened_at: number; entry_price: number; spent_pls: number; high_water: number }
+interface FullModeRow {
+  id: number; vault: string; token: string; opened_at: number; entry_price: number;
+  spent_pls: number; high_water: number; last_ai_review_at: number | null;
+}
 
 /**
  * Auto Full's periodic re-judgment - every open Hunter position whose owner
@@ -408,7 +422,8 @@ interface FullModeRow { id: number; vault: string; token: string; opened_at: num
  */
 async function reviewFullModePositions(): Promise<void> {
   const rows = db.prepare(
-    `SELECT id, vault, token, opened_at, entry_price, spent_pls, high_water FROM positions WHERE bot='hunter' AND status='open' AND exit_mode='full'`,
+    `SELECT id, vault, token, opened_at, entry_price, spent_pls, high_water, last_ai_review_at
+     FROM positions WHERE bot='hunter' AND status='open' AND exit_mode='full'`,
   ).all() as FullModeRow[];
   if (rows.length === 0) return;
 
@@ -444,9 +459,20 @@ async function reviewFullModePositions(): Promise<void> {
       // handed to the AI - real fee/gas costs below only ever push the real
       // number down from here, so this can't let a not-actually-a-gain
       // position through.
-      const minutesHeldSoFar = (Math.floor(Date.now() / 1000) - r.opened_at) / 60;
+      const nowSec = Math.floor(Date.now() / 1000);
+      const minutesHeldSoFar = (nowSec - r.opened_at) / 60;
       const roughGainPct = ((taxAdjustedPrice - r.entry_price) / r.entry_price) * 100;
-      if (minutesHeldSoFar < MIN_HOLD_MINUTES_BEFORE_AI_REVIEW && roughGainPct < EARLY_REVIEW_MIN_GAIN_PCT) return;
+      const isRealGain = roughGainPct >= EARLY_REVIEW_MIN_GAIN_PCT;
+      if (minutesHeldSoFar < MIN_HOLD_MINUTES_BEFORE_AI_REVIEW && !isRealGain) return;
+
+      // Past the floor, a flat/marginal position still shouldn't be
+      // re-asked every single tick forever - see MIN_REVIEW_GAP_MINUTES's
+      // comment. A real gain always bypasses this, same reasoning as the
+      // early-review exception above: profit-taking should never wait on a
+      // throttle timer.
+      const minutesSinceLastReview = r.last_ai_review_at === null
+        ? Infinity : (nowSec - r.last_ai_review_at) / 60;
+      if (!isRealGain && minutesSinceLastReview < MIN_REVIEW_GAP_MINUTES) return;
 
       // Still a raw market price - a real close also pays the platform fee
       // and gas reimbursement (see executor.ts's netOfExitCosts), which
@@ -483,6 +509,7 @@ async function reviewFullModePositions(): Promise<void> {
       };
 
       const verdict = await assessExit(context);
+      db.prepare("UPDATE positions SET last_ai_review_at = ? WHERE id = ?").run(nowSec, r.id);
       if (verdict?.sell) {
         aiExitRequests.request(r.id, verdict.reasoning);
         log("info", "hunter", `Position #${r.id} (${context.symbol}): AI exit judgment - ${verdict.reasoning}`);

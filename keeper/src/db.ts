@@ -199,6 +199,11 @@ CREATE TABLE IF NOT EXISTS hunter_reviewed_misses (opportunity_id INTEGER PRIMAR
   if (!cols.some((c) => c.name === "source_tx_hash")) {
     db.exec("ALTER TABLE positions ADD COLUMN source_tx_hash TEXT");
   }
+  // Last time Auto Full's AI exit judgment actually reviewed this position -
+  // see hunter.ts's MIN_REVIEW_GAP_MINUTES. NULL until the first review.
+  if (!cols.some((c) => c.name === "last_ai_review_at")) {
+    db.exec("ALTER TABLE positions ADD COLUMN last_ai_review_at INTEGER");
+  }
 }
 
 // Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request

@@ -135,6 +135,26 @@ comfortably above the fee/gas floor above and ordinary noise) - a position
 already up by a real margin gets evaluated for profit-taking immediately,
 no matter how young.
 
+Still not the whole story: the owner kept seeing small losses on positions
+that had been open for hours, well past the 20-minute floor, with reasoning
+like "position is underwater" over a move of a percent or less. The floor
+only gates the position's first 20 minutes - after that, Auto Full re-asks
+the AI to hold or sell on EVERY hunter tick, as often as every 90 seconds,
+for the rest of the position's open life. The technicals it's judged on
+(RSI/MACD/Bollinger) come from 15-minute candles, so almost none of those
+reviews carry new information - it's the same picture asked about dozens
+of times an hour. Asked that often, ordinary noise eventually produces a
+"sell" that isn't a real signal, just the law of large numbers: a position
+only needs one unlucky-looking moment out of a hundred. Fixed by adding
+`last_ai_review_at` to the positions table and a `MIN_REVIEW_GAP_MINUTES`
+(tied to `CANDLE_MINUTES`, so a position isn't re-reviewed faster than its
+own underlying data actually updates) - a flat/marginal position now gets
+reviewed roughly once per candle instead of every tick, a real gain still
+bypasses this and gets evaluated immediately (profit-taking should never
+wait on a throttle timer). The exit prompt also now says explicitly that a
+small loss alone isn't evidence the setup failed absent a real technical
+breakdown or genuine proximity to the stop-loss.
+
 A third finding, this time from the owner noticing Launch Bot's real PLS
 spend in the trade history looked nothing like its configured
 `perLaunchPls` (150,000) - amounts like 0, 2, 347, and 2,292,913 PLS on

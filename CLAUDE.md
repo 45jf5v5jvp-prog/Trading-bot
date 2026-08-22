@@ -188,6 +188,13 @@ anything touching arbitrary ERC20 behaviour deserves suspicion.
   VaultFactory's `vaultCount()`, no key needed. Whenever asked "how many
   vaults have been made" or similar, give this command rather than a block
   explorer link - it runs from the terminal the user is already in.
+- **Market-wide seeding progress** (how many PulseX pairs have been
+  classified, how many tokens actually cleared the liquidity bar and are
+  watched/tradeable, whether the scan has caught up to the live pair count):
+  `node scripts/seed-progress.js`, same directory/no-key deal as
+  vault-count.js above. Reads the keeper's own `keeper.db` plus one live
+  `allPairsLength()` call - "done" here means caught up as of right now,
+  not a one-time finish line, since PulseX keeps minting new pairs.
 
 ## Honesty expectations
 

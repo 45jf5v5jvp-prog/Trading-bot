@@ -26,8 +26,24 @@ export interface OpenArgs {
   sourceTxHash?: string | null;
 }
 
+/**
+ * A second, real bug this same investigation turned up: entry_price used to
+ * be computed with formatEther, which always assumes 18 decimals - correct
+ * for a typical fresh launch token, wrong for anything that isn't (HEX is 8,
+ * plenty of tokens use 6 or 9). For those, entry_price came out off by
+ * whatever power of ten separates the token's real decimals from 18 - a
+ * position could show its AI exit judgment "down 100%" (a decimals-mismatch
+ * artifact comparing entry_price on the wrong scale against prices.latest(),
+ * which DOES use the token's real decimals - see prices.ts's readPair)
+ * while the real close was a modest, ordinary loss. tokens_held itself was
+ * never wrong (stored as the raw on-chain amount, decimals-agnostic), only
+ * this human-readable price derived from it - real proceeds/P&L on close
+ * were always correct, computed straight from actual swap output.
+ */
 export function openPosition(a: OpenArgs): void {
-  const tokens = Number(formatEther(a.tokensOut));
+  const w = db.prepare("SELECT decimals FROM watched WHERE token = ?")
+    .get(a.token.toLowerCase()) as { decimals: number } | undefined;
+  const tokens = Number(formatUnits(a.tokensOut, w ? w.decimals : 18));
   const entry = tokens > 0 ? a.spentPls / tokens : 0;
   db.prepare(`INSERT INTO positions
     (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status,exit_mode,source_tx_hash)

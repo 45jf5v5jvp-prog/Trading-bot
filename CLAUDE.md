@@ -26,7 +26,7 @@ keeper implementation. See HANDOFF.md section 6.
 
 ## The bug pattern to hunt
 
-Four separate bugs of the same shape have already been found and fixed here:
+Five separate bugs of the same shape have already been found and fixed here:
 
 > **buying works, selling reverts, position is stuck forever**
 
@@ -58,10 +58,33 @@ Four separate bugs of the same shape have already been found and fixed here:
    same way, since a resting sell-limit order is itself a manual
    take-profit target. Never trust `getAmountsOut` for anything
    proceeds-shaped without discounting it first.
+5. A different root cause, found while investigating a second live report
+   of the same symptom: `positions.ts`'s `openPosition` computed
+   `entry_price` with `formatEther`, which always assumes 18 decimals.
+   Correct for a typical fresh launch token, wrong for any token that isn't
+   (HEX is 8; plenty of tokens use 6 or 9). For those, `entry_price` came
+   out wrong by whatever power of ten separates the token's real decimals
+   from 18, while `prices.latest()` (used for the current-price side of the
+   same comparison) correctly reads each token's real decimals from
+   `watched.decimals` - so Hunter's Auto Full AI exit judgment could compare
+   two numbers on different scales and believe a position was catastrophically
+   down (one live case: the AI's own reasoning said "down 100%... indicating
+   either a token meltdown, decimal error in the oracle, or rug pull" - it
+   suspected its own bug) when the real close was an ordinary few-percent
+   loss. Bounded blast radius: `tokens_held` itself was always stored as the
+   raw on-chain amount (decimals-agnostic, never wrong), and both the actual
+   stop-loss/take-profit ratio (`checkAndClose`'s `value / spent_pls`, PLS to
+   PLS) and the site's own P&L display compare spent/proceeds directly rather
+   than through `entry_price` - so this skewed what the AI *believed*, never
+   what actually executed or what the dashboard showed. Fixed by looking up
+   the token's real decimals from `watched` before computing `entry_price`.
 
-All four were found by re-reading with a specific question in mind (#4 was
-reported live: a Hunter Bot position that closed at a real 2% loss after the
-bot believed, and told its owner, it was up 40%). Assume more exist. The
+All five were found by re-reading with a specific question in mind (#4 and
+#5 were both reported live, from the same owner watching the same bot -
+first a position that closed at a real 2% loss after the bot believed, and
+told its owner, it was up 40%, then a second one the owner flagged as
+"exited early... doesn't make sense" that turned out to be a completely
+different bug hiding behind a similar-looking symptom). Assume more exist. The
 Launch Bot buys tokens that are hostile by assumption, so anything touching
 arbitrary ERC20 behaviour deserves suspicion.
 

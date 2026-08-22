@@ -46,6 +46,14 @@ const MANDATORY_MIN_STOP_LOSS_PCT = 50;
 // mandatory floor, which can still raise it further.
 const ATR_STOP_MIN_PCT = 5;
 const ATR_STOP_MAX_PCT = 80;
+// Auto Full re-asks the AI whether to hold or sell on every hunter tick -
+// as often as every HUNTER_SCAN_SEC (90s by default) - starting the moment
+// a position opens. With nothing gating that, a position could be judged
+// "not worth holding" a minute and a half after being bought, off almost no
+// real price action - not a genuine read of the setup, just noise. This is
+// a floor under the AI, not a substitute for one: the mandatory stop-loss
+// below still protects the downside for the duration, same as always.
+const MIN_HOLD_MINUTES_BEFORE_AI_REVIEW = 20;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
@@ -405,6 +413,14 @@ async function reviewFullModePositions(): Promise<void> {
       const latest = prices.latest(r.token);
       if (!latest || latest.price <= 0 || r.entry_price <= 0) return;
 
+      // See MIN_HOLD_MINUTES_BEFORE_AI_REVIEW's comment - a position this
+      // young has no real setup information yet, only entry-tick noise.
+      // Skipping the AI call entirely (rather than calling it and hoping the
+      // prompt talks it out of selling) means "not enough time has passed"
+      // is enforced mechanically, not just suggested.
+      const minutesHeldSoFar = (Math.floor(Date.now() / 1000) - r.opened_at) / 60;
+      if (minutesHeldSoFar < MIN_HOLD_MINUTES_BEFORE_AI_REVIEW) return;
+
       // prices.latest() is a raw AMM mid-price (see prices.ts's readPair) -
       // it has no idea this token might take a cut on transfer, so it always
       // overstates what a real sale would return. Discounted by the same
@@ -441,7 +457,7 @@ async function reviewFullModePositions(): Promise<void> {
         currentPrice: realizablePrice,
         pnlPct: ((realizablePrice - r.entry_price) / r.entry_price) * 100,
         peakPnlPct: (r.high_water - 1) * 100, // high_water is a value/cost ratio - 1.0 is breakeven
-        minutesHeld: (Math.floor(Date.now() / 1000) - r.opened_at) / 60,
+        minutesHeld: minutesHeldSoFar,
         rsi: snap?.rsi ?? null,
         macdHistogram: snap?.macd?.histogram ?? null,
         macdBullishCross: snap?.macd?.bullishCross ?? null,

@@ -255,11 +255,16 @@ const EXIT_SYSTEM_PROMPT =
   "token, bought earlier by a trading bot on a technical dip-buying signal. A hard stop-loss " +
   "protects the downside no matter what you decide - your job is purely about the upside: is " +
   "there a real reason to think this still has room to run, or does the pattern suggest this is " +
-  "a good place to take the win (or cut a fading position) rather than give gains back? You have " +
-  "no special insight into the future - momentum can reverse in the next block, and a token that " +
-  "ran 50% can just as easily run 100% more or crash back to zero. When genuinely uncertain, " +
-  "there is nothing wrong with taking a solid profit rather than holding out for more. Be " +
-  "concrete: cite the specific numbers you're weighing.";
+  "a good place to take the win (or cut a genuinely fading position) rather than give gains back? " +
+  "You have no special insight into the future - momentum can reverse in the next block, and a " +
+  "token that ran 50% can just as easily run 100% more or crash back to zero. When genuinely " +
+  "uncertain, there is nothing wrong with taking a solid profit rather than holding out for more - " +
+  "but 'uncertain' means the setup has actually had time to show you something, not that you were " +
+  "just asked. You will be asked about this same position again soon, every time it's still open - " +
+  "a young position sitting close to its entry price is not fading, it is normal short-term noise " +
+  "that hasn't resolved yet, and is not itself a reason to sell; weigh minutesHeld before reading " +
+  "meaning into a small move. Be concrete: cite the specific numbers you're weighing, including how " +
+  "long this has actually been held.";
 
 /**
  * Periodic re-judgment of an open position - used only by Hunter Bot's

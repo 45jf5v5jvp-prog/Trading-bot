@@ -110,7 +110,29 @@ Six separate bugs of the same shape have already been found and fixed here:
    to net real costs out of at that point - would need restructuring
    `fireOrder`'s call order to fix properly, not done yet.
 
-All six were found by re-reading with a specific question in mind (#4, #5,
+A second, unrelated cause came out of that same conversation, once the owner
+pushed back that fee/gas-blindness alone couldn't explain positions closing
+within a few minutes of opening (a fee/gas-blind AI should still land near
+breakeven either way, not exit almost immediately) - not a quote-blindness
+bug at all, a decision-cadence one. `hunter.ts`'s Auto Full re-asks the AI
+whether to hold or sell on every hunter tick (as often as every
+`HUNTER_SCAN_SEC`, 90s by default) starting the moment a position opens, and
+`ai.ts`'s `EXIT_SYSTEM_PROMPT` had no patience guidance at all - "there is
+nothing wrong with taking a solid profit rather than holding out for more"
+with no anchor for how much time a setup needs to actually develop. A
+position could be judged "not worth holding" 90 seconds after being bought,
+off almost no real price action. Fixed two ways: `hunter.ts` now has a hard
+`MIN_HOLD_MINUTES_BEFORE_AI_REVIEW` (20 minutes) below which the AI isn't
+consulted at all - not a suggestion, a mechanical floor, same "hard rule
+underneath the AI" pattern `MANDATORY_MIN_STOP_LOSS_PCT` already uses -  and
+the exit prompt now explicitly tells the model a young position sitting
+near entry is normal unresolved noise, not fading, and to weigh
+`minutesHeld` before reading meaning into a small move.
+
+All six numbered bugs share the quote-blindness shape; this last one is a
+different kind of finding from the same investigation, included here
+because it was just as real and just as much a live-money problem. Both
+found by re-reading with a specific question in mind (#4, #5, and #6 were
 and #6 were all reported live, from the same owner watching the same bot -
 first a position that closed at a real 2% loss after the bot believed, and
 told its owner, it was up 40%, then a second one the owner flagged as

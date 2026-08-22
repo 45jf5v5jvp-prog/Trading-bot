@@ -47,7 +47,16 @@ Four separate bugs of the same shape have already been found and fixed here:
    own `livePrice.js` had the identical blind spot in the P&L it displays.
    Fixed by discounting each of these by the same `screened.sell_tax_bps` the
    min-output floor (bug 2) already measures - see git history around
-   2026-08-22 for the fix. Never trust `getAmountsOut` for anything
+   2026-08-22 for the fix. Followed up by auditing every OTHER place a bot
+   decides to take profit on its own: every bot that opens a position
+   through `positions.ts`'s shared `openPosition`/`checkAndClose` (launch,
+   discovery, hunter, snipe, rules, limit-order buy fills) was covered by
+   that same fix, since they all exit through the one shared
+   `markToMarket`. The one exception was `limits.ts`'s SELL-side limit
+   orders, which fire on their own independent `currentPrice()` quote and
+   never touch `positions.ts` at all - same untaxed-quote bug, fixed the
+   same way, since a resting sell-limit order is itself a manual
+   take-profit target. Never trust `getAmountsOut` for anything
    proceeds-shaped without discounting it first.
 
 All four were found by re-reading with a specific question in mind (#4 was

@@ -5,7 +5,7 @@ import { ERC20_ABI } from "./abis.js";
 import { registry, type LimitOrder, type VaultRecord } from "./registry.js";
 import { executeSwap } from "./executor.js";
 import { openPosition } from "./positions.js";
-import { limitFires } from "./db.js";
+import { limitFires, db } from "./db.js";
 import { log } from "./log.js";
 
 /**
@@ -41,15 +41,33 @@ async function tokenDecimals(token: string): Promise<number> {
   return dec;
 }
 
-/** PLS per whole token, quoted fresh (not the polled price cache) - a
+/**
+ * PLS per whole token, quoted fresh (not the polled price cache) - a
  * resting order should react to the price right now, not one up to
- * PRICE_POLL_SEC stale. Null if the token has no PulseX pair yet. */
+ * PRICE_POLL_SEC stale. Null if the token has no PulseX pair yet.
+ *
+ * Discounted by any measured sell tax on file, same fix as positions.ts's
+ * markToMarket - getAmountsOut is pure reserve arithmetic with no idea a
+ * token takes a cut on transfer, so an undiscounted quote overstates what a
+ * real sale actually returns, and a sell-limit order is exactly a manual
+ * take-profit target. This module deliberately runs no honeypot/tax
+ * screening of its own (see the module comment), so `screened` frequently
+ * has no row for a limit-order token at all - best-effort only: a token
+ * this vault (or any other bot) has separately been screened for gets a
+ * real discount, an unscreened one gets none, same "no fabricated numbers"
+ * convention as executor.ts's own use of this table.
+ */
 async function currentPrice(token: string, decimals: number): Promise<number | null> {
   try {
     const pair: string = await factory.getPair(token, CFG.wpls);
     if (/^0x0{40}$/i.test(pair)) return null;
     const amounts: bigint[] = await routerRead.getAmountsOut(parseUnits("1", decimals), [token, CFG.wpls]);
-    return Number(formatEther(amounts[amounts.length - 1] ?? 0n));
+    const quoted = amounts[amounts.length - 1] ?? 0n;
+    const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+      .get(token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+    const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+    const afterTax = (quoted * BigInt(10_000 - taxBps)) / 10_000n;
+    return Number(formatEther(afterTax));
   } catch {
     return null;
   }

@@ -54,6 +54,13 @@ const ATR_STOP_MAX_PCT = 80;
 // a floor under the AI, not a substitute for one: the mandatory stop-loss
 // below still protects the downside for the duration, same as always.
 const MIN_HOLD_MINUTES_BEFORE_AI_REVIEW = 20;
+// The one exception to that floor: a position already up by a real margin
+// this early is a genuine fast winner, not noise, and shouldn't have to
+// wait to be evaluated for profit-taking just because the clock hasn't run
+// out. Comfortably above the ~1-2% fee/gas floor a "flat" position already
+// carries (see netOfExitCosts) and above ordinary tick-to-tick wobble, so
+// this can't be satisfied by noise alone - only an actual move qualifies.
+const EARLY_REVIEW_MIN_GAIN_PCT = 5;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
@@ -413,14 +420,6 @@ async function reviewFullModePositions(): Promise<void> {
       const latest = prices.latest(r.token);
       if (!latest || latest.price <= 0 || r.entry_price <= 0) return;
 
-      // See MIN_HOLD_MINUTES_BEFORE_AI_REVIEW's comment - a position this
-      // young has no real setup information yet, only entry-tick noise.
-      // Skipping the AI call entirely (rather than calling it and hoping the
-      // prompt talks it out of selling) means "not enough time has passed"
-      // is enforced mechanically, not just suggested.
-      const minutesHeldSoFar = (Math.floor(Date.now() / 1000) - r.opened_at) / 60;
-      if (minutesHeldSoFar < MIN_HOLD_MINUTES_BEFORE_AI_REVIEW) return;
-
       // prices.latest() is a raw AMM mid-price (see prices.ts's readPair) -
       // it has no idea this token might take a cut on transfer, so it always
       // overstates what a real sale would return. Discounted by the same
@@ -432,6 +431,22 @@ async function reviewFullModePositions(): Promise<void> {
         .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
       const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
       const taxAdjustedPrice = latest.price * (1 - taxBps / 10_000);
+
+      // See MIN_HOLD_MINUTES_BEFORE_AI_REVIEW's comment - a young position
+      // hasn't had time to show a real setup yet, so below that age the AI
+      // isn't consulted UNLESS it's already sitting on a real gain worth
+      // looking at. A genuine fast winner should still get evaluated for
+      // profit-taking right away, same as the owner asked for - this only
+      // holds back the case that actually caused the problem: a position
+      // that's flat or only marginally up/down this early, which is normal
+      // unresolved noise, not a signal either way. Uses the cheap raw quote
+      // (no RPC round trip) since this is a threshold check, not the number
+      // handed to the AI - real fee/gas costs below only ever push the real
+      // number down from here, so this can't let a not-actually-a-gain
+      // position through.
+      const minutesHeldSoFar = (Math.floor(Date.now() / 1000) - r.opened_at) / 60;
+      const roughGainPct = ((taxAdjustedPrice - r.entry_price) / r.entry_price) * 100;
+      if (minutesHeldSoFar < MIN_HOLD_MINUTES_BEFORE_AI_REVIEW && roughGainPct < EARLY_REVIEW_MIN_GAIN_PCT) return;
 
       // Still a raw market price - a real close also pays the platform fee
       // and gas reimbursement (see executor.ts's netOfExitCosts), which

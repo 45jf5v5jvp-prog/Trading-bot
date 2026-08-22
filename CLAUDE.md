@@ -124,10 +124,16 @@ position could be judged "not worth holding" 90 seconds after being bought,
 off almost no real price action. Fixed two ways: `hunter.ts` now has a hard
 `MIN_HOLD_MINUTES_BEFORE_AI_REVIEW` (20 minutes) below which the AI isn't
 consulted at all - not a suggestion, a mechanical floor, same "hard rule
-underneath the AI" pattern `MANDATORY_MIN_STOP_LOSS_PCT` already uses -  and
+underneath the AI" pattern `MANDATORY_MIN_STOP_LOSS_PCT` already uses - and
 the exit prompt now explicitly tells the model a young position sitting
 near entry is normal unresolved noise, not fading, and to weigh
-`minutesHeld` before reading meaning into a small move.
+`minutesHeld` before reading meaning into a small move. Refined once more
+after owner feedback: the floor shouldn't block taking a genuine fast win
+just because the clock hasn't run out, so it only holds back a position
+that's flat or marginal this early (`EARLY_REVIEW_MIN_GAIN_PCT`, 5% -
+comfortably above the fee/gas floor above and ordinary noise) - a position
+already up by a real margin gets evaluated for profit-taking immediately,
+no matter how young.
 
 All six numbered bugs share the quote-blindness shape; this last one is a
 different kind of finding from the same investigation, included here

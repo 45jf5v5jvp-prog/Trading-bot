@@ -83,8 +83,10 @@ const PRESETS = {
     // up rather than trusting a guessed address.
     factory: "",
     vaultFactory: "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54",
-    multiVenueVaultFactory: "",
-    multiVenueV4VaultFactory: "",
+    // Read straight off the live droplet's own site/.env.local (2026-08-22),
+    // same verification standard as vaultFactory/router/wrapped above.
+    multiVenueVaultFactory: "0x7C9bcf8935888839ac3F8BfeFca5dcc37D20CF46",
+    multiVenueV4VaultFactory: "0x27804E63872Ba6458777524d3603846Be00D2712",
     // V3/V4 pricing addresses. Same "no fabricated defaults" convention as
     // the keeper's own FACTORY_V3/POOL_MANAGER - unset until the matching
     // NEXT_PUBLIC_* var is set on the deployment, matched to keeper/.env.

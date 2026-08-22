@@ -77,23 +77,17 @@ const PRESETS = {
     explorerUrl: "https://robinhoodchain.blockscout.com",
     wrapped: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
     router: "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
-    // Unset until independently verified on this chain's explorer - Ask
-    // Icaria and Hunter Bot are PulseChain-only for now (see their own
-    // module comments), so this deployment simply has no V2 factory wired
-    // up rather than trusting a guessed address.
-    factory: "",
+    // Read straight off the live droplet's own keeper/.env (2026-08-22),
+    // same verification standard as router/wrapped above.
+    factory: "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f",
     vaultFactory: "0xfe0EC05B62fD5EA170Cbb40706CD088DB8E06D54",
-    // Read straight off the live droplet's own site/.env.local (2026-08-22),
-    // same verification standard as vaultFactory/router/wrapped above.
     multiVenueVaultFactory: "0x7C9bcf8935888839ac3F8BfeFca5dcc37D20CF46",
     multiVenueV4VaultFactory: "0x27804E63872Ba6458777524d3603846Be00D2712",
-    // V3/V4 pricing addresses. Same "no fabricated defaults" convention as
-    // the keeper's own FACTORY_V3/POOL_MANAGER - unset until the matching
-    // NEXT_PUBLIC_* var is set on the deployment, matched to keeper/.env.
-    factoryV3: "",
-    quoterV3: "",
-    poolManager: "",
-    probeAddressV4: "",
+    // V3/V4 pricing addresses - same live-keeper-env source as above.
+    factoryV3: "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+    quoterV3: "0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7",
+    poolManager: "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+    probeAddressV4: "0x3bccB77E426f1908329c1Ec4c26FbEDF9feB76B8",
     // ETH-scale amounts (a trade might be 0.0025) - 2 decimals would round
     // real money down to nothing.
     balanceMaxDecimals: 6,

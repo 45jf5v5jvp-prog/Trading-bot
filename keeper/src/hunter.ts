@@ -405,6 +405,18 @@ async function reviewFullModePositions(): Promise<void> {
       const latest = prices.latest(r.token);
       if (!latest || latest.price <= 0 || r.entry_price <= 0) return;
 
+      // prices.latest() is a raw AMM mid-price (see prices.ts's readPair) -
+      // it has no idea this token might take a cut on transfer, so it always
+      // overstates what a real sale would return. Discounted by the same
+      // measured sell_tax_bps positions.ts's markToMarket uses, so the AI
+      // isn't judging an exit against a price nobody could actually realize -
+      // exactly the mismatch that let it believe a position was up when
+      // closing it actually locked in a loss.
+      const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+        .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+      const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+      const realizablePrice = latest.price * (1 - taxBps / 10_000);
+
       const candles = candlesForToken(r.token, from, CANDLE_MINUTES * 60);
       const snap = candles.length ? snapshot(candles) : null;
 
@@ -412,8 +424,8 @@ async function reviewFullModePositions(): Promise<void> {
         symbol: symbolByToken.get(r.token) ?? r.token,
         token: r.token,
         entryPrice: r.entry_price,
-        currentPrice: latest.price,
-        pnlPct: ((latest.price - r.entry_price) / r.entry_price) * 100,
+        currentPrice: realizablePrice,
+        pnlPct: ((realizablePrice - r.entry_price) / r.entry_price) * 100,
         peakPnlPct: (r.high_water - 1) * 100, // high_water is a value/cost ratio - 1.0 is breakeven
         minutesHeld: (Math.floor(Date.now() / 1000) - r.opened_at) / 60,
         rsi: snap?.rsi ?? null,

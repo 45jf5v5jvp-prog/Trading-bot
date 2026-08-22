@@ -67,6 +67,27 @@ function getTotalFees(vault) {
 }
 
 /**
+ * The sell tax the keeper's own honeypot/tax probe measured for this token,
+ * in bps - null if it's never been screened. Used to discount a raw V2
+ * getAmountsOut quote (see livePrice.js's quotePlsValue): that quote is pure
+ * reserve arithmetic with no idea a token takes a cut on transfer, so an
+ * undiscounted "current value" reads as far more than a real sale would
+ * actually return. 0 (not null) if the token WAS screened and simply has no
+ * measurable sell tax - only a token that's never been screened at all gets
+ * null, so a caller can tell "no tax" from "no data" if it needs to.
+ */
+function getSellTaxBps(token) {
+  const d = getDb();
+  if (!d) return null;
+  try {
+    const row = d.prepare(`SELECT sell_tax_bps FROM screened WHERE token = ?`).get(token.toLowerCase());
+    return row ? row.sell_tax_bps : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Every V4 pool the keeper's scanner has recorded for a token. V4 has no
  * on-chain "getPool(tokenA, tokenB, fee)" lookup the way V2/V3 do - a
  * pool's full PoolKey (both currencies, fee, tickSpacing, hooks) IS its
@@ -211,6 +232,6 @@ function resetForTests() {
 module.exports = {
   getPositions, getRecentFires, getTotalFees, getV4PoolsForToken,
   getOpportunities, getDiscoveryActionsForVault, getRecentPrices,
-  getHunterLessons, getHunterTrades,
+  getHunterLessons, getHunterTrades, getSellTaxBps,
   resetForTests, resolveDbPath,
 };

@@ -87,12 +87,21 @@ export async function positionsValuePls(vault: string): Promise<{ total: number;
   const byToken = new Map<string, number>();
   let total = 0;
   // Read-only quotes, safe to run concurrently regardless of vault grouping.
+  // Tax-discounted same as markToMarket above - this feeds the holding-cap
+  // check (exceedsHoldingCap), and an undiscounted quote overstates a taxed
+  // token's real share of the vault just like it overstates a single
+  // position's P&L.
   const values = await mapLimit(rows, CFG.keeperConcurrency, async (r) => {
     try {
       const held = BigInt(r.tokens_held);
       if (held === 0n) return null;
       const amounts: bigint[] = await routerRead.getAmountsOut(held, [r.token, CFG.wpls]);
-      return { token: r.token.toLowerCase(), value: Number(formatEther(amounts[amounts.length - 1]!)) };
+      const quoted = amounts[amounts.length - 1]!;
+      const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+        .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+      const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+      const afterTax = (quoted * BigInt(10_000 - taxBps)) / 10_000n;
+      return { token: r.token.toLowerCase(), value: Number(formatEther(afterTax)) };
     } catch { return null; } // unpriceable right now, skip
   });
   for (const v of values) {
@@ -120,6 +129,16 @@ type MarkResult =
  * Marks a position against a live quote for the size actually held, not a mid
  * price. On a thin new pair those differ enormously, and exiting on mid price
  * means the stop fires far later than the user thinks it will.
+ *
+ * getAmountsOut is pure reserve arithmetic - it has no idea a token takes a
+ * cut on transfer, so its quote is always too high for a taxed token. Left
+ * undiscounted, this is exactly the bug executor.ts's own minOut calculation
+ * already had to work around: a position in a token with real sell tax reads
+ * as up far more than it actually is, which can fire take-profit (or hold
+ * through what should have been a stop-loss) on a number nobody could
+ * actually realize on a real sale. Discounted by the same measured
+ * sell_tax_bps executor.ts uses for its own quote, so the ratio/high_water
+ * this function feeds sellSignal() reflects what a real sale would return.
  */
 async function markToMarket(r: Row): Promise<MarkResult> {
   let held: bigint;
@@ -132,7 +151,12 @@ async function markToMarket(r: Row): Promise<MarkResult> {
   if (held === 0n) return { ok: false, reason: "vanished" };
   try {
     const amounts: bigint[] = await routerRead.getAmountsOut(held, [r.token, CFG.wpls]);
-    return { ok: true, value: Number(formatEther(amounts[amounts.length - 1]!)), held };
+    const quoted = amounts[amounts.length - 1]!;
+    const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+      .get(r.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+    const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+    const afterTax = (quoted * BigInt(10_000 - taxBps)) / 10_000n;
+    return { ok: true, value: Number(formatEther(afterTax)), held };
   } catch {
     return { ok: false, reason: "unpriceable" };
   }

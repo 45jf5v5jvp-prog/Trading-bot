@@ -26,7 +26,7 @@ keeper implementation. See HANDOFF.md section 6.
 
 ## The bug pattern to hunt
 
-Three separate bugs of the same shape have already been found and fixed here:
+Four separate bugs of the same shape have already been found and fixed here:
 
 > **buying works, selling reverts, position is stuck forever**
 
@@ -36,10 +36,25 @@ Three separate bugs of the same shape have already been found and fixed here:
    taxes, so the floor was unreachable.
 3. Allowlist checked every path token, so a newly launched token could be
    bought but never sold.
+4. A variant, found from a live report rather than a code read: `getAmountsOut`
+   also can't see transfer taxes when it's used to *value* an open position,
+   not just to floor a swap. `positions.ts`'s `markToMarket`/`positionsValuePls`
+   and `hunter.ts`'s `reviewFullModePositions` all quoted a raw, untaxed price
+   to decide whether take-profit/stop-loss had been hit and what an AI exit
+   judgment should believe the position was worth - so a real sell-tax token
+   could read as up 40% right up until the actual sale (which does account for
+   tax, since it's a real on-chain swap) came back at a real loss. The site's
+   own `livePrice.js` had the identical blind spot in the P&L it displays.
+   Fixed by discounting each of these by the same `screened.sell_tax_bps` the
+   min-output floor (bug 2) already measures - see git history around
+   2026-08-22 for the fix. Never trust `getAmountsOut` for anything
+   proceeds-shaped without discounting it first.
 
-All three were found by re-reading with a specific question in mind. Assume
-more exist. The Launch Bot buys tokens that are hostile by assumption, so
-anything touching arbitrary ERC20 behaviour deserves suspicion.
+All four were found by re-reading with a specific question in mind (#4 was
+reported live: a Hunter Bot position that closed at a real 2% loss after the
+bot believed, and told its owner, it was up 40%). Assume more exist. The
+Launch Bot buys tokens that are hostile by assumption, so anything touching
+arbitrary ERC20 behaviour deserves suspicion.
 
 ## What would help most, in order
 

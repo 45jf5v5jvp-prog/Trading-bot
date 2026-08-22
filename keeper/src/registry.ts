@@ -163,6 +163,19 @@ export interface HunterConfig {
   // needing a per-token dollar guess (HEX/INC's normal daily volume looks
   // nothing like a small cap's). 0 disables the check.
   minTrades24h: number;
+
+  // Auto-rebuy: when a Hunter position closes on a bearish/profit-taking
+  // read (an AI exit, a take-profit, or a trailing stop - never a stop-loss
+  // or a manual close, see hunter.ts's considerAutoRebuys), place a resting
+  // rebuy for the same token some percent below the exit price, so a real
+  // pullback gets captured as a better entry instead of just walking away.
+  // Lives entirely on the keeper's own side (see db.ts's pendingRebuys) -
+  // this one signed toggle authorizes it, not a fresh signature per rebuy.
+  autoRebuyOnExit: boolean;
+  autoRebuyDipPct: number;
+  // Give up waiting after this long so a rebuy that never comes doesn't sit
+  // forever - the setup that justified it has gone stale by then anyway.
+  autoRebuyExpireHours: number;
 }
 
 /**
@@ -285,6 +298,7 @@ const DEFAULT_HUNTER: HunterConfig = {
   // requireVolumeConfirmation just above - off until an owner turns it on
   // and picks a number for their own risk tolerance.
   minTrades24h: 0,
+  autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
 };
 
 const cache = new Map<string, VaultRecord>();

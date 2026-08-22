@@ -65,6 +65,7 @@ const DEFAULT_HUNTER = {
   trailingStopPct: 0, timeExitMin: 0,
   requireVolumeConfirmation: false, minVolumeRatio: 1.5,
   minTrades24h: 0,
+  autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
 };
 
 function isFiniteNumber(v) {
@@ -215,6 +216,7 @@ function normalizeHunter(h) {
     "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
     "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
     "atrStopMultiplier", "minVolumeRatio", "minTrades24h",
+    "autoRebuyDipPct", "autoRebuyExpireHours",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
       throw new Error(`hunter.${field} must be a non-negative number`);
@@ -233,6 +235,8 @@ function normalizeHunter(h) {
     throw new Error("hunter.stopLossPct must be greater than 0 when exitMode is \"full\" - Auto Full still needs a mandatory stop-loss");
   if (merged.useAtrStop && merged.atrStopMultiplier <= 0)
     throw new Error("hunter.atrStopMultiplier must be greater than 0 when useAtrStop is on");
+  if (merged.autoRebuyDipPct >= 100)
+    throw new Error("hunter.autoRebuyDipPct must be less than 100");
   return {
     enabled: Boolean(merged.enabled),
     mode: merged.mode,
@@ -261,6 +265,9 @@ function normalizeHunter(h) {
     requireVolumeConfirmation: Boolean(merged.requireVolumeConfirmation),
     minVolumeRatio: merged.minVolumeRatio,
     minTrades24h: merged.minTrades24h,
+    autoRebuyOnExit: Boolean(merged.autoRebuyOnExit),
+    autoRebuyDipPct: merged.autoRebuyDipPct,
+    autoRebuyExpireHours: merged.autoRebuyExpireHours,
   };
 }
 

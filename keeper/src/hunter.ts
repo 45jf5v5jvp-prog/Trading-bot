@@ -3,7 +3,7 @@ import { CFG } from "./config.js";
 import { provider, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
 import { registry, type VaultRecord, type HunterConfig } from "./registry.js";
-import { watched, opportunities, discoveryActions, aiExitRequests, hunterLessons, prices, db } from "./db.js";
+import { watched, opportunities, discoveryActions, aiExitRequests, hunterLessons, pendingRebuys, prices, db } from "./db.js";
 import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./discovery.js";
 import { candlesForToken } from "./candles.js";
 import { snapshot, liquidityDropIsSuspicious } from "./indicators.js";
@@ -631,6 +631,145 @@ async function reflectOnClosedLosses(): Promise<void> {
   }
 }
 
+const AUTO_REBUY_BATCH_LIMIT = 5;
+
+interface RebuyCandidateRow {
+  id: number; vault: string; token: string; entry_price: number; spent_pls: number;
+  proceeds_pls: number | null; close_reason: string | null;
+}
+
+/**
+ * After a Hunter position closes on a bearish/profit-taking read, queue a
+ * resting rebuy for the same token some percent below the exit price - a
+ * real pullback becomes a better entry instead of the bot just walking
+ * away. Only for a vault that opted in (registry.ts's autoRebuyOnExit) and
+ * only for a close reason that means "the bot chose to take this off,"
+ * never a stop-loss (the thesis was wrong, not a reason to want back in) or
+ * an owner-requested manual close (they wanted out, not "buy it back for
+ * me"). See db.ts's pendingRebuys for why this lives entirely on the
+ * keeper's own side rather than as a real limitOrders entry.
+ */
+async function considerAutoRebuys(): Promise<void> {
+  const rows = db.prepare(`
+    SELECT id, vault, token, entry_price, spent_pls, proceeds_pls, close_reason
+    FROM positions WHERE bot='hunter' AND status='closed'
+  `).all() as RebuyCandidateRow[];
+  if (rows.length === 0) return;
+
+  let processed = 0;
+  for (const r of rows) {
+    if (processed >= AUTO_REBUY_BATCH_LIMIT) break;
+    if (pendingRebuys.rebuyAlreadyConsidered(r.id)) continue;
+    processed++;
+
+    const v = registry.get(r.vault);
+    const H = v?.hunter;
+    if (!H || !H.autoRebuyOnExit) { pendingRebuys.markRebuyConsidered(r.id); continue; }
+
+    const reason = r.close_reason ?? "";
+    const qualifies = reason.startsWith("AI exit") || reason.startsWith("take profit") || reason.startsWith("trailing stop");
+    if (!qualifies) { pendingRebuys.markRebuyConsidered(r.id); continue; }
+
+    if (r.proceeds_pls === null || r.proceeds_pls <= 0 || r.entry_price <= 0 || r.spent_pls <= 0) {
+      pendingRebuys.markRebuyConsidered(r.id);
+      continue;
+    }
+
+    // Same relationship openPosition used to derive entry_price in the
+    // first place - backs out the token quantity that was sold without
+    // needing a separate decimals lookup.
+    const tokensSold = r.spent_pls / r.entry_price;
+    if (tokensSold <= 0) { pendingRebuys.markRebuyConsidered(r.id); continue; }
+    const exitPrice = r.proceeds_pls / tokensSold;
+    const targetPrice = exitPrice * (1 - H.autoRebuyDipPct / 100);
+    const amountPls = H.maxPerTradePls > 0 ? Math.min(r.spent_pls, H.maxPerTradePls) : r.spent_pls;
+    const expiresAt = Math.floor(Date.now() / 1000) + H.autoRebuyExpireHours * 3600;
+
+    pendingRebuys.insert(r.vault, r.token, targetPrice, amountPls, r.id, expiresAt);
+    pendingRebuys.markRebuyConsidered(r.id);
+    log("info", "hunter", `${r.vault}: queued an auto-rebuy for ${r.token} if it drops to ${targetPrice.toFixed(10)} (${H.autoRebuyDipPct}% below its ${exitPrice.toFixed(10)} exit), expires in ${H.autoRebuyExpireHours}h`);
+  }
+}
+
+/**
+ * Fires any pending auto-rebuy whose target has been reached, or drops it
+ * once it's expired without one. Uses prices.latest() rather than a fresh
+ * quote - this token is already watched, so that data is kept fresh
+ * regardless - discounted by the same measured sell_tax_bps every other
+ * Hunter price read uses. Re-checks the vault's CURRENT settings at fire
+ * time, not whatever they were when the rebuy was queued: if the owner has
+ * since turned Hunter or auto-rebuy off, or lowered the per-trade ceiling,
+ * a stale queued rebuy respects that, not the settings from whenever the
+ * original position closed. Mirrors executeHunterBuy's allocation/holding-
+ * cap checks and how it opens the resulting position, since this is still
+ * an ordinary Hunter buy in every way that matters - it just wasn't found
+ * through the normal RSI/MACD/Bollinger detection pass.
+ */
+async function checkPendingRebuys(): Promise<void> {
+  const pending = pendingRebuys.all();
+  if (pending.length === 0) return;
+  const now = Math.floor(Date.now() / 1000);
+
+  await mapLimit(pending, CFG.keeperConcurrency, async (p) => {
+    if (now >= p.expiresAt) {
+      pendingRebuys.remove(p.id);
+      log("info", "hunter", `${p.vault}: auto-rebuy for ${p.token} expired without filling`);
+      return;
+    }
+
+    const v = registry.get(p.vault);
+    const H = v?.hunter;
+    if (!v || !H || !H.enabled || !H.autoRebuyOnExit) { pendingRebuys.remove(p.id); return; }
+
+    const latest = prices.latest(p.token);
+    if (!latest || latest.price <= 0) return; // try again next tick
+
+    const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+      .get(p.token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+    const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+    const taxAdjustedPrice = latest.price * (1 - taxBps / 10_000);
+    if (taxAdjustedPrice > p.targetPrice) return; // hasn't dropped far enough yet
+
+    const amountPls = H.maxPerTradePls > 0 ? Math.min(p.amountPls, H.maxPerTradePls) : p.amountPls;
+    if (amountPls <= 0 || H.allocatedPls <= 0) { pendingRebuys.remove(p.id); return; }
+
+    const deployed = deployedPls(v.address);
+    if (deployed + amountPls > H.allocatedPls) return; // try again next tick - allocation may free up
+
+    const { total: posValue, byToken } = await positionsValuePls(v.address);
+    const totalValue = (await vaultWplsPls(v.address)) + posValue;
+    const tokenNow = byToken.get(p.token.toLowerCase()) ?? 0;
+    if (exceedsHoldingCap(tokenNow + amountPls, totalValue, v.maxHoldingPct)) return; // try again next tick
+
+    try {
+      const res = await executeSwap({
+        vault: p.vault, bot: "hunter", path: [CFG.wpls, p.token],
+        amountIn: parseEther(String(amountPls)), tokenLabel: p.token,
+        slippageBps: Math.min(CFG.maxSlippageBps, 300),
+      });
+      if (!res.ok) {
+        log("warn", "hunter", `${p.vault}: auto-rebuy for ${p.token} failed to fill: ${res.reason}`);
+        return; // transient - try again next tick rather than dropping a real opportunity
+      }
+      const slPct = computeStopLossPct(H, null);
+      openPosition({
+        vault: p.vault, bot: "hunter", token: p.token,
+        spentPls: amountPls, tokensOut: res.amountOut,
+        tpPct: H.exitMode === "full" ? 0 : H.takeProfitPct,
+        slPct,
+        trailPct: H.exitMode === "full" ? 0 : H.trailingStopPct,
+        timeExitMin: H.exitMode === "full" ? 0 : H.timeExitMin,
+        exitMode: H.exitMode,
+        sourceTxHash: res.txHash,
+      });
+      pendingRebuys.remove(p.id);
+      log("info", "hunter", `${p.vault}: auto-rebuy filled for ${p.token} at ${amountPls} PLS, tx=${res.txHash}`);
+    } catch (e) {
+      log("error", "hunter", `Auto-rebuy execution for ${p.token} on ${p.vault}: ${(e as Error).message}`);
+    }
+  });
+}
+
 interface DeclinedOpportunityRow {
   id: number; token: string; ts: number; narrative: string; aiReasoning: string | null; priceAtDetection: number | null;
 }
@@ -733,6 +872,13 @@ export async function tick(): Promise<void> {
   await ingestOwnerFeedback(registry.active());
   await reflectOnClosedLosses();
   await reflectOnMissedOpportunities();
+
+  // Same "runs regardless of whether Hunter is enabled anywhere right now"
+  // reasoning as the reflection passes above - an already-queued rebuy (or
+  // one from a position that just closed) shouldn't stall just because
+  // detection is skipped this tick.
+  await considerAutoRebuys();
+  await checkPendingRebuys();
 
   const candidates = registry.active().filter((v) => v.hunter.enabled);
   if (candidates.length === 0) return;

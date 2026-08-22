@@ -199,6 +199,27 @@ export default function HunterSettings({ hunter, onChange }) {
         </div>
       )}
 
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
+        <input
+          type="checkbox" checked={hunter.autoRebuyOnExit}
+          onChange={(e) => onChange({ ...hunter, autoRebuyOnExit: e.target.checked })}
+        />
+        Auto-rebuy on a good exit
+      </label>
+      <div className="field-inline" style={{ marginLeft: 21 }}>
+        <label>Rebuy if it drops</label>
+        <NumberField {...num("autoRebuyDipPct")} min="0" max="99" style={{ width: 70 }} disabled={!hunter.autoRebuyOnExit} />
+        <span className="hint" style={{ margin: 0 }}>% below the exit price, expiring after</span>
+        <NumberField {...num("autoRebuyExpireHours")} min="0" style={{ width: 70 }} disabled={!hunter.autoRebuyOnExit} />
+        <span className="hint" style={{ margin: 0 }}>hours</span>
+      </div>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        When the bot takes profit or exits on its own AI judgment - never on a stop-loss, and never
+        after you manually close a position - it queues a resting rebuy some percent below where it
+        sold, so a real pullback becomes a better entry instead of walking away for good. Sized the
+        same as the position that just closed, still subject to your allocation and holding cap.
+      </p>
+
       <div className="sub-label">Screening limits (a token failing any of these is never buyable, notify or auto-buy)</div>
 
       <div className="field-inline">

@@ -180,6 +180,33 @@ CREATE INDEX IF NOT EXISTS hunter_lessons_vault_ts ON hunter_lessons(vault, ts D
 -- forever.
 CREATE TABLE IF NOT EXISTS hunter_reviewed_closes (position_id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS hunter_reviewed_misses (opportunity_id INTEGER PRIMARY KEY);
+
+-- A resting rebuy the keeper created for itself after closing a Hunter
+-- position on a bearish/profit-taking read - see hunter.ts's
+-- considerAutoRebuys/checkPendingRebuys. Deliberately NOT part of the
+-- owner's signed limitOrders config (registry.ts's LimitOrder) - the
+-- keeper can never write into that (only the vault owner's own signature
+-- can), so this is its own keeper-internal table instead, gated by the
+-- owner's one signed autoRebuyOnExit toggle rather than a per-order
+-- signature. Deleted on fire or on expiry either way, never left around.
+CREATE TABLE IF NOT EXISTS hunter_pending_rebuys (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  vault         TEXT NOT NULL,
+  token         TEXT NOT NULL,
+  target_price  REAL NOT NULL,
+  amount_pls    REAL NOT NULL,
+  source_position_id INTEGER NOT NULL,
+  created_at    INTEGER NOT NULL,
+  expires_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS hunter_pending_rebuys_vault ON hunter_pending_rebuys(vault);
+
+-- Every closed Hunter position already considered for an auto-rebuy,
+-- whether or not it actually qualified - same "look once, move on
+-- permanently" shape as hunter_reviewed_closes above, kept separate since
+-- it tracks a different question (was a rebuy created?) on the same
+-- underlying closes.
+CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY KEY);
 `);
 
 // Additive migration: databases created before the retry-storm fix predate
@@ -622,5 +649,38 @@ export const hunterLessons = {
   },
   markMissReviewed(opportunityId: number): void {
     db.prepare("INSERT OR IGNORE INTO hunter_reviewed_misses(opportunity_id) VALUES(?)").run(opportunityId);
+  },
+};
+
+export interface PendingRebuyRow {
+  id: number; vault: string; token: string; targetPrice: number; amountPls: number;
+  sourcePositionId: number; createdAt: number; expiresAt: number;
+}
+
+/** Keeper-internal resting rebuys - see the hunter_pending_rebuys table
+ * comment in the schema above for why these live here instead of in the
+ * owner's signed limitOrders config. */
+export const pendingRebuys = {
+  insert(vault: string, token: string, targetPrice: number, amountPls: number, sourcePositionId: number, expiresAt: number): void {
+    db.prepare(`INSERT INTO hunter_pending_rebuys(vault,token,target_price,amount_pls,source_position_id,created_at,expires_at)
+                VALUES(?,?,?,?,?,?,?)`)
+      .run(vault.toLowerCase(), token.toLowerCase(), targetPrice, amountPls, sourcePositionId,
+           Math.floor(Date.now() / 1000), expiresAt);
+  },
+  all(): PendingRebuyRow[] {
+    return db.prepare(`
+      SELECT id, vault, token, target_price AS targetPrice, amount_pls AS amountPls,
+             source_position_id AS sourcePositionId, created_at AS createdAt, expires_at AS expiresAt
+      FROM hunter_pending_rebuys
+    `).all() as PendingRebuyRow[];
+  },
+  remove(id: number): void {
+    db.prepare("DELETE FROM hunter_pending_rebuys WHERE id=?").run(id);
+  },
+  rebuyAlreadyConsidered(positionId: number): boolean {
+    return Boolean(db.prepare("SELECT 1 FROM hunter_rebuy_considered WHERE position_id=?").get(positionId));
+  },
+  markRebuyConsidered(positionId: number): void {
+    db.prepare("INSERT OR IGNORE INTO hunter_rebuy_considered(position_id) VALUES(?)").run(positionId);
   },
 };

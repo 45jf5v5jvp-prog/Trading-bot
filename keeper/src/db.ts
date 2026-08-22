@@ -203,6 +203,10 @@ CREATE TABLE IF NOT EXISTS hunter_reviewed_misses (opportunity_id INTEGER PRIMAR
   // see the Robinhood port notes for why reflectOnMissedOpportunities is a
   // no-op until that's wired up.
   add("price_at_detection", "price_at_detection REAL");
+  // A notified (never bought) opportunity that's aged out or been overtaken
+  // by price movement since detection - see hunter.ts's refreshStaleness().
+  add("stale", "stale INTEGER NOT NULL DEFAULT 0");
+  add("stale_reason", "stale_reason TEXT");
 }
 
 export const meta = {
@@ -419,7 +423,10 @@ export interface NewOpportunity {
    * the price_at_detection column note above. */
   priceAtDetection?: number | null;
 }
-export interface OpportunityRow extends NewOpportunity { id: number; ts: number; source: "discovery" | "hunter" }
+export interface OpportunityRow extends NewOpportunity {
+  id: number; ts: number; source: "discovery" | "hunter";
+  stale: boolean; staleReason: string | null;
+}
 
 /** Discovery Bot's and Hunter Bot's findings share one feed - one row per
  * candidate either detector found AND ran the full honeypot/tax/lock/
@@ -464,7 +471,7 @@ export const opportunities = {
              ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
              ai_suggested_amount_pls AS aiSuggestedAmountPls,
              atr_pct AS atrPct, vol_ratio AS volRatio, signal_count AS signalCount,
-             price_at_detection AS priceAtDetection
+             price_at_detection AS priceAtDetection, stale, stale_reason AS staleReason
       FROM opportunities WHERE id=?
     `).get(id) as any;
     if (!r) return undefined;
@@ -473,7 +480,23 @@ export const opportunities = {
       ownerRenounced: r.ownerRenounced === null ? null : Boolean(r.ownerRenounced),
       sellable: Boolean(r.sellable),
       aiRecommend: r.aiRecommend === null ? null : Boolean(r.aiRecommend),
+      stale: Boolean(r.stale),
     } as OpportunityRow;
+  },
+  /** Every notified-but-not-bought opportunity from the last `withinSec`
+   * seconds that isn't already marked stale - see hunter.ts's
+   * refreshStaleness(), which re-checks each of these every tick. */
+  notifiedCandidatesForStaleness(withinSec: number): { id: number; token: string; ts: number; source: "discovery" | "hunter"; priceAtDetection: number | null }[] {
+    const since = Math.floor(Date.now() / 1000) - withinSec;
+    return db.prepare(`
+      SELECT DISTINCT o.id, o.token, o.ts, o.source, o.price_at_detection AS priceAtDetection
+      FROM opportunities o
+      JOIN discovery_actions a ON a.opportunity_id = o.id AND a.action = 'notified'
+      WHERE o.ts >= ? AND o.stale = 0
+    `).all(since) as any;
+  },
+  markStale(id: number, reason: string): void {
+    db.prepare("UPDATE opportunities SET stale=1, stale_reason=? WHERE id=?").run(reason, id);
   },
 };
 

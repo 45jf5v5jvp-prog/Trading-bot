@@ -51,6 +51,51 @@ const MIN_CANDLES = 36;
 // loss, no matter what the owner set.
 const MANDATORY_MIN_STOP_LOSS_PCT = 50;
 
+// How long a notify-mode opportunity stays worth showing before it's marked
+// stale on age alone, and how far price has to have moved since detection
+// for it to be marked stale early - same thresholds PulseChain's
+// discovery.ts uses for the identical check. Defined here rather than in
+// discovery.ts since Discovery Bot's tick() doesn't run on this deployment
+// (see index.ts) - Hunter is the only source of notify-mode opportunities
+// on this chain, so this keeper owns the staleness sweep directly.
+const STALE_TTL_MIN = 120;
+const STALE_PRICE_MOVE_PCT = 15;
+
+/**
+ * Marks a notified (never bought) opportunity stale once it's no longer a
+ * fair description of the market - either because too long has passed, or
+ * because price has since moved enough that the reason it was flagged no
+ * longer holds. Never touches an already-bought opportunity (nothing to
+ * protect there) or a notify a vault has never even seen. Runs every tick
+ * so the site's Buy Now button reflects this within one scan interval, not
+ * only when someone happens to load the page. Ported from PulseChain's
+ * discovery.ts's refreshStaleness() - identical logic, just called from
+ * here instead, since this deployment has no discovery.tick() to host it.
+ */
+async function refreshStaleness(): Promise<void> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const candidates = opportunities.notifiedCandidatesForStaleness(STALE_TTL_MIN * 60 * 2);
+
+  for (const c of candidates) {
+    const ageMin = (nowSec - c.ts) / 60;
+    if (ageMin >= STALE_TTL_MIN) {
+      opportunities.markStale(c.id, `Notified ${Math.round(ageMin)} minutes ago - too much time has passed to trust the original signal.`);
+      continue;
+    }
+
+    if (c.priceAtDetection === null || c.priceAtDetection <= 0) continue; // old row, or a hunter.ts insert predating priceAtDetection - TTL is the only check available
+    const latest = prices.latest(c.token);
+    if (!latest || latest.price <= 0) continue;
+
+    const movePctSinceDetection = ((latest.price - c.priceAtDetection) / c.priceAtDetection) * 100;
+    if (c.source === "hunter" && movePctSinceDetection >= STALE_PRICE_MOVE_PCT) {
+      opportunities.markStale(c.id, `Price is already up ${movePctSinceDetection.toFixed(0)}% since this was flagged as oversold - it's no longer the same dip.`);
+    } else if (c.source !== "hunter" && movePctSinceDetection <= -STALE_PRICE_MOVE_PCT) {
+      opportunities.markStale(c.id, `Price has pulled back ${Math.abs(movePctSinceDetection).toFixed(0)}% since this was flagged - the move it reacted to has since reversed.`);
+    }
+  }
+}
+
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 
 // Hunter IQ: how much of a vault's own lesson history rides along in a
@@ -619,6 +664,11 @@ async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void
 }
 
 export async function tick(): Promise<void> {
+  // Runs unconditionally, same as PulseChain's discovery.tick() does for
+  // this exact check - a notify-mode opportunity should stop looking fresh
+  // on schedule regardless of whether Hunter is still enabled anywhere.
+  await refreshStaleness();
+
   // Independent of whether Hunter Bot is still enabled anywhere - an
   // already-open Auto Full position stays actively managed even if the
   // owner later turns the bot off, same as positions.ts's own tick()

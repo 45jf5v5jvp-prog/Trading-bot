@@ -170,6 +170,18 @@ function deployedPls(vault: string): number {
   return r.s;
 }
 
+/** How many Hunter positions this vault currently has open - the count a
+ * maxOpenPositions setting caps, independent of the PLS-based allocation/
+ * holding-cap checks above (a vault could have room left in its budget but
+ * still be capped on number of simultaneous bets, e.g. someone who wants
+ * five smaller positions rather than fewer bigger ones). 0 disables. */
+function openPositionCount(vault: string): number {
+  const r = db.prepare(
+    `SELECT COUNT(*) n FROM positions WHERE vault=? AND bot='hunter' AND status='open'`,
+  ).get(vault.toLowerCase()) as { n: number };
+  return r.n;
+}
+
 function checkTriggers(
   snap: NonNullable<ReturnType<typeof snapshot>>, strictest: Strictest,
 ): string[] {
@@ -212,6 +224,11 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
   const deployed = deployedPls(v.address);
   if (deployed + amountPls > H.allocatedPls) {
     log("info", "hunter", `${v.address} ${token}: ${amountPls} PLS would exceed its ${H.allocatedPls} PLS allocation (${deployed} already deployed), skipping`);
+    return;
+  }
+
+  if (H.maxOpenPositions > 0 && openPositionCount(v.address) >= H.maxOpenPositions) {
+    log("info", "hunter", `${v.address} ${token}: already at its ${H.maxOpenPositions}-position cap, skipping`);
     return;
   }
 
@@ -752,6 +769,8 @@ async function checkPendingRebuys(): Promise<void> {
 
     const deployed = deployedPls(v.address);
     if (deployed + amountPls > H.allocatedPls) return; // try again next tick - allocation may free up
+
+    if (H.maxOpenPositions > 0 && openPositionCount(v.address) >= H.maxOpenPositions) return; // try again next tick - a slot may free up
 
     const { total: posValue, byToken } = await positionsValuePls(v.address);
     const totalValue = (await vaultWplsPls(v.address)) + posValue;

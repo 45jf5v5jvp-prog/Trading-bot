@@ -176,6 +176,13 @@ export interface HunterConfig {
   // Give up waiting after this long so a rebuy that never comes doesn't sit
   // forever - the setup that justified it has gone stale by then anyway.
   autoRebuyExpireHours: number;
+
+  // Caps how many Hunter positions this vault can hold open at once,
+  // independent of allocatedPls/maxPerTradePls - someone may have plenty of
+  // budget left but still want to limit how many simultaneous bets they're
+  // carrying (five focused positions vs. thirty scattered ones). Checked in
+  // hunter.ts's executeHunterBuy and checkPendingRebuys. 0 disables it.
+  maxOpenPositions: number;
 }
 
 /**
@@ -299,6 +306,7 @@ const DEFAULT_HUNTER: HunterConfig = {
   // and picks a number for their own risk tolerance.
   minTrades24h: 0,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
+  maxOpenPositions: 0,
 };
 
 const cache = new Map<string, VaultRecord>();

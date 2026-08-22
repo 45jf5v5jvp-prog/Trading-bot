@@ -47,6 +47,8 @@ export default function HunterSettings({ hunter, onChange }) {
         <NumberField {...num("maxPerTradePls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
         <NumberField {...num("maxPerDay")} min="0" style={{ width: 80 }} />
+        <label>Max open positions</label>
+        <NumberField {...num("maxOpenPositions")} min="0" style={{ width: 80 }} />
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         Hunter Bot never has more than "Allocated" deployed at once across its own open positions -
@@ -54,7 +56,8 @@ export default function HunterSettings({ hunter, onChange }) {
         the vault. Freed back up as positions close, win or lose, so it can keep reusing that amount.
         "Max per buy" is a ceiling, not a fixed size - with AI approval on, the AI decides how much
         of that ceiling to actually spend on each buy (less when it's less confident), full authority
-        up to the number you set here, never more.
+        up to the number you set here, never more. "Max open positions" caps how many separate bets
+        it can be carrying at once regardless of leftover budget - 0 means no cap.
       </p>
 
       <div className="sub-label">Technical setup (at least one enabled trigger must fire)</div>

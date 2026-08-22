@@ -66,6 +66,7 @@ const DEFAULT_HUNTER = {
   requireVolumeConfirmation: false, minVolumeRatio: 1.5,
   minTrades24h: 0,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
+  maxOpenPositions: 0,
 };
 
 function isFiniteNumber(v) {
@@ -216,7 +217,7 @@ function normalizeHunter(h) {
     "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
     "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
     "atrStopMultiplier", "minVolumeRatio", "minTrades24h",
-    "autoRebuyDipPct", "autoRebuyExpireHours",
+    "autoRebuyDipPct", "autoRebuyExpireHours", "maxOpenPositions",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
       throw new Error(`hunter.${field} must be a non-negative number`);
@@ -268,6 +269,7 @@ function normalizeHunter(h) {
     autoRebuyOnExit: Boolean(merged.autoRebuyOnExit),
     autoRebuyDipPct: merged.autoRebuyDipPct,
     autoRebuyExpireHours: merged.autoRebuyExpireHours,
+    maxOpenPositions: merged.maxOpenPositions,
   };
 }
 

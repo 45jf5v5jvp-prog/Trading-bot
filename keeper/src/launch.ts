@@ -144,7 +144,7 @@ async function evaluateToken(token: string, pair: string, txHash: string): Promi
       log("info", "launch", `${v.address} ${token}: sell tax ${(s.sellTaxBps / 100).toFixed(1)}% over this vault's ${(L.maxSellTaxBps / 100).toFixed(1)}% limit, skipping`);
       return;
     }
-    if (L.requireLpLock && s.lpLockedPct < 95) {
+    if (L.requireLpLock && s.lpLockedPct < 80) {
       log("info", "launch", `${v.address} ${token}: only ${s.lpLockedPct.toFixed(1)}% of LP is locked or burned and this vault requires LP lock, skipping`);
       return;
     }

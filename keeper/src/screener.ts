@@ -159,7 +159,13 @@ export async function screen(
     return { ...out, reason: `sell tax ${(sim.sellTaxBps / 100).toFixed(1)}% over limit` };
 
   out.lpLockedPct = await lpLockedPct(pair);
-  if (limits.requireLpLock && out.lpLockedPct < 95)
+  // 80%, not 100% - the owner's own call: below this, a deployer can still
+  // walk away with a meaningfully large, directly-extractable share of the
+  // pool's paired-asset value on top of gutting its depth, so this isn't
+  // loose, but 95%+ was screening out legitimate tokens that keep a small
+  // working slice unlocked. Same threshold everywhere "require LP lock" is
+  // checked - hunter.ts, discovery.ts (x2), launch.ts - keep them in sync.
+  if (limits.requireLpLock && out.lpLockedPct < 80)
     return { ...out, reason: `only ${out.lpLockedPct.toFixed(1)}% of LP is locked or burned` };
 
   out.deployerPct = await deployerPct(token, deployer);

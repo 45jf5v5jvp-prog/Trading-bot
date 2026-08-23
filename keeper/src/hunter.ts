@@ -308,7 +308,7 @@ async function dispatch(
     const H = v.hunter;
     if (s.buyTaxBps > H.maxBuyTaxBps) return;
     if (s.sellTaxBps > H.maxSellTaxBps) return;
-    if (H.requireLpLock && s.lpLockedPct < 95) return;
+    if (H.requireLpLock && s.lpLockedPct < 80) return;
     if (H.requireOwnerRenounced && !s.ownerRenounced) return;
     if (discoveryActions.has(v.address, id)) return;
     if (actionsToday(v.address) >= H.maxPerDay) return;

@@ -86,7 +86,7 @@ export async function screenOpportunity(
     return { ...out, reason: `sell tax ${(sim.sellTaxBps / 100).toFixed(1)}% over limit` };
 
   out.lpLockedPct = await lpLockedPct(pair);
-  if (limits.requireLpLock && out.lpLockedPct < 95)
+  if (limits.requireLpLock && out.lpLockedPct < 80)
     return { ...out, reason: `only ${out.lpLockedPct.toFixed(1)}% of LP is locked or burned` };
 
   out.ownerRenounced = await checkOwnerRenounced(token);
@@ -175,7 +175,7 @@ async function dispatch(
     if (opp.liqPls < D.minLiquidityPls) return;
     if (s.buyTaxBps > D.maxBuyTaxBps) return;
     if (s.sellTaxBps > D.maxSellTaxBps) return;
-    if (D.requireLpLock && s.lpLockedPct < 95) return;
+    if (D.requireLpLock && s.lpLockedPct < 80) return;
     if (D.requireOwnerRenounced && !s.ownerRenounced) return;
     if (discoveryActions.has(v.address, id)) return;
     if (actionsToday(v.address) >= D.maxPerDay) return;

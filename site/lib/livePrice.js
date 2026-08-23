@@ -278,11 +278,21 @@ async function getTokenMeta(token) {
   const cached = tokenMetaCache.get(key);
   if (cached) return cached;
   const erc = new Contract(token, ERC20_ABI, getProvider());
-  const meta = await Promise.all([
-    withTimeout(erc.decimals(), 8000).catch(() => 18),
-    withTimeout(erc.symbol(), 8000).catch(() => "???"),
-  ]).then(([decimals, symbol]) => ({ decimals, symbol }));
-  tokenMetaCache.set(key, meta);
+  let decimals = 18, decimalsOk = false;
+  let symbol = "???", symbolOk = false;
+  await Promise.all([
+    withTimeout(erc.decimals(), 8000).then((d) => { decimals = d; decimalsOk = true; }).catch(() => {}),
+    withTimeout(erc.symbol(), 8000).then((s) => { symbol = s; symbolOk = true; }).catch(() => {}),
+  ]);
+  const meta = { decimals, symbol };
+  // Only cache a real answer. Caching the "???"/18 fallback here is exactly
+  // the same shape as the stuck-position false-rug bug: a transient RPC
+  // hiccup (the same congestion that caused that one) gets frozen in as
+  // permanent truth, and since this cache has no TTL, one bad read during a
+  // busy moment means "???" forever for that token, for this process's
+  // whole lifetime, even once the RPC is healthy again seconds later. Not
+  // caching a partial/failed read means the next lookup just tries again.
+  if (decimalsOk && symbolOk) tokenMetaCache.set(key, meta);
   return meta;
 }
 

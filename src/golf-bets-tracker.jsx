@@ -950,12 +950,25 @@ function LineupBuilder({ names, count, lineup, setLineup, showTeams }) {
   );
 }
 
-/* Optional courses baked into the app that show up as a "your courses" quick
-   pick without a search. Empty now that live search covers every course,
-   including TPC River's Bend — everyone just searches for it. To pin a course
-   back to the top for everyone, add an object here:
+/* Courses baked into the app from a real scorecard, so they're guaranteed
+   correct regardless of what the online database has. They surface under "your
+   courses" when the search box matches (not pinned by default). Add more with:
      { id, name, city, state, par:[18], hcp:[18], tees:{ TeeName:[18 yards] } } */
-const BUILT_IN_COURSES = [];
+const BUILT_IN_COURSES = [
+  {
+    id: 'tpc-rivers-bend',
+    name: "TPC River's Bend",
+    city: 'Maineville', state: 'OH',
+    par: [4, 4, 4, 4, 3, 5, 3, 5, 4, 4, 5, 3, 4, 4, 4, 3, 4, 5],
+    hcp: [5, 13, 1, 11, 15, 9, 17, 7, 3, 12, 6, 16, 10, 2, 4, 18, 8, 14],
+    tees: {
+      Black: [442, 405, 436, 344, 189, 568, 158, 553, 431, 388, 537, 191, 428, 461, 470, 213, 422, 544],
+      Blue:  [415, 375, 412, 315, 165, 543, 138, 524, 408, 369, 479, 168, 400, 434, 424, 207, 410, 529],
+      White: [384, 342, 335, 287, 150, 517, 120, 496, 366, 349, 457, 144, 363, 410, 378, 165, 369, 477],
+      Green: [332, 279, 279, 204, 117, 376, 90, 452, 313, 302, 423, 110, 328, 271, 320, 134, 314, 375],
+    },
+  },
+];
 
 function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYards, courseName, setCourseName }) {
   const [q, setQ] = useState('');
@@ -975,9 +988,14 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     setCourseName(`${bc.name} · ${tee}`);
     setList(null); setErr(null);
   };
+  /* Only surface a built-in once the search box matches it (so nothing is
+     pinned by default), and ignore case/punctuation so "rivers bend" finds
+     "River's Bend". */
   const matchBuiltIn = (bc) => {
-    const s = q.trim().toLowerCase();
-    return !s || bc.name.toLowerCase().includes(s) || `${bc.city} ${bc.state}`.toLowerCase().includes(s);
+    const norm = (x) => (x || '').toLowerCase().replace(/[^a-z0-9 ]/g, '');
+    const s = norm(q.trim());
+    if (!s) return false;
+    return norm(bc.name).includes(s) || norm(`${bc.city} ${bc.state}`).includes(s);
   };
 
   const run = async (fn) => {

@@ -1,6 +1,6 @@
 import { Contract, Interface, formatUnits, formatEther, id } from "ethers";
 import { CFG } from "./config.js";
-import { provider, factory, type Dyn } from "./chain.js";
+import { provider, logsProvider, factory, type Dyn } from "./chain.js";
 import { ERC20_ABI, PAIR_ABI } from "./abis.js";
 import { prices, watched, meta, volumeAccum } from "./db.js";
 import { log } from "./log.js";
@@ -99,7 +99,11 @@ export async function scanSwapVolume(): Promise<void> {
   const pairIndex = new Map<string, { token: string; plsFirst: boolean }>();
   for (const w of list) pairIndex.set(w.pair.toLowerCase(), { token: w.token, plsFirst: await resolvePlsFirst(w) });
 
-  const head = await provider.getBlockNumber();
+  // Uses logsProvider throughout, not provider - see chain.ts's comment.
+  // Mixing providers for the block-number read and the getLogs call could
+  // ask the getLogs endpoint for a block range past what it's actually
+  // synced to, if the two providers are ever a few blocks apart.
+  const head = await logsProvider.getBlockNumber();
   const last = Number(meta.get("last_swap_block", String(head - 200)));
   if (head <= last) return;
 
@@ -109,7 +113,7 @@ export async function scanSwapVolume(): Promise<void> {
   while (chunkStart <= head) {
     const chunkEnd = Math.min(chunkStart + SWAP_LOG_CHUNK_BLOCKS - 1, head);
     try {
-      const logs = await provider.getLogs({ fromBlock: chunkStart, toBlock: chunkEnd, topics: [SWAP_TOPIC0] });
+      const logs = await logsProvider.getLogs({ fromBlock: chunkStart, toBlock: chunkEnd, topics: [SWAP_TOPIC0] });
       for (const l of logs) {
         const hit = pairIndex.get(l.address.toLowerCase());
         if (!hit) continue; // a swap on some other pair entirely - not ours

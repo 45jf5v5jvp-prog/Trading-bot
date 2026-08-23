@@ -20,7 +20,12 @@ export const CFG = {
   // minutes over their configured interval, see the 2026-08-23 incident),
   // and PublicNode is separate infrastructure that doesn't share that load.
   rpcUrl: opt("RPC_URL", "https://pulsechain-rpc.publicnode.com"),
-  rpcFallback: opt("RPC_FALLBACK", ""),
+  // Used only for prices.ts's chain-wide Swap log scan (see chain.ts's
+  // logsProvider) - PublicNode rejects that one broad, address-less
+  // eth_getLogs call, so it needs an endpoint confirmed not to restrict it.
+  // Defaults to the official node specifically because that's the one
+  // that's actually been confirmed to handle it.
+  rpcFallback: opt("RPC_FALLBACK", "https://rpc.pulsechain.com"),
   chainId: num("CHAIN_ID", "369"),
 
   keeperKey: opt("KEEPER_PRIVATE_KEY", ""),

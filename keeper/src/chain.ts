@@ -9,6 +9,23 @@ export type Dyn = Contract & Record<string, any>;
 export const provider = new JsonRpcProvider(CFG.rpcUrl, { chainId: CFG.chainId, name: "pulsechain" });
 export const keeper: Wallet | null = CFG.keeperKey ? new Wallet(CFG.keeperKey, provider) : null;
 
+/**
+ * A second provider, used only for the one call in this whole codebase that
+ * needs it: prices.ts's scanSwapVolume, a chain-wide eth_getLogs scan with
+ * no address filter (by design - one request covers every watched pair
+ * regardless of how many there are). Free-tier RPCs that restrict broad
+ * getLogs calls (PublicNode confirmed this 2026-08-23: "Please specify an
+ * address in your request") reject that specific call outright, while every
+ * other call the keeper makes is an ordinary per-contract eth_call PublicNode
+ * handles fine. rpcFallback defaults to the official node specifically
+ * because it's the one confirmed NOT to have this restriction - if rpcUrl
+ * itself is already the official node (or another unrestricted one),
+ * rpcFallback is simply unused; nothing here assumes rpcUrl is PublicNode.
+ */
+export const logsProvider = CFG.rpcFallback
+  ? new JsonRpcProvider(CFG.rpcFallback, { chainId: CFG.chainId, name: "pulsechain" })
+  : provider;
+
 export const router = new Contract(CFG.router, ROUTER_ABI, keeper ?? provider) as Dyn;
 export const routerRead = new Contract(CFG.router, ROUTER_ABI, provider) as Dyn;
 export const factory = new Contract(CFG.factory, FACTORY_ABI, provider) as Dyn;

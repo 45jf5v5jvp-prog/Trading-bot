@@ -54,6 +54,39 @@ function withTimeout(promise, ms) {
   });
 }
 
+/**
+ * Runs fn over items with at most `limit` in flight at once, instead of the
+ * unbounded Promise.all this replaced. A vault with many open positions (or
+ * many distinct held tokens) used to fire one full price lookup per item
+ * simultaneously - each one several RPC calls - which is fine against a
+ * dedicated node but reliably starves the shared public rpc.pulsechain.com
+ * endpoint: a single eth_blockNumber call answers instantly, but a burst of
+ * a dozen-plus concurrent getAmountsOut calls (on top of the keeper hitting
+ * the same endpoint from its own scan loop at the same time) pushed every
+ * one of them past the 8s timeout and made positions read as "no liquidity"
+ * that had nothing wrong with them. Same shape as the keeper's own
+ * concurrency.ts:mapLimit, just duplicated here since the site is a
+ * separate JS project with no shared package between them.
+ */
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+// Deliberately small - this isn't trying to be fast, it's trying not to be
+// the thing that tips a shared, rate-limited public RPC over. Tune down
+// further (or up, on a dedicated node) if the timeout pattern persists.
+const RPC_CONCURRENCY = 4;
+
 function isBaseCurrency(addr) {
   const a = addr.toLowerCase();
   return a === "0x0000000000000000000000000000000000000000" || a === WRAPPED.toLowerCase();
@@ -264,7 +297,7 @@ async function getTokenMeta(token) {
  * whole dashboard.
  */
 async function priceOpenPositions(openPositions, vaultAddress) {
-  return Promise.all(openPositions.map(async (p) => {
+  return mapLimit(openPositions, RPC_CONCURRENCY, async (p) => {
     let valueNowPls = null;
     let pnlPct = null;
     let tokensHeld = null;
@@ -279,7 +312,7 @@ async function priceOpenPositions(openPositions, vaultAddress) {
       symbol = meta.symbol;
     } catch { /* leave tokensHeld/symbol null */ }
     return { ...p, valueNowPls, pnlPct, tokensHeld, symbol };
-  }));
+  });
 }
 
 /**
@@ -310,7 +343,7 @@ async function getPortfolioToken(vaultAddress, token) {
 
 async function getPortfolio(vaultAddress, tokens) {
   const distinct = [...new Set(tokens.map((t) => t.toLowerCase()))];
-  return Promise.all(distinct.map((t) => getPortfolioToken(vaultAddress, t)));
+  return mapLimit(distinct, RPC_CONCURRENCY, (t) => getPortfolioToken(vaultAddress, t));
 }
 
 /**

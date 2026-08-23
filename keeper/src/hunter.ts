@@ -322,7 +322,7 @@ async function personalizedOrSharedAi(v: VaultRecord, sharedAi: AiVerdict | null
 
 async function dispatch(
   id: number, token: string, ai: AiVerdict | null, s: DiscoveryScreen, atrPct: number | null, candidates: VaultRecord[],
-  profile: TokenProfile | null,
+  profile: TokenProfile | null, liqPls: number, trades24hEquivalent: number,
 ): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const H = v.hunter;
@@ -330,6 +330,16 @@ async function dispatch(
     if (s.sellTaxBps > H.maxSellTaxBps) return;
     if (H.requireLpLock && s.lpLockedPct < 80) return;
     if (H.requireOwnerRenounced && !s.ownerRenounced) return;
+    // The shared detection stage above screens using the LOOSEST liquidity/
+    // trade-count floor across every subscribed vault (see strictest's own
+    // comment) - real per-vault enforcement has to happen here, same as
+    // requireLpLock/requireOwnerRenounced just above. Missing this meant a
+    // vault with a strict minLiquidityPls could still get bought into for a
+    // token that only cleared some OTHER, looser vault's floor - confirmed
+    // live 2026-08-23: a 20,000,000 PLS floor still bought a 7,000,000 PLS
+    // liquidity token.
+    if (liqPls < H.minLiquidityPls) return;
+    if (trades24hEquivalent < H.minTrades24h) return;
     if (discoveryActions.has(v.address, id)) return;
     if (actionsToday(v.address) >= H.maxPerDay) return;
 
@@ -396,14 +406,15 @@ async function evaluateWatchedToken(
   // than requiring a complete window - MIN_CANDLES above already guarantees
   // at least 9 hours of real data by this point, enough for a reasonable
   // estimate without making every freshly-watched token wait a full day.
-  if (strictest.minTrades24h > 0) {
-    const dayAgo = Math.floor(Date.now() / 1000) - 24 * 3600;
-    const recent = candles.filter((c) => c.ts >= dayAgo);
-    const tradesRecent = recent.reduce((sum, c) => sum + c.trades, 0);
-    const hoursAvailable = recent.length ? Math.max(1, (Math.floor(Date.now() / 1000) - recent[0]!.ts) / 3600) : 0;
-    const trades24hEquivalent = hoursAvailable > 0 ? (tradesRecent / hoursAvailable) * 24 : 0;
-    if (trades24hEquivalent < strictest.minTrades24h) return;
-  }
+  // Computed regardless of whether the shared strictest.minTrades24h is 0 -
+  // dispatch() below needs the real number to re-check each vault's own
+  // floor individually, not just the shared loosest one.
+  const dayAgo = Math.floor(Date.now() / 1000) - 24 * 3600;
+  const recentCandles = candles.filter((c) => c.ts >= dayAgo);
+  const tradesRecent = recentCandles.reduce((sum, c) => sum + c.trades, 0);
+  const hoursAvailable = recentCandles.length ? Math.max(1, (Math.floor(Date.now() / 1000) - recentCandles[0]!.ts) / 3600) : 0;
+  const trades24hEquivalent = hoursAvailable > 0 ? (tradesRecent / hoursAvailable) * 24 : 0;
+  if (strictest.minTrades24h > 0 && trades24hEquivalent < strictest.minTrades24h) return;
 
   // Hard gate, not configurable - the exact trap this bot exists to avoid.
   // Recorded and shown rather than silently dropped, same as a failed
@@ -456,7 +467,7 @@ async function evaluateWatchedToken(
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
   if (s.verdict !== "pass") return;
-  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile);
+  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile, last.liq, trades24hEquivalent);
 }
 
 interface FullModeRow {

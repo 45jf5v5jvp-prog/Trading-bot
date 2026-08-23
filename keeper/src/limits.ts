@@ -3,7 +3,7 @@ import { CFG } from "./config.js";
 import { provider, routerRead, factory, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
 import { registry, type LimitOrder, type VaultRecord } from "./registry.js";
-import { executeSwap } from "./executor.js";
+import { executeSwap, netOfExitCosts } from "./executor.js";
 import { openPosition } from "./positions.js";
 import { limitFires, db } from "./db.js";
 import { log } from "./log.js";
@@ -73,25 +73,74 @@ async function currentPrice(token: string, decimals: number): Promise<number | n
   }
 }
 
+/**
+ * What a real sell of `amountRaw` tokens would actually leave the vault
+ * holding, in PLS per whole token - net of transfer tax AND the platform
+ * fee/gas reimbursement a real BotVault.executeSwap exit pays on the way
+ * out (see executor.ts's netOfExitCosts). The old currentPrice()-based sell
+ * check compared a raw, cost-free per-unit quote against the target - the
+ * same "roughly flat" read was already a small guaranteed loss the moment
+ * the trade actually happened, same bug as positions.ts's markToMarket
+ * (CLAUDE.md bug #6), just never fixed here because gas reimbursement is
+ * close to a fixed PLS cost per trade rather than a pure percentage, so
+ * what it comes out to per token depends on how many tokens are actually
+ * being sold - there was no real total to net it out of until the caller
+ * knows the real trade size. `amountRaw` must be the exact quantity this
+ * order is actually about to sell (including a resolved sellAll balance),
+ * not a placeholder 1-token probe.
+ */
+async function netSellPricePerUnit(token: string, decimals: number, amountRaw: bigint, vaultAddr: string): Promise<number | null> {
+  try {
+    const pair: string = await factory.getPair(token, CFG.wpls);
+    if (/^0x0{40}$/i.test(pair)) return null;
+    const amountWhole = Number(formatUnits(amountRaw, decimals));
+    if (amountWhole <= 0) return null;
+    const amounts: bigint[] = await routerRead.getAmountsOut(amountRaw, [token, CFG.wpls]);
+    const quoted = amounts[amounts.length - 1] ?? 0n;
+    const taxRow = db.prepare("SELECT sell_tax_bps FROM screened WHERE token = ?")
+      .get(token.toLowerCase()) as { sell_tax_bps: number } | undefined;
+    const taxBps = taxRow ? Math.min(taxRow.sell_tax_bps, 5000) : 0;
+    const afterTax = (quoted * BigInt(10_000 - taxBps)) / 10_000n;
+    const rawValuePls = Number(formatEther(afterTax));
+    const netValuePls = await netOfExitCosts(rawValuePls, vaultAddr);
+    return netValuePls / amountWhole;
+  } catch {
+    return null;
+  }
+}
+
 async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
   const token = o.token.toLowerCase();
   const decimals = await tokenDecimals(token);
-  const price = await currentPrice(token, decimals);
-  if (price === null) return; // not tradeable right now, try again next tick
-
-  const shouldFire = o.side === "buy" ? price <= o.targetPrice : price >= o.targetPrice;
-  if (!shouldFire) return;
 
   let amountIn: bigint;
   let path: string[];
+  let firedPrice: number;
+
   if (o.side === "buy") {
+    // Spend-side, not proceeds-shaped - the fee/gas the vault pays comes out
+    // of the fixed o.amount PLS being spent, it doesn't change whether the
+    // market price has hit the target, so no net-of-exit-costs treatment
+    // needed here (same carve-out reasoning as the sell side used to have).
+    const price = await currentPrice(token, decimals);
+    if (price === null) return; // not tradeable right now, try again next tick
+    if (price > o.targetPrice) return;
     if (o.amount <= 0) {
       log("warn", "limits", `${v.address} buy order ${o.id} on ${token} hit its target price (${price} <= ${o.targetPrice}) but has 0 PLS to spend - fix the amount on the dashboard`);
       return;
     }
+    firedPrice = price;
     amountIn = parseEther(String(o.amount));
     path = [CFG.wpls, token];
   } else {
+    // The real sell amount has to be known BEFORE the price check, not
+    // after: gas reimbursement is close to a fixed PLS cost per trade, not
+    // a pure percentage, so what it works out to per token depends on how
+    // many tokens are actually being sold. A per-unit quote taken before
+    // knowing the trade size (the old currentPrice()-based check) had no
+    // real total to net that cost out of - see CLAUDE.md bug #6's carve-out
+    // note. Determining raw first (including the sellAll balance read) lets
+    // netSellPricePerUnit below quote and net costs against the REAL trade.
     let raw: bigint;
     if (o.sellAll) {
       const erc = new Contract(token, ERC20_ABI, provider) as Dyn;
@@ -99,11 +148,15 @@ async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
       if (raw === 0n) return; // nothing to sell
     } else {
       if (o.amount <= 0) {
-        log("warn", "limits", `${v.address} sell order ${o.id} on ${token} hit its target price (${price} >= ${o.targetPrice}) but has 0 tokens to sell - fix the amount on the dashboard`);
+        log("warn", "limits", `${v.address} sell order ${o.id} on ${token} hit its target price but has 0 tokens to sell - fix the amount on the dashboard`);
         return;
       }
       raw = parseUnits(String(o.amount), decimals);
     }
+    const netPrice = await netSellPricePerUnit(token, decimals, raw, v.address);
+    if (netPrice === null) return; // not tradeable right now, try again next tick
+    if (netPrice < o.targetPrice) return;
+    firedPrice = netPrice;
     amountIn = raw;
     path = [token, CFG.wpls];
   }
@@ -116,7 +169,8 @@ async function fireOrder(v: VaultRecord, o: LimitOrder): Promise<void> {
   if (res.ok) {
     limitFires.record(v.address, o.id, res.txHash);
     const amountLabel = o.side === "buy" ? `${o.amount} PLS` : `${formatUnits(amountIn, decimals)} tokens`;
-    log("info", "limits", `${v.address} filled ${o.side} order on ${token}: ${amountLabel} at target ${o.targetPrice} PLS (actual ${price})`);
+    const priceNote = o.side === "sell" ? `net of fee/gas/tax` : `actual`;
+    log("info", "limits", `${v.address} filled ${o.side} order on ${token}: ${amountLabel} at target ${o.targetPrice} PLS (${priceNote} ${firedPrice})`);
 
     // A buy fill was previously left completely untracked: the tokens landed
     // in the vault but never became a real position, so there was no P&L, no

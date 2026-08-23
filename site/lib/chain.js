@@ -29,8 +29,10 @@ const PRESETS = {
     key: "pulsechain",
     chainName: "PulseChain",
     chainId: 369,
-    // Public RPC, safe to expose in the browser bundle.
-    rpcUrl: "https://rpc.pulsechain.com",
+    // PublicNode's free endpoint, not the official rpc.pulsechain.com - see
+    // keeper/src/config.ts's rpcUrl comment for why. Safe to expose in the
+    // browser bundle either way (no API key involved).
+    rpcUrl: "https://pulsechain-rpc.publicnode.com",
     baseSymbol: "WPLS",
     nativeSymbol: "PLS",
     dexName: "PulseX",

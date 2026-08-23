@@ -15,7 +15,11 @@ const addr = (k: string, d?: string): string => {
 };
 
 export const CFG = {
-  rpcUrl: opt("RPC_URL", "https://rpc.pulsechain.com"),
+  // PublicNode's free endpoint, not the official rpc.pulsechain.com - the
+  // official one has been severely congested (keeper loop passes running
+  // minutes over their configured interval, see the 2026-08-23 incident),
+  // and PublicNode is separate infrastructure that doesn't share that load.
+  rpcUrl: opt("RPC_URL", "https://pulsechain-rpc.publicnode.com"),
   rpcFallback: opt("RPC_FALLBACK", ""),
   chainId: num("CHAIN_ID", "369"),
 

@@ -96,6 +96,11 @@ async function main(): Promise<void> {
   loop("deposits", CFG.positionCheckSec, deposits.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
+  // Once an hour, not every tick - a truly dead token costs nothing to leave
+  // stuck a while longer, and this exists to catch the case where "stuck"
+  // was actually a transient RPC read, not the token itself. See
+  // positions.ts's retryStuckPositions.
+  loop("stuckRetry", 3600, positions.retryStuckPositions);
 
   loop("health", 300, async () => {
     const open = (db.prepare("SELECT COUNT(*) n FROM positions WHERE status='open'").get() as { n: number }).n;

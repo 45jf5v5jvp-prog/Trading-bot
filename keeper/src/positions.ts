@@ -89,6 +89,21 @@ const MAX_STRUCTURAL_EXIT_FAILURES = 5;
 const UNPRICEABLE_STREAK_LIMIT = 90;
 const unpriceableStreak = new Map<number, number>();
 
+/**
+ * Same peer-checked reasoning as UNPRICEABLE_STREAK_LIMIT, for a "vanished"
+ * balance or a "would revert" sell simulation - both used to retire a
+ * position on a single reading, which turned out to be reachable by a bad
+ * response from an overloaded shared RPC, not just a genuine rug (see the
+ * mass false "no liquidity" incident from the same day this was found). A
+ * real rug reads the same way every time a check actually runs while other
+ * positions are pricing fine, so a much smaller threshold than the 90-tick
+ * generic unpriceable one is enough to rule out a fluke without slowing
+ * down a genuine retirement by much.
+ */
+const VANISHED_OR_REVERT_STREAK_LIMIT = 3;
+const vanishedStreak = new Map<number, number>();
+const revertStreak = new Map<number, number>();
+
 function retirePosition(id: number, token: string, reason: string): void {
   db.prepare(`UPDATE positions SET status='stuck', close_reason=? WHERE id=?`).run(reason, id);
   log("error", "positions", `${token}: ${reason}`);
@@ -219,17 +234,19 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
  */
 async function checkAndClose(
   r: Row, now: number, forceReason: string | null,
-): Promise<"priced" | "unpriceable" | "retired"> {
+): Promise<"priced" | "unpriceable" | "vanished" | "revert" | "retired"> {
   const m = await markToMarket(r);
   if (!m.ok) {
     if (m.reason === "vanished") {
-      log("error", "positions",
-        `${r.token} in ${r.vault}: real on-chain balance is 0 but the position is still recorded ` +
-        `open - the tokens left the vault without this bot ever selling them (most likely a ` +
-        `malicious token). Marking stuck so this doesn't sit silently invisible.`);
-      db.prepare(`UPDATE positions SET status='stuck', close_reason=? WHERE id=?`)
-        .run("balance vanished: real on-chain balance is 0, not sold by this bot", r.id);
-      return "retired";
+      // Used to retire on the spot, on a single read. A real rug reads this
+      // way every time; a stale/malformed response from an overloaded
+      // shared RPC (confirmed to happen - see the mass false "no liquidity"
+      // incident this same day) can ALSO read as a clean, successful 0.
+      // Now goes through the same peer-checked streak as "unpriceable"
+      // below instead of trusting one read - see tick()'s vanishedStreak.
+      log("warn", "positions",
+        `${r.token} in ${r.vault}: real on-chain balance reads 0 this tick - confirming before treating as vanished`);
+      return "vanished";
     }
     log("warn", "positions", `${r.token} in ${r.vault}: could not get a live quote this tick, will retry`);
     return "unpriceable";
@@ -271,9 +288,13 @@ async function checkAndClose(
   const why = res.reason || "";
   log("error", "positions", `Exit failed for ${r.token}: ${why}`);
   if (why.includes("would revert")) {
-    retirePosition(r.id, r.token,
-      `cannot sell: ${why}. Tokens remain in the vault - the dashboard's emergency withdraw can still pull them.`);
-    return "retired";
+    // Same reasoning as "vanished" above - used to retire on one failed
+    // simulation. A genuine "cannot sell" reverts the same way every time;
+    // a stale RPC read mid-simulation can produce the exact same message
+    // once without the token actually being unsellable. Confirmed through
+    // tick()'s revertStreak instead of trusted on the spot.
+    log("warn", "positions", `${r.token} in ${r.vault}: sell simulation reverted this tick - confirming before giving up`);
+    return "revert";
   }
   // Structural failures: retrying cannot help unless the position's
   // economics change (see MAX_STRUCTURAL_EXIT_FAILURES). Count persistently;
@@ -315,7 +336,7 @@ export async function tick(): Promise<void> {
       .map((r) => [r.position_id, `AI exit: ${r.reason}`]),
   );
 
-  const outcomes: { id: number; token: string; outcome: "priced" | "unpriceable" | "retired" }[] = [];
+  const outcomes: { id: number; token: string; outcome: "priced" | "unpriceable" | "vanished" | "revert" | "retired" }[] = [];
   await mapLimit([...byVault.values()], CFG.keeperConcurrency, async (vaultRows) => {
     const closeIds = await fetchCloseRequests(vaultRows[0]!.vault);
     for (const r of vaultRows) {
@@ -325,27 +346,81 @@ export async function tick(): Promise<void> {
     }
   });
 
-  // Peer-checked unpriceable-streak accounting (see UNPRICEABLE_STREAK_LIMIT).
-  // Only ticks where at least one position priced fine count - that's the
-  // proof the RPC is healthy and a persistent failure is the token's own
-  // contract misbehaving, not the network.
+  // Peer-checked streak accounting - shared by unpriceable/vanished/revert.
+  // Only ticks where at least one OTHER position priced fine count toward
+  // any of these - that's the proof the RPC itself is healthy right now, so
+  // a persistent failure is this token's own contract misbehaving, not the
+  // network having a bad moment. An RPC outage therefore never retires
+  // anything: no position prices during a real outage, so nothing counts.
   const anyPriced = outcomes.some((o) => o.outcome === "priced");
+  function accountStreak(
+    kind: "unpriceable" | "vanished" | "revert", streaks: Map<number, number>, limit: number,
+    reasonFor: (n: number) => string,
+  ): void {
+    for (const o of outcomes) {
+      if (o.outcome !== kind) continue;
+      if (!anyPriced) continue; // possible RPC-wide problem - don't count this tick
+      const n = (streaks.get(o.id) ?? 0) + 1;
+      if (n >= limit) {
+        retirePosition(o.id, o.token, reasonFor(n));
+        streaks.delete(o.id);
+      } else {
+        streaks.set(o.id, n);
+      }
+    }
+  }
   for (const o of outcomes) {
     if (o.outcome === "priced" || o.outcome === "retired") {
       unpriceableStreak.delete(o.id);
-      continue;
-    }
-    if (!anyPriced) continue; // possible RPC-wide problem - don't count this tick
-    const n = (unpriceableStreak.get(o.id) ?? 0) + 1;
-    if (n >= UNPRICEABLE_STREAK_LIMIT) {
-      retirePosition(o.id, o.token,
-        `unpriceable for ${n} consecutive checks while other positions priced fine - the token's ` +
-        `contract likely reverts balance or quote calls (rug behavior). Tokens remain in the vault.`);
-      unpriceableStreak.delete(o.id);
-    } else {
-      unpriceableStreak.set(o.id, n);
+      vanishedStreak.delete(o.id);
+      revertStreak.delete(o.id);
     }
   }
+  accountStreak("unpriceable", unpriceableStreak, UNPRICEABLE_STREAK_LIMIT, (n) =>
+    `unpriceable for ${n} consecutive checks while other positions priced fine - the token's ` +
+    `contract likely reverts balance or quote calls (rug behavior). Tokens remain in the vault.`);
+  accountStreak("vanished", vanishedStreak, VANISHED_OR_REVERT_STREAK_LIMIT, (n) =>
+    `real on-chain balance read 0 for ${n} consecutive checks while other positions priced fine - ` +
+    `the tokens left the vault without this bot ever selling them (most likely a malicious token). ` +
+    `Tokens remain in the vault - the dashboard's emergency withdraw can still pull them.`);
+  accountStreak("revert", revertStreak, VANISHED_OR_REVERT_STREAK_LIMIT, (n) =>
+    `cannot sell for ${n} consecutive checks while other positions priced fine - the sell simulation ` +
+    `keeps reverting. Tokens remain in the vault - the dashboard's emergency withdraw can still pull them.`);
+}
+
+/**
+ * Periodic second chance for every position already marked 'stuck' - a real
+ * rug stays unsellable forever, so retrying costs nothing but an RPC call;
+ * a position that was actually retired on a bad RPC read (the exact bug
+ * VANISHED_OR_REVERT_STREAK_LIMIT above exists to stop happening going
+ * forward) gets a real path back instead of sitting wrong forever. Runs on
+ * its own slow cadence (see index.ts), separate from the main position
+ * check loop - a truly dead token doesn't need checking every tick, and
+ * this is a lower priority than exiting live open positions.
+ */
+export async function retryStuckPositions(): Promise<void> {
+  const rows = db.prepare(`SELECT * FROM positions WHERE status='stuck'`).all() as Row[];
+  if (rows.length === 0) return;
+  await mapLimit(rows, CFG.keeperConcurrency, async (r) => {
+    const m = await markToMarket(r);
+    if (!m.ok) return; // still can't even price it - leave stuck, try again next sweep
+
+    log("info", "positions", `${r.token} in ${r.vault}: stuck position prices fine again, attempting to sell`);
+    const res = await executeSwap({
+      vault: r.vault, bot: r.bot, path: [r.token, CFG.wpls],
+      amountIn: m.held, tokenLabel: r.token,
+      slippageBps: Math.max(CFG.maxSlippageBps, 500),
+    });
+    if (!res.ok) {
+      log("warn", "positions", `${r.token} in ${r.vault}: stuck retry priced fine but the sell itself still failed: ${res.reason}`);
+      return; // leave it stuck - don't touch fail_count, that machinery is for open positions
+    }
+    db.prepare(`UPDATE positions SET status='closed',closed_at=?,proceeds_pls=?,close_reason=? WHERE id=?`)
+      .run(Math.floor(Date.now() / 1000), Number(formatEther(res.amountOut)),
+        "recovered from stuck - a retry sweep found it sellable again", r.id);
+    aiExitRequests.clear(r.id);
+    log("info", "positions", `${r.token} in ${r.vault}: recovered from stuck, sold for ${formatEther(res.amountOut)} PLS`);
+  });
 }
 
 export { formatUnits };

@@ -110,6 +110,30 @@ function retirePosition(id: number, token: string, reason: string): void {
 }
 
 /**
+ * Has ANY vault ever gotten a position on this token stuck (unsellable)?
+ * Checked across every vault, not just one - the token itself is what's
+ * unsafe, not the vault that happened to find that out first. A stuck row
+ * is never deleted even once the site confirms its balance is now zero and
+ * stops showing it (see the site's attachRealBalance/history filtering), so
+ * this keeps working after that display-layer fix hides the row.
+ *
+ * A fresh honeypot simulation passing right now is not proof of anything -
+ * a scam token's unsellability can be selective (a buyer-specific
+ * blacklist, a cooldown, LP pulled after the last check passed), so the
+ * one hard fact worth trusting more than any live simulation is that this
+ * exact token already proved unsellable in production once. Checked before
+ * every discovery-driven buy path spends the RPC calls on a fresh
+ * simulation at all - see launch.ts/discovery.ts/hunter.ts/snipe.ts.
+ * Deliberately NOT applied to rules.ts or limits.ts, where the owner named
+ * the exact token themselves and already accepts the risk of holding it.
+ */
+export function hasStuckHistory(token: string): boolean {
+  const r = db.prepare(`SELECT 1 FROM positions WHERE token=? AND status='stuck' LIMIT 1`)
+    .get(token.toLowerCase());
+  return r !== undefined;
+}
+
+/**
  * The PLS value of every open position in a vault, and the per-token breakdown.
  * Used by the holding cap: total vault value is this plus the vault's WPLS.
  */

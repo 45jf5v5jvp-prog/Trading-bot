@@ -4,7 +4,7 @@ import { registry, type VaultRecord, type DiscoveryConfig } from "./registry.js"
 import { watched, prices, opportunities, discoveryActions, db } from "./db.js";
 import { simulate, lpLockedPct, checkOwnerRenounced } from "./screener.js";
 import { executeSwap } from "./executor.js";
-import { openPosition, positionsValuePls } from "./positions.js";
+import { openPosition, positionsValuePls, hasStuckHistory } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
 import { vaultWplsPls } from "./launch.js";
 import { mapLimit } from "./concurrency.js";
@@ -69,6 +69,12 @@ export async function screenOpportunity(
     sellable: false, buyTaxBps: 0, sellTaxBps: 0, roundTripLossBps: 0,
     lpLockedPct: 0, ownerRenounced: true, verdict: "fail", reason: "",
   };
+
+  // Checked before spending an RPC round trip on a fresh simulation at all -
+  // a token that already got a position stuck (any vault, ever) doesn't get
+  // a second chance just because it happens to simulate clean this time. See
+  // positions.ts's hasStuckHistory for why a live sim isn't trusted over this.
+  if (hasStuckHistory(token)) return { ...out, reason: "previously left a position stuck - this token has already proven unsellable" };
 
   const sim = await simulate(token);
   if (!sim) return { ...out, reason: "simulation unavailable, refusing to guess" };

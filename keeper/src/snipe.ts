@@ -4,7 +4,7 @@ import { routerRead, factory } from "./chain.js";
 import { registry, type TargetSnipe, type VaultRecord } from "./registry.js";
 import { simulate } from "./screener.js";
 import { executeSwap } from "./executor.js";
-import { openPosition } from "./positions.js";
+import { openPosition, hasStuckHistory } from "./positions.js";
 import { ensureWatched } from "./prices.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -50,6 +50,15 @@ async function fireSnipe(v: VaultRecord, s: TargetSnipe): Promise<void> {
   const amountIn = parseEther(String(s.amountPls));
 
   if (!(await isTradeable(token, amountIn))) return; // not live yet, try again next tick
+
+  // Same guard as launch.ts/discovery.ts - a deliberately-chosen target is
+  // still an arbitrary token, and one that already left a position stuck
+  // (any vault, ever) has proven more about its real sellability than
+  // today's simulation can. See positions.ts's hasStuckHistory.
+  if (hasStuckHistory(token)) {
+    log("warn", "snipe", `${v.address} target ${token}: previously left a position stuck - this token has already proven unsellable, refusing to buy`);
+    return;
+  }
 
   const sim = await simulate(token);
   if (!sim) {

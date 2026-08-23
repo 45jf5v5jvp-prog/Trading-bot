@@ -5,7 +5,7 @@ import { FACTORY_ABI, ERC20_ABI } from "./abis.js";
 import { registry, type VaultRecord } from "./registry.js";
 import { screen, recordScreen } from "./screener.js";
 import { executeSwap } from "./executor.js";
-import { openPosition, positionsValuePls } from "./positions.js";
+import { openPosition, positionsValuePls, hasStuckHistory } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
 import { ensureWatched } from "./prices.js";
 import { mapLimit } from "./concurrency.js";
@@ -92,6 +92,15 @@ async function handleNewPair(token: string, pair: string, txHash: string): Promi
 async function evaluateToken(token: string, pair: string, txHash: string): Promise<void> {
   const candidates = registry.active().filter((v) => v.launch.enabled && v.launch.perLaunchPls > 0);
   if (candidates.length === 0) return;
+
+  // Same guard as discovery.ts's screenOpportunity - a token that already
+  // left some vault's position stuck doesn't get bought again on the
+  // strength of a fresh simulation, see positions.ts's hasStuckHistory.
+  if (hasStuckHistory(token)) {
+    pendingRetry.delete(token.toLowerCase());
+    log("info", "launch", `Rejected ${token}: previously left a position stuck - this token has already proven unsellable`);
+    return;
+  }
 
   const deployer = await deployerOf(txHash);
 

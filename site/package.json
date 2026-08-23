@@ -1,6 +1,6 @@
 {
   "name": "icaria-site",
-  "version": "3.39.0",
+  "version": "3.39.1",
   "private": true,
   "scripts": {
     "dev": "next dev",

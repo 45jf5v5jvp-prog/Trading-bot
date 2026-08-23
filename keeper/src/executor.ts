@@ -197,8 +197,9 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
       const feeLogged = realFeeWei !== null
         ? Number(formatEther(realFeeWei))
         : amountLogged * (CFG.feeBps / 10_000); // pre-trade fallback if the event couldn't be read
-      db.prepare(`INSERT INTO fires(vault,bot,token,ts,amount,fee,tx_hash) VALUES(?,?,?,?,?,?,?)`)
-        .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now, amountLogged, feeLogged, tx.hash);
+      const side = isWplsIn ? "buy" : "sell";
+      db.prepare(`INSERT INTO fires(vault,bot,token,ts,amount,fee,tx_hash,side) VALUES(?,?,?,?,?,?,?,?)`)
+        .run(req.vault.toLowerCase(), req.bot, req.tokenLabel, now, amountLogged, feeLogged, tx.hash, side);
       log("info", "exec", `${req.bot} filled ${req.tokenLabel} tx=${tx.hash} block=${rc?.blockNumber}`);
       return { ok: true, amountOut: realAmountOut, txHash: tx.hash };
     } catch (e) {

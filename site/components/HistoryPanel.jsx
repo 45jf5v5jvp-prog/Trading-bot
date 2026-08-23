@@ -526,11 +526,16 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
       >
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Bot</th><th>Token</th><th>When</th><th>Amount ({unit})</th><th>Tx</th></tr></thead>
+            <thead><tr><th>Bot</th><th>Side</th><th>Token</th><th>When</th><th>Amount ({unit})</th><th>Tx</th></tr></thead>
             <tbody>
               {fires.map((f) => (
                 <tr key={f.id}>
                   <td>{f.bot}</td>
+                  <td>
+                    <span className={`side-badge ${f.side === "buy" ? "side-badge-buy" : f.side === "sell" ? "side-badge-sell" : "side-badge-unknown"}`}>
+                      {f.side === "buy" ? "Buy" : f.side === "sell" ? "Sell" : "-"}
+                    </span>
+                  </td>
                   <td>
                     <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
                       {f.symbol && <span className="holding-symbol" style={{ fontSize: 12 }}>{f.symbol}</span>}

@@ -25,7 +25,8 @@ setup.exec(`
   );
   CREATE TABLE fires (
     id INTEGER PRIMARY KEY AUTOINCREMENT, vault TEXT NOT NULL, bot TEXT NOT NULL,
-    token TEXT NOT NULL, ts INTEGER NOT NULL, amount REAL NOT NULL, fee REAL NOT NULL, tx_hash TEXT
+    token TEXT NOT NULL, ts INTEGER NOT NULL, amount REAL NOT NULL, fee REAL NOT NULL, tx_hash TEXT,
+    side TEXT
   );
 `);
 const VAULT = "0x523a8848e9a1d7f2e083625d1004f76e607bfcd7";
@@ -36,10 +37,10 @@ setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spen
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(VAULT, "launch", "0x" + "b".repeat(40), 900, 2.0, 200, "0", 1.5, "closed", 1200, 250, "take profit 25%");
 setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status)
   VALUES (?,?,?,?,?,?,?,?,?)`).run(OTHER_VAULT, "trading", "0x" + "c".repeat(40), 1000, 1, 50, "0", 1, "open");
-setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
-  .run(VAULT, "trading", "0x" + "a".repeat(40), 1000, 100, 0.25, "0xabc123");
-setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
-  .run(VAULT, "launch", "0x" + "b".repeat(40), 1100, 200, 0.5, "0xdef456");
+setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash,side) VALUES (?,?,?,?,?,?,?,?)`)
+  .run(VAULT, "trading", "0x" + "a".repeat(40), 1000, 100, 0.25, "0xabc123", "buy");
+setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash,side) VALUES (?,?,?,?,?,?,?,?)`)
+  .run(VAULT, "launch", "0x" + "b".repeat(40), 1100, 200, 0.5, "0xdef456", "sell");
 
 // Same schema as keeper/src/db.ts's v4_pools - present on a Robinhood
 // keeper.db, absent on a PulseChain one (see the "no such table" test below).
@@ -152,6 +153,10 @@ test("returns positions and fires for a vault that has real trading history", ()
   const fires = getRecentFires(VAULT);
   assert.equal(fires.length, 3);
   assert.equal(fires[0].tx_hash, HUNTER_BUY_TX); // newest first (ts DESC)
+  // Fired before the side column existed - null, not a guessed value.
+  assert.equal(fires[0].side, null);
+  assert.equal(fires[1].side, "sell");
+  assert.equal(fires[2].side, "buy");
 });
 
 test("getTotalFees sums every fire's fee for a vault, scoped to that vault only", () => {

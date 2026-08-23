@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS fires (
   ts       INTEGER NOT NULL,
   amount   REAL NOT NULL,
   fee      REAL NOT NULL,
-  tx_hash  TEXT
+  tx_hash  TEXT,
+  side     TEXT
 );
 CREATE INDEX IF NOT EXISTS fires_vault_ts ON fires(vault, ts DESC);
 
@@ -326,6 +327,17 @@ CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY 
   const cols = db.prepare("PRAGMA table_info(watched)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "pls_first")) {
     db.exec("ALTER TABLE watched ADD COLUMN pls_first INTEGER");
+  }
+}
+
+// Additive migration: Recent Trades on the dashboard had no way to show
+// buy vs sell - executor.ts always knew (WPLS-in means buy, token-in means
+// sell), it just never persisted it. NULL on any row fired before this
+// column existed; the site shows those as unlabeled rather than guessing.
+{
+  const cols = db.prepare("PRAGMA table_info(fires)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "side")) {
+    db.exec("ALTER TABLE fires ADD COLUMN side TEXT");
   }
 }
 

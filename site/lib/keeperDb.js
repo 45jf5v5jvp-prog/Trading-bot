@@ -67,7 +67,7 @@ function getRecentFires(vault, limit = 25) {
   const d = getDb();
   if (!d) return [];
   return d.prepare(
-    `SELECT id, bot, token, ts, amount, fee, tx_hash FROM fires
+    `SELECT id, bot, token, ts, amount, fee, tx_hash, side FROM fires
      WHERE vault = ? ORDER BY ts DESC LIMIT ?`,
   ).all(vault.toLowerCase(), limit);
 }

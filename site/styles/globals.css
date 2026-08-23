@@ -515,6 +515,14 @@ input::placeholder { color: #6b6c76; }
 .lesson-badge-loss { background: var(--bad-soft); color: var(--bad); }
 .lesson-badge-miss { background: rgba(201, 138, 62, 0.14); color: var(--amber); }
 
+/* Recent Trades' buy/sell badge - green for a buy, red for a sell, same
+   soft-pill treatment as .lesson-badge. Fired before the side column
+   existed reads as unknown (side is null) rather than guessing. */
+.side-badge { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+.side-badge-buy { background: var(--good-soft); color: var(--good); }
+.side-badge-sell { background: var(--bad-soft); color: var(--bad); }
+.side-badge-unknown { background: var(--chip); color: var(--ash); }
+
 .trade-row { padding: 10px 0; border-bottom: 1px solid var(--edge); }
 .trade-row:last-child { border-bottom: none; }
 .trade-rationale {

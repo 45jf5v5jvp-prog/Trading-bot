@@ -11,7 +11,15 @@
  * well-known address specifically to borrow trust from the real thing.
  *
  * Usage:
- *   node scripts/check-token-identity.js TOKEN_ADDR [TOKEN_ADDR ...] [--vault=0x...]
+ *   node scripts/check-token-identity.js VAULT_ADDR TOKEN_ADDR [TOKEN_ADDR ...]
+ *
+ * No flags - the first address is always the vault, everything after it is
+ * a token to check. Kept deliberately flag-free after --vault=0x... proved
+ * to be a real usability trap: it silently misparses if a space or line
+ * break lands anywhere inside it (a paste from a wrapped terminal line, for
+ * instance), and the tool has no way to tell "malformed flag" apart from
+ * "no vault given" - it just quietly skips the balance check instead of
+ * erroring, which is exactly what happened the first two times this was run.
  */
 const path = require("path");
 
@@ -31,13 +39,16 @@ const ABI = [
   "function balanceOf(address) view returns (uint256)",
 ];
 
+function isAddress(s) {
+  return /^0x[0-9a-fA-F]{40}$/.test(s);
+}
+
 async function main() {
   const args = process.argv.slice(2);
-  const vaultArg = args.find((a) => a.startsWith("--vault="));
-  const vault = vaultArg ? vaultArg.slice("--vault=".length) : null;
-  const tokens = args.filter((a) => !a.startsWith("--"));
-  if (tokens.length === 0) {
-    console.error("Usage: node scripts/check-token-identity.js TOKEN_ADDR [TOKEN_ADDR ...] [--vault=0x...]");
+  const [vault, ...tokens] = args;
+  if (!isAddress(vault) || tokens.length === 0 || !tokens.every(isAddress)) {
+    console.error("Usage: node scripts/check-token-identity.js VAULT_ADDR TOKEN_ADDR [TOKEN_ADDR ...]");
+    console.error("Every address must be a full 0x... address (42 characters), the vault first.");
     process.exit(1);
   }
 
@@ -60,11 +71,9 @@ async function main() {
     console.log(`${addr}:`);
     console.log(`  symbol=${symbol}  name=${name}  decimals=${decimals}`);
     console.log(`  totalSupply=${supplyStr}`);
-    if (vault) {
-      const bal = await c.balanceOf(vault).catch((e) => `ERROR: ${e.message}`);
-      const balStr = typeof bal === "bigint" && decimals !== null ? ethers.formatUnits(bal, decimals) : bal;
-      console.log(`  vault ${vault} balance = ${balStr}`);
-    }
+    const bal = await c.balanceOf(vault).catch((e) => `ERROR: ${e.message}`);
+    const balStr = typeof bal === "bigint" && decimals !== null ? ethers.formatUnits(bal, decimals) : bal;
+    console.log(`  vault ${vault} balance = ${balStr}`);
   }
 }
 

@@ -32,7 +32,8 @@ function shortReason(reason, status) {
   if (r.startsWith("trailing stop")) return reason.split(" (")[0];
   if (r.startsWith("take profit") || r.startsWith("stop loss") || r.startsWith("time exit")) return reason;
   if (r.startsWith("closed by owner")) return "closed by owner";
-  if (r.startsWith("balance vanished")) return "rugged";
+  if (r.startsWith("balance vanished")) return "no balance found";
+  if (r.startsWith("real on-chain balance read 0")) return "no balance found";
   if (r.startsWith("cannot sell")) return "unsellable";
   if (r.startsWith("retired")) return "retired";
   return reason.length > 30 ? `${reason.slice(0, 28)}...` : reason;
@@ -465,7 +466,7 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
 
       {rugged.length > 0 && (
         <button type="button" className="archive-link" onClick={() => setShowRuggedScreen(true)}>
-          See {rugged.length} rugged position{rugged.length === 1 ? "" : "s"}
+          See {rugged.length} stuck position{rugged.length === 1 ? "" : "s"}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 6l6 6-6 6" />
           </svg>
@@ -473,8 +474,8 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
       )}
 
       <DrillInScreen
-        title="Rugged Positions"
-        subtitle={`${rugged.length} the bot gave up trying to sell - tokens are still in the vault, withdraw them directly`}
+        title="Stuck Positions"
+        subtitle={`${rugged.length} the bot couldn't sell - stuck, not confirmed rugged. Could be a real rug pull, or just a bad quote/RPC hiccup it hasn't recovered from yet, and it keeps retrying on its own. Tokens are still in the vault - withdraw them directly any time.`}
         open={showRuggedScreen}
         onClose={() => setShowRuggedScreen(false)}
       >

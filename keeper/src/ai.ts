@@ -1,4 +1,5 @@
 import { CFG } from "./config.js";
+import { plsUsd } from "./plsPrice.js";
 import { log } from "./log.js";
 
 /**
@@ -56,10 +57,25 @@ export interface AiVerdict {
   suggestedAmountPls?: number;
 }
 
-function describeProfile(p: TokenProfile): string {
+/**
+ * usdPerPls converts the raw liquidity figure to an explicit dollar amount
+ * rather than leaving that arithmetic to the model. PLS trades at a tiny
+ * fraction of $1 (roughly $0.00001-0.00002), so a real liquidity figure in
+ * PLS terms can be a huge-looking number - "185,000,000 PLS" - that's
+ * actually only a few thousand real dollars. A live incident showed the
+ * model doing that conversion in its head and getting it wrong by
+ * something like five orders of magnitude, describing a few-thousand-
+ * dollar pool as "$185M" in its own reasoning. Spelling out the USD
+ * figure directly removes the arithmetic the model was getting wrong.
+ */
+function describeProfile(p: TokenProfile, usdPerPls: number | null): string {
+  const usdNote = usdPerPls !== null
+    ? ` (approximately $${Math.round(p.liqPls * usdPerPls).toLocaleString()} USD - PLS itself is a low-value ` +
+      `token, a large PLS figure is NOT the same as that many dollars)`
+    : "";
   const lines = [
     `Token: ${p.symbol} (${p.token})`,
-    `Liquidity: ${Math.round(p.liqPls).toLocaleString()} PLS`,
+    `Liquidity: ${Math.round(p.liqPls).toLocaleString()} PLS${usdNote}`,
     `Buy tax: ${(p.buyTaxBps / 100).toFixed(1)}%, sell tax: ${(p.sellTaxBps / 100).toFixed(1)}%`,
     `Round trip buy+sell loses ${p.roundTripLossBps} bps beyond tax (slippage/other friction)`,
     `LP locked or burned: ${p.lpLockedPct.toFixed(1)}%`,
@@ -173,9 +189,12 @@ export async function assess(profile: TokenProfile, maxAmountPls?: number, guida
     ? `\n\nThis vault's owner has been coaching this bot based on past trades - the bot's own reflections are included too. ` +
       `Weigh this alongside the profile below, oldest first:\n${guidance.map((g, i) => `${i + 1}. ${g}`).join("\n")}`
     : "";
+  // Best-effort - a failed price fetch just means the USD note is omitted,
+  // not that the whole assessment fails.
+  const usdPerPls = await plsUsd().catch(() => null);
   const data = await callClaude(
     SYSTEM_PROMPT,
-    `${describeProfile(profile)}${guidanceLine}\n\nWould you buy this token?${ceilingLine} Report your verdict via give_verdict.`,
+    `${describeProfile(profile, usdPerPls)}${guidanceLine}\n\nWould you buy this token?${ceilingLine} Report your verdict via give_verdict.`,
     verdictTool(maxAmountPls),
   );
   if (!data) return null;
@@ -379,9 +398,10 @@ export async function reflectOnMiss(input: {
 /** Free-form answer for Ask Icaria - the user's own question, in their own
  * words, alongside the token's profile. Null means unavailable. */
 export async function answerQuestion(profile: TokenProfile, question: string): Promise<string | null> {
+  const usdPerPls = await plsUsd().catch(() => null);
   const data = await callClaude(
     SYSTEM_PROMPT,
-    `${describeProfile(profile)}\n\nThe user asks: "${question}"\n\nAnswer directly and plainly, in a few sentences.`,
+    `${describeProfile(profile, usdPerPls)}\n\nThe user asks: "${question}"\n\nAnswer directly and plainly, in a few sentences.`,
     null,
   );
   if (!data) return null;

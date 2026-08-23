@@ -55,6 +55,19 @@ export function useVault() {
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState(null);
   const rawProviderRef = useRef(null); // the active EIP-1193 provider, whichever method connected it
+  // Mirrors the account state into a ref purely so refreshVaultInfo can read
+  // the current value without account being a useCallback dependency. It
+  // used to be one - which meant every setAccount() during connect gave
+  // refreshVaultInfo (and, through it, finishConnecting) a new identity
+  // mid-call, retriggering the silent-reconnect-on-load effect (it depends
+  // on finishConnecting) while the original connect attempt was still
+  // in-flight - two concurrent connect attempts racing, one of which loses
+  // and never reaches its own setInitializing(false), leaving the "reconnecting
+  // your wallet" screen stuck forever. A ref never changes identity, so
+  // refreshVaultInfo (and everything downstream of it) stays stable across
+  // the very setAccount call it's used to read the result of.
+  const accountRef = useRef(null);
+  useEffect(() => { accountRef.current = account; }, [account]);
 
   const getProvider = useCallback(() => {
     if (!rawProviderRef.current) {
@@ -63,16 +76,15 @@ export function useVault() {
     return new BrowserProvider(rawProviderRef.current);
   }, []);
 
-  // walletAddr is explicit, not read from the account state, because this is
-  // called during the connect flow itself (right after setAccount, before
-  // that state update has actually landed) - relying on the closure would
-  // read a stale null there. Every other call site just passes the account
-  // state through, which by then is settled.
+  // walletAddr is explicit when the caller already has it fresher than the
+  // account state could be (the connect flow, right after setAccount, before
+  // that update has landed) - every other call site omits it and falls back
+  // to accountRef, which is current by then.
   const refreshVaultInfo = useCallback(async (addr, walletAddr) => {
     const provider = getProvider();
     const vault = new Contract(addr, VAULT_ABI, provider);
     const wrapped = new Contract(WRAPPED, ERC20_ABI, provider);
-    const wallet = walletAddr ?? account;
+    const wallet = walletAddr ?? accountRef.current;
     const [owner, executor, paused, baseBalance, walletBaseBalance] = await Promise.all([
       vault.owner(), vault.executor(), vault.paused(), wrapped.balanceOf(addr),
       wallet ? wrapped.balanceOf(wallet) : Promise.resolve(0n),
@@ -85,7 +97,7 @@ export function useVault() {
       // send in, the way vaultInfo.baseBalance already does for Withdraw.
       walletBaseBalance: formatEther(walletBaseBalance),
     });
-  }, [getProvider, account]);
+  }, [getProvider]);
 
   /** Shared finish-up once ANY connection method has produced accounts on a raw provider. */
   const finishConnecting = useCallback(async (rawProvider, accounts) => {

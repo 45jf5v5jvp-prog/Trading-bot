@@ -19,7 +19,8 @@ setup.exec(`
     token TEXT NOT NULL, opened_at INTEGER NOT NULL, entry_price REAL NOT NULL,
     spent_pls REAL NOT NULL, tokens_held TEXT NOT NULL, high_water REAL NOT NULL,
     tp_pct REAL, sl_pct REAL, trail_pct REAL, time_exit_min INTEGER, exit_mode TEXT,
-    status TEXT NOT NULL DEFAULT 'open', closed_at INTEGER, proceeds_pls REAL, close_reason TEXT
+    status TEXT NOT NULL DEFAULT 'open', closed_at INTEGER, proceeds_pls REAL, close_reason TEXT,
+    source_tx_hash TEXT
   );
   CREATE TABLE fires (
     id INTEGER PRIMARY KEY AUTOINCREMENT, vault TEXT NOT NULL, bot TEXT NOT NULL,
@@ -103,6 +104,22 @@ setup.prepare(`INSERT INTO opportunities
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
   .run(HUNTER_OPP_TOKEN, 1950, -15, 5, 2500000, 100, 100, 100, 1, 1, "pass", "clear", "RSI oversold", "hunter", 22, 14.5, 2.3);
 
+// An actual Hunter buy against HUNTER_OPP_TOKEN above - fires + discovery_actions
+// linking it to opportunity id 4, and an open position carrying that fire's
+// tx_hash as source_tx_hash, so getPositions' narrative join has something
+// real to resolve for an OPEN position, not just Hunter's closed-trade feed.
+const HUNTER_BUY_TX = "0xhunterbuy1";
+// fee 0 here deliberately - getTotalFees' own test sums every fire's fee
+// for this vault and expects an exact total, unrelated to this fixture.
+setup.prepare(`INSERT INTO fires (vault,bot,token,ts,amount,fee,tx_hash) VALUES (?,?,?,?,?,?,?)`)
+  .run(VAULT, "hunter", HUNTER_OPP_TOKEN, 1960, 100000, 0, HUNTER_BUY_TX);
+setup.prepare(`INSERT INTO discovery_actions (vault,opportunity_id,ts,action,tx_hash) VALUES (?,?,?,?,?)`)
+  .run(VAULT, 4, 1960, "bought", HUNTER_BUY_TX);
+setup.prepare(`INSERT INTO positions
+  (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status,source_tx_hash)
+  VALUES (?,?,?,?,?,?,?,?,?,?)`)
+  .run(VAULT, "hunter", HUNTER_OPP_TOKEN, 1960, 0.5, 100000, "200000000000000000000000", 1, "open", HUNTER_BUY_TX);
+
 const PRICE_TOKEN = "0x" + "6".repeat(40);
 setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 1000, 1.0, 500000, 10);
 setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 2000, 1.2, 520000, 15);
@@ -116,14 +133,24 @@ test("returns positions and fires for a vault that has real trading history", ()
   const { getPositions, getRecentFires } = require("../lib/keeperDb");
 
   const { open, closed } = getPositions(VAULT);
-  assert.equal(open.length, 1);
-  assert.equal(open[0].bot, "trading");
+  assert.equal(open.length, 2);
+  // Newest opened_at first - the Hunter position (1960) before the Rules
+  // one (1000).
+  assert.equal(open[0].bot, "hunter");
+  assert.equal(open[1].bot, "trading");
+  // The Hunter position's source_tx_hash resolves through fires ->
+  // discovery_actions -> opportunities, same join getHunterTrades already
+  // used for closed trades - now available on an open one too.
+  assert.equal(open[0].narrative, "RSI oversold");
+  // The Rules position never went through opportunities/discovery_actions,
+  // so it has nothing to resolve - null, not a crash.
+  assert.equal(open[1].narrative, null);
   assert.equal(closed.length, 1);
   assert.equal(closed[0].close_reason, "take profit 25%");
 
   const fires = getRecentFires(VAULT);
-  assert.equal(fires.length, 2);
-  assert.equal(fires[0].tx_hash, "0xdef456"); // newest first (ts DESC)
+  assert.equal(fires.length, 3);
+  assert.equal(fires[0].tx_hash, HUNTER_BUY_TX); // newest first (ts DESC)
 });
 
 test("getTotalFees sums every fire's fee for a vault, scoped to that vault only", () => {
@@ -256,7 +283,10 @@ test("getDiscoveryActionsForVault keys this vault's actions by opportunity id, n
   delete require.cache[require.resolve("../lib/keeperDb")];
   const { getDiscoveryActionsForVault } = require("../lib/keeperDb");
   const actions = getDiscoveryActionsForVault(VAULT);
-  assert.deepEqual(actions, { 1: { action: "notified", txHash: null } });
+  assert.deepEqual(actions, {
+    1: { action: "notified", txHash: null },
+    4: { action: "bought", txHash: HUNTER_BUY_TX },
+  });
   assert.deepEqual(getDiscoveryActionsForVault(OTHER_VAULT), {});
 });
 

@@ -231,8 +231,14 @@ function ExitProgress({ p }) {
  * (a live DEX quote, not a cached price), and whether that's up or down
  * since entry. This is the "should I close this?" view. */
 function HoldingCard({ p, onClose, closeState }) {
+  const [showWhy, setShowWhy] = useState(false);
   const requested = closeState === "requested" || closeState === "pending";
   const unit = CHAIN.nativeSymbol;
+  // Only Hunter/Discovery buys go through opportunities - see keeperDb.js's
+  // getPositions comment. A Launch/Snipe/Rules/Limit/Ask position just has
+  // nothing here, same as its narrative already being null - no button to
+  // show for those, not a bug.
+  const rationale = p.narrative || p.aiReasoning;
   return (
     <div className="holding-card">
       <div className="holding-card-top">
@@ -256,6 +262,19 @@ function HoldingCard({ p, onClose, closeState }) {
           : ""}
       </div>
       <ExitProgress p={p} />
+      {rationale && (
+        <>
+          <button
+            type="button"
+            className="btn btn-small"
+            style={{ marginTop: 10 }}
+            onClick={() => setShowWhy((s) => !s)}
+          >
+            {showWhy ? "Hide reason" : "Why did it buy this?"}
+          </button>
+          {showWhy && <p className="hint" style={{ marginTop: 6 }}>{rationale}</p>}
+        </>
+      )}
       <div className="row" style={{ marginTop: 10 }}>
         <button
           type="button"

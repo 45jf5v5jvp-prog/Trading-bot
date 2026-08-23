@@ -34,10 +34,23 @@ function getDb() {
 function getPositions(vault) {
   const d = getDb();
   if (!d) return { open: [], closed: [] };
+  // narrative/aiReasoning/signalCount: the same buy-time rationale
+  // getHunterTrades already surfaces for Hunter's closed-trade feed, joined
+  // in here for every position (open or closed, any bot) via source_tx_hash
+  // - not just Hunter's. Only Hunter and Discovery buys actually go through
+  // opportunities/discovery_actions, so a Launch/Snipe/Rules/Limit/Ask
+  // position just gets null here, same as it always would have - nothing
+  // to show a rationale for on those, not a bug.
   const rows = d.prepare(
-    `SELECT id, bot, token, opened_at, entry_price, spent_pls, tokens_held, high_water,
-            tp_pct, sl_pct, trail_pct, time_exit_min, exit_mode, status, closed_at, proceeds_pls, close_reason
-     FROM positions WHERE vault = ? ORDER BY opened_at DESC LIMIT 100`,
+    `SELECT p.id, p.bot, p.token, p.opened_at, p.entry_price, p.spent_pls, p.tokens_held, p.high_water,
+            p.tp_pct, p.sl_pct, p.trail_pct, p.time_exit_min, p.exit_mode, p.status, p.closed_at,
+            p.proceeds_pls, p.close_reason,
+            o.narrative, o.ai_reasoning AS aiReasoning, o.signal_count AS signalCount
+     FROM positions p
+     LEFT JOIN fires f ON f.tx_hash = p.source_tx_hash
+     LEFT JOIN discovery_actions a ON a.vault = f.vault AND a.tx_hash = f.tx_hash AND a.action = 'bought'
+     LEFT JOIN opportunities o ON o.id = a.opportunity_id
+     WHERE p.vault = ? ORDER BY p.opened_at DESC LIMIT 100`,
   ).all(vault.toLowerCase());
   return {
     open: rows.filter((r) => r.status === "open"),

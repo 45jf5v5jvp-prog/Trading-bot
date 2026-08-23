@@ -332,6 +332,7 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
   const [showTradesScreen, setShowTradesScreen] = useState(false);
   const [showMorePositions, setShowMorePositions] = useState(false);
   const [showClosedScreen, setShowClosedScreen] = useState(false);
+  const [showRuggedScreen, setShowRuggedScreen] = useState(false);
   const [botFilter, setBotFilter] = useState("all");
   if (!history) return null;
   const unit = CHAIN.nativeSymbol;
@@ -342,6 +343,14 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
     open: history.positions.open.filter((p) => matches(p.bot)),
     closed: history.positions.closed.filter((p) => matches(p.bot)),
   };
+  // A "stuck" position never sold - the keeper gave up retrying and it just
+  // sits there until someone withdraws it by hand (see ClosedPositionRow's
+  // comment). It used to live inside Closed Positions alongside real sales,
+  // which buried the actual trade history under withdraw-it-yourself
+  // entries that aren't a trade outcome at all. Split out into its own
+  // section instead.
+  const reallyClosed = positions.closed.filter((p) => p.status !== "stuck");
+  const rugged = positions.closed.filter((p) => p.status === "stuck");
   const fires = history.fires.filter((f) => matches(f.bot));
   // Largest current value first - the position worth the most (or losing the
   // most) is the one most worth seeing without having to scroll for it.
@@ -410,9 +419,9 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
         </div>
       )}
 
-      {positions.closed.length > 0 && (
+      {reallyClosed.length > 0 && (
         <button type="button" className="archive-link" onClick={() => setShowClosedScreen(true)}>
-          See {positions.closed.length} closed position{positions.closed.length === 1 ? "" : "s"}
+          See {reallyClosed.length} closed position{reallyClosed.length === 1 ? "" : "s"}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 6l6 6-6 6" />
           </svg>
@@ -421,12 +430,38 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
 
       <DrillInScreen
         title="Closed Positions"
-        subtitle={`${positions.closed.length} closed · ${fmtSignedAmount(totalRealizedPls(positions.closed))} ${unit} total realized`}
+        subtitle={`${reallyClosed.length} closed · ${fmtSignedAmount(totalRealizedPls(reallyClosed))} ${unit} total realized`}
         open={showClosedScreen}
         onClose={() => setShowClosedScreen(false)}
       >
         <div className="closed-list">
-          {positions.closed.map((p) => (
+          {reallyClosed.map((p) => (
+            <ClosedPositionRow
+              key={p.id} p={p}
+              onWithdrawStuckToken={onWithdrawStuckToken}
+              withdrawState={withdrawStuckStates?.[p.id]}
+            />
+          ))}
+        </div>
+      </DrillInScreen>
+
+      {rugged.length > 0 && (
+        <button type="button" className="archive-link" onClick={() => setShowRuggedScreen(true)}>
+          See {rugged.length} rugged position{rugged.length === 1 ? "" : "s"}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+      )}
+
+      <DrillInScreen
+        title="Rugged Positions"
+        subtitle={`${rugged.length} the bot gave up trying to sell - tokens are still in the vault, withdraw them directly`}
+        open={showRuggedScreen}
+        onClose={() => setShowRuggedScreen(false)}
+      >
+        <div className="closed-list">
+          {rugged.map((p) => (
             <ClosedPositionRow
               key={p.id} p={p}
               onWithdrawStuckToken={onWithdrawStuckToken}

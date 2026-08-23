@@ -62,7 +62,8 @@ function describeHunterContext({ hunterConfig, trades, lessons }) {
   if (hunterConfig) {
     lines.push(
       `Your current settings: mode=${hunterConfig.mode}, allocated ` +
-      `${hunterConfig.allocatedUnlimited ? "no cap" : `${hunterConfig.allocatedPls.toLocaleString()} ${CHAIN.nativeSymbol}`}, ` +
+      `${hunterConfig.allocatedUnlimited ? "no cap" : `${hunterConfig.allocatedPls.toLocaleString()} ${CHAIN.nativeSymbol}` +
+        (hunterConfig.allocatedResetDaily ? " (resets every 24h)" : " (frees as positions close)")}, ` +
       `max ${hunterConfig.maxPerTradePls.toLocaleString()} per trade, max ${hunterConfig.maxPerDay}/day, ` +
       `exit mode=${hunterConfig.exitMode}, take profit ${hunterConfig.takeProfitPct}%, stop loss ${hunterConfig.stopLossPct}%` +
       (hunterConfig.requireAiApproval ? `, AI approval required at ${hunterConfig.minAiConfidence}+ confidence` : ", no AI approval gate") +

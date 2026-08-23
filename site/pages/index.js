@@ -75,18 +75,28 @@ function botPerfDetail(history, botKey, hunterConfig) {
 
   // Hunter-only: warn once its own dedicated budget is close to full, since
   // that's exactly what silently looks like "the bot stopped buying" from
-  // the dashboard - see hunter.ts's deployedPls/executeHunterBuy. Only
-  // meaningful when there's still a real cap to run out of.
+  // the dashboard - see hunter.ts's deployedPls/spentPlsLast24h/
+  // executeHunterBuy. Only meaningful when there's still a real cap to run
+  // out of. Mirrors whichever mode the vault is actually using: "as
+  // positions close" only counts currently-open positions, "every 24 hours"
+  // counts anything opened in the last day regardless of status.
   let nearLimit = null;
   if (botKey === "hunter" && hunterConfig && !hunterConfig.allocatedUnlimited && hunterConfig.allocatedPls > 0) {
-    const deployedPls = openPositions.reduce((sum, p) => sum + (p.spent_pls || 0), 0);
-    const pctUsed = deployedPls / hunterConfig.allocatedPls;
+    const usedPls = hunterConfig.allocatedResetDaily
+      ? [...openPositions, ...history.positions.closed.filter((p) => p.bot === botKey)]
+          .filter((p) => p.opened_at >= Math.floor(Date.now() / 1000) - 86400)
+          .reduce((sum, p) => sum + (p.spent_pls || 0), 0)
+      : openPositions.reduce((sum, p) => sum + (p.spent_pls || 0), 0);
+    const pctUsed = usedPls / hunterConfig.allocatedPls;
     if (pctUsed >= 0.9) {
+      const resetNote = hunterConfig.allocatedResetDaily
+        ? "some room frees up as older buys age past 24 hours"
+        : 'wait for an open position to close, or turn on "Every 24 hours" so it frees up on its own';
       nearLimit = (
         <p className="hint" style={{ marginBottom: 0, marginTop: 4, color: "var(--amber)" }}>
-          {fmt(deployedPls)} of its {fmt(hunterConfig.allocatedPls)} allocation deployed
+          {fmt(usedPls)} of its {fmt(hunterConfig.allocatedPls)} allocation used
           ({Math.round(pctUsed * 100)}%) - new buys will be skipped once it's full. Raise "Allocated
-          {" "}{CHAIN.nativeSymbol}" below, turn on "No cap," or wait for an open position to close.
+          {" "}{CHAIN.nativeSymbol}" below, turn on "No cap," or {resetNote}.
         </p>
       );
     }

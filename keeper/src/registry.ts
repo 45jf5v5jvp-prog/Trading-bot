@@ -112,8 +112,18 @@ export interface HunterConfig {
   // When true, allocatedPls is ignored entirely and the allocation check
   // never blocks a buy - maxPerTradePls (still enforced) is the only real
   // ceiling left. Off by default: an owner has to opt into removing the
-  // budget cap, not land on it by accident.
+  // budget cap, not land on it by accident. Mutually exclusive with
+  // allocatedResetDaily below - the site's schema validation rejects both
+  // being true at once.
   allocatedUnlimited: boolean;
+  // When true, allocatedPls caps how much this vault's Hunter Bot may SPEND
+  // on buys in the last 24 hours (see hunter.ts's spentPlsLast24h) instead
+  // of how much it may have concurrently DEPLOYED (deployedPls) - an old
+  // position sitting open a long time no longer keeps the budget tied up;
+  // it just ages out of the 24h window on its own. Off by default: the
+  // original concurrent-exposure cap stays the default meaning of
+  // allocatedPls unless explicitly opted into this instead.
+  allocatedResetDaily: boolean;
   maxPerTradePls: number;
   maxPerDay: number;
   exitMode: "limited" | "full";
@@ -296,7 +306,7 @@ const DEFAULT_DISCOVERY: DiscoveryConfig = {
 };
 
 const DEFAULT_HUNTER: HunterConfig = {
-  enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, maxPerTradePls: 0, maxPerDay: 3,
+  enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false, maxPerTradePls: 0, maxPerDay: 3,
   exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,

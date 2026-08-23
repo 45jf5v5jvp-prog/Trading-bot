@@ -132,6 +132,20 @@ test("hunter allocatedUnlimited defaults to false", () => {
   assert.equal(out.hunter.allocatedUnlimited, false);
 });
 
+test("hunter allocatedResetDaily defaults to false and can be set", () => {
+  const out1 = normalizeConfig({ hunter: { allocatedPls: 1000 } });
+  assert.equal(out1.hunter.allocatedResetDaily, false);
+  const out2 = normalizeConfig({ hunter: { allocatedPls: 1000, allocatedResetDaily: true } });
+  assert.equal(out2.hunter.allocatedResetDaily, true);
+});
+
+test("rejects hunter allocatedUnlimited and allocatedResetDaily both true", () => {
+  assert.throws(
+    () => normalizeConfig({ hunter: { allocatedUnlimited: true, allocatedResetDaily: true } }),
+    /allocatedUnlimited.*allocatedResetDaily/,
+  );
+});
+
 test("hunter ATR stop and volume confirmation default off", () => {
   const c = emptyConfig();
   assert.equal(c.hunter.useAtrStop, false);

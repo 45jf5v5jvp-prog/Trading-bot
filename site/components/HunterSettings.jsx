@@ -39,13 +39,6 @@ export default function HunterSettings({ hunter, onChange }) {
         ) : (
           <NumberField {...num("allocatedPls")} min="0" style={{ width: 110 }} />
         )}
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => onChange({ ...hunter, allocatedUnlimited: !hunter.allocatedUnlimited })}
-        >
-          {hunter.allocatedUnlimited ? "Set a cap" : "No cap / Unlimited"}
-        </button>
         <label>Max {CHAIN.nativeSymbol} per buy</label>
         <NumberField {...num("maxPerTradePls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
@@ -53,23 +46,53 @@ export default function HunterSettings({ hunter, onChange }) {
         <label>Max open positions</label>
         <NumberField {...num("maxOpenPositions")} min="0" style={{ width: 80 }} />
       </div>
+      <div className="field-inline" style={{ marginTop: -6 }}>
+        <label>Allocation resets</label>
+        <div className="row" style={{ gap: 6 }}>
+          <button
+            type="button"
+            className={`btn btn-small${!hunter.allocatedUnlimited && !hunter.allocatedResetDaily ? " btn-primary" : ""}`}
+            onClick={() => onChange({ ...hunter, allocatedUnlimited: false, allocatedResetDaily: false })}
+          >
+            As positions close
+          </button>
+          <button
+            type="button"
+            className={`btn btn-small${hunter.allocatedResetDaily ? " btn-primary" : ""}`}
+            onClick={() => onChange({ ...hunter, allocatedUnlimited: false, allocatedResetDaily: true })}
+          >
+            Every 24 hours
+          </button>
+          <button
+            type="button"
+            className={`btn btn-small${hunter.allocatedUnlimited ? " btn-primary" : ""}`}
+            onClick={() => onChange({ ...hunter, allocatedUnlimited: true, allocatedResetDaily: false })}
+          >
+            No cap
+          </button>
+        </div>
+      </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        Hunter Bot never has more than "Allocated" deployed at once across its own open positions -
-        it's the amount you're choosing to risk on this bot specifically, separate from the rest of
-        the vault. Freed back up as positions close, win or lose, so it can keep reusing that amount.
-        "No cap" removes that budget ceiling entirely - "Max per buy" (still enforced) becomes the
-        only real limit on any one trade. "Max per buy" is a ceiling, not a fixed size - with AI
-        approval on, the AI decides how much of that ceiling to actually spend on each buy (less when
-        it's less confident), full authority up to the number you set here, never more. "Max open
-        positions" caps how many separate bets it can be carrying at once regardless of leftover
-        budget - 0 means no cap.
+        "Allocated" is the amount you're choosing to risk on Hunter Bot specifically, separate from
+        the rest of the vault - how it frees back up depends on which button is picked above.
+        "As positions close" (the default) never lets more than "Allocated" be deployed across open
+        positions at once - a position sitting open a long time keeps that share of the budget tied
+        up the whole time. "Every 24 hours" instead caps how much it can spend on buys in a rolling
+        24-hour window, regardless of whether older positions are still open - old spend simply ages
+        out and frees fresh room on its own, so a slow-closing position can't stall new buys the way
+        it can under "As positions close." "No cap" removes the budget ceiling entirely - "Max per
+        buy" (still enforced either way) becomes the only real limit on any one trade. "Max per buy"
+        is a ceiling, not a fixed size - with AI approval on, the AI decides how much of that ceiling
+        to actually spend on each buy (less when it's less confident), full authority up to the
+        number you set here, never more. "Max open positions" caps how many separate bets it can be
+        carrying at once regardless of leftover budget - 0 means no cap.
       </p>
-      {hunter.allocatedUnlimited && Number(hunter.maxOpenPositions) === 0 && (
+      {(hunter.allocatedUnlimited || hunter.allocatedResetDaily) && Number(hunter.maxOpenPositions) === 0 && (
         <p className="hint" style={{ marginTop: -6, marginBottom: 14, color: "var(--bad)" }}>
-          With no allocation cap and no "Max open positions" either, this vault's Hunter Bot can open
-          as many positions as it wants - which also means more of its trades competing for the same
-          keeper queue every other vault's bots share. Set a real "Max open positions" number above
-          to keep that bounded without capping your PLS budget.
+          With no "Max open positions" cap either, this vault's Hunter Bot can open as many positions
+          as it wants - which also means more of its trades competing for the same keeper queue every
+          other vault's bots share. Set a real "Max open positions" number above to keep that bounded
+          without capping your PLS budget.
         </p>
       )}
 

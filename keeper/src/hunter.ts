@@ -159,14 +159,31 @@ function actionsToday(vault: string): number {
 }
 
 /** How much of its own dedicated allocation this bot currently has
- * deployed, across every vault's open hunter positions. Freed back as
+ * deployed, across this vault's open hunter positions. Freed back as
  * positions close (a realized loss shrinks the vault, but frees the same
  * PLS the position was opened with back to the allocation) - allocatedPls
- * caps concurrent exposure, not lifetime spend. */
+ * caps concurrent exposure, not lifetime spend. This is the default mode;
+ * see spentPlsLast24h below for the alternative "resets daily" mode. */
 function deployedPls(vault: string): number {
   const r = db.prepare(
     `SELECT COALESCE(SUM(spent_pls),0) s FROM positions WHERE vault=? AND bot='hunter' AND status='open'`,
   ).get(vault.toLowerCase()) as { s: number };
+  return r.s;
+}
+
+/** Alternative to deployedPls for allocatedResetDaily: how much this vault's
+ * Hunter Bot has actually SPENT on buys in the last 24 hours, open or
+ * already closed - a rolling activity-pace limit rather than a concurrent-
+ * exposure one. Unlike deployedPls, an old position sitting open a long
+ * time doesn't keep tying up the budget forever; it just ages out of the
+ * 24h window and frees fresh room to buy, same "resets daily" spirit as
+ * actionsToday above (same rolling-window shape, deliberately - not a
+ * calendar-day reset, so nothing clusters right at a UTC boundary). */
+function spentPlsLast24h(vault: string): number {
+  const since = Math.floor(Date.now() / 1000) - 86400;
+  const r = db.prepare(
+    `SELECT COALESCE(SUM(spent_pls),0) s FROM positions WHERE vault=? AND bot='hunter' AND opened_at>=?`,
+  ).get(vault.toLowerCase(), since) as { s: number };
   return r.s;
 }
 
@@ -222,9 +239,10 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
   if (amountPls <= 0 || (!H.allocatedUnlimited && H.allocatedPls <= 0)) return;
 
   if (!H.allocatedUnlimited) {
-    const deployed = deployedPls(v.address);
+    const deployed = H.allocatedResetDaily ? spentPlsLast24h(v.address) : deployedPls(v.address);
     if (deployed + amountPls > H.allocatedPls) {
-      log("info", "hunter", `${v.address} ${token}: ${amountPls} PLS would exceed its ${H.allocatedPls} PLS allocation (${deployed} already deployed), skipping`);
+      const kind = H.allocatedResetDaily ? "24h spending" : "PLS allocation";
+      log("info", "hunter", `${v.address} ${token}: ${amountPls} PLS would exceed its ${H.allocatedPls} ${kind} (${deployed} already used), skipping`);
       return;
     }
   }
@@ -770,7 +788,7 @@ async function checkPendingRebuys(): Promise<void> {
     if (amountPls <= 0 || (!H.allocatedUnlimited && H.allocatedPls <= 0)) { pendingRebuys.remove(p.id); return; }
 
     if (!H.allocatedUnlimited) {
-      const deployed = deployedPls(v.address);
+      const deployed = H.allocatedResetDaily ? spentPlsLast24h(v.address) : deployedPls(v.address);
       if (deployed + amountPls > H.allocatedPls) return; // try again next tick - allocation may free up
     }
 

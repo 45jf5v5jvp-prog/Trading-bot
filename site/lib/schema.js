@@ -54,7 +54,8 @@ const QUICK_SETUP_SIZE_KEYS = ["small", "medium", "large"];
 // liquidity-coherence check (always on, not a setting here) that catches a
 // price crash caused by a liquidity pull before it's mistaken for a dip.
 const DEFAULT_HUNTER = {
-  enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, maxPerTradePls: 0, maxPerDay: 3,
+  enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false,
+  maxPerTradePls: 0, maxPerDay: 3,
   exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
@@ -224,6 +225,8 @@ function normalizeHunter(h) {
   }
   if (!isFiniteNumber(merged.bollingerPercentBMax) || merged.bollingerPercentBMax < 0 || merged.bollingerPercentBMax > 1)
     throw new Error("hunter.bollingerPercentBMax must be between 0 and 1");
+  if (merged.allocatedUnlimited && merged.allocatedResetDaily)
+    throw new Error("hunter.allocatedUnlimited and hunter.allocatedResetDaily cannot both be true - pick one");
   if (!merged.allocatedUnlimited && merged.maxPerTradePls > merged.allocatedPls && merged.allocatedPls > 0)
     throw new Error("hunter.maxPerTradePls cannot exceed hunter.allocatedPls");
   // Auto Full hands the AI ongoing exit authority - the stop-loss is the one
@@ -243,6 +246,7 @@ function normalizeHunter(h) {
     mode: merged.mode,
     allocatedPls: merged.allocatedPls,
     allocatedUnlimited: Boolean(merged.allocatedUnlimited),
+    allocatedResetDaily: Boolean(merged.allocatedResetDaily),
     maxPerTradePls: merged.maxPerTradePls,
     maxPerDay: merged.maxPerDay,
     exitMode: merged.exitMode,

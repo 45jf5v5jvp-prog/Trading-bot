@@ -1,4 +1,5 @@
 import { CHAIN } from "../lib/contracts";
+import CopyAddressButton from "./CopyAddressButton";
 
 function short(addr) {
   if (!addr) return "-";
@@ -50,6 +51,7 @@ export default function PortfolioPanel({ portfolio }) {
               <div className="row" style={{ gap: 8 }}>
                 <span className="holding-token">{p.symbol}</span>
                 <span className="hint" style={{ margin: 0 }}>{short(p.token)}</span>
+                <CopyAddressButton address={p.token} />
               </div>
             </div>
             <div className="num" style={{ fontSize: 16 }}>{fmtValue(p.valuePls)}</div>

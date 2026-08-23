@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CHAIN, EXPLORER_URL } from "../lib/contracts";
+import CopyAddressButton from "./CopyAddressButton";
 
 function short(addr) {
   if (!addr) return "-";
@@ -47,8 +48,10 @@ function TradeRow({ t }) {
   return (
     <div className="trade-row">
       <div className="row-between">
-        <div className="row" style={{ gap: 8 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {t.symbol && <span className="holding-symbol" style={{ fontSize: 12.5 }}>{t.symbol}</span>}
           <span className="holding-token">{short(t.token)}</span>
+          <CopyAddressButton address={t.token} />
           <span className="hint" style={{ margin: 0 }}>{fmtTsShort(t.ts)}</span>
         </div>
         <span className="num">{fmtAmount(t.amount)} {CHAIN.nativeSymbol}</span>

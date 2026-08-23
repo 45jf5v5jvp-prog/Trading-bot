@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CHAIN, EXPLORER_URL } from "../lib/contracts";
 import DrillInScreen from "./DrillInScreen";
+import CopyAddressButton from "./CopyAddressButton";
 
 function fmtTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -68,7 +69,9 @@ function ClosedPositionRow({ p, onWithdrawStuckToken, withdrawState }) {
     <div className="closed-row" title={p.close_reason || ""}>
       <div className="closed-row-top">
         <span className="closed-bot">{p.bot}</span>
+        {p.symbol && <span className="holding-symbol" style={{ fontSize: 12.5 }}>{p.symbol}</span>}
         <span className="closed-token">{short(p.token)}</span>
+        <CopyAddressButton address={p.token} />
         <span className="closed-date">{fmtTsShort(p.closed_at)}</span>
       </div>
       <div className="closed-row-bottom">
@@ -129,30 +132,6 @@ function totalRealizedPls(closed) {
     if (p.proceeds_pls === null || p.proceeds_pls === undefined) return sum;
     return sum + (p.proceeds_pls - p.spent_pls);
   }, 0);
-}
-
-/** Copies the full (untruncated) token address - what's shown next to it is
- * always the shortened display form, so there's nothing to select and copy
- * by hand. Exists specifically so a token can be pasted into DexScreener or
- * the emergency withdraw field without retyping a 42-character address. */
-function CopyAddressButton({ address }) {
-  const [copied, setCopied] = useState(false);
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard API unavailable (very old browser, or not on HTTPS) -
-      // nothing useful to fall back to, the address is still visible to
-      // select by hand.
-    }
-  }
-  return (
-    <button type="button" className="btn btn-small" style={{ padding: "2px 8px", fontSize: 10 }} onClick={handleCopy}>
-      {copied ? "Copied!" : "Copy"}
-    </button>
-  );
 }
 
 /** A position the DEX currently can't price at any real size - either
@@ -492,7 +471,15 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
             <tbody>
               {fires.map((f) => (
                 <tr key={f.id}>
-                  <td>{f.bot}</td><td>{short(f.token)}</td><td>{fmtTsShort(f.ts)}</td>
+                  <td>{f.bot}</td>
+                  <td>
+                    <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                      {f.symbol && <span className="holding-symbol" style={{ fontSize: 12 }}>{f.symbol}</span>}
+                      <span>{short(f.token)}</span>
+                      <CopyAddressButton address={f.token} />
+                    </div>
+                  </td>
+                  <td>{fmtTsShort(f.ts)}</td>
                   <td>{fmtAmount(f.amount)}</td>
                   <td>{f.tx_hash
                     ? (EXPLORER_URL

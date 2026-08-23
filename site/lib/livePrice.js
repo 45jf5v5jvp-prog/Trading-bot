@@ -287,6 +287,27 @@ async function getTokenMeta(token) {
 }
 
 /**
+ * Adds just the symbol to a set of positions that don't need live pricing -
+ * closed and rugged/stuck ones. They're done trading (or, for a rugged one,
+ * never going to sell), so there's no valueNowPls/pnlPct to compute, but the
+ * dashboard still needs to say what token each row actually was - a bare
+ * truncated address doesn't tell an owner what they're looking at or
+ * withdrawing. Same getTokenMeta cache as priceOpenPositions, throttled the
+ * same way so a vault with many closed positions doesn't reintroduce the
+ * concurrent-RPC-burst problem that caused false "no liquidity" readings.
+ */
+async function attachSymbols(positions) {
+  return mapLimit(positions, RPC_CONCURRENCY, async (p) => {
+    try {
+      const meta = await getTokenMeta(p.token);
+      return { ...p, symbol: meta.symbol };
+    } catch {
+      return { ...p, symbol: null };
+    }
+  });
+}
+
+/**
  * Adds live valueNowPls/pnlPct to each open position (field names kept as-is
  * for shape-compatibility with the keeper's history schema - the values are
  * in whichever base unit this chain uses), plus tokensHeld/symbol - the
@@ -363,4 +384,4 @@ async function getUnitPrice(token) {
   return Number(formatEther(best));
 }
 
-module.exports = { priceOpenPositions, quotePlsValue, getPortfolio, getUnitPrice };
+module.exports = { priceOpenPositions, attachSymbols, quotePlsValue, getPortfolio, getUnitPrice };

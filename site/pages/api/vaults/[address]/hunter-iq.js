@@ -1,4 +1,5 @@
 const { getHunterLessons, getHunterTrades } = require("../../../../lib/keeperDb");
+const { attachSymbols } = require("../../../../lib/livePrice");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -7,7 +8,9 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
  * history.js: nothing sensitive in a bot's own trade rationale or a vault
  * owner's coaching notes, and it needs to be visible without a separate
  * signed request just to look at a dashboard. Read-only against the
- * keeper's own database, same as history.js - see lib/keeperDb.js.
+ * keeper's own database, same as history.js - see lib/keeperDb.js. Trades
+ * get a token symbol attached, same as history.js's Closed Positions/
+ * Recent Trades - a bare truncated address doesn't say what was traded.
  */
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -22,7 +25,7 @@ export default async function handler(req, res) {
   }
   const vault = address.toLowerCase();
   res.status(200).json({
-    trades: getHunterTrades(vault),
+    trades: await attachSymbols(getHunterTrades(vault)),
     lessons: getHunterLessons(vault),
   });
 }

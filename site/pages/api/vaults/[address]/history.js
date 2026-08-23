@@ -1,5 +1,5 @@
 const { getPositions, getRecentFires } = require("../../../../lib/keeperDb");
-const { priceOpenPositions } = require("../../../../lib/livePrice");
+const { priceOpenPositions, attachSymbols } = require("../../../../lib/livePrice");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -11,7 +11,13 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
  * database - see lib/keeperDb.js. Open positions additionally get a live
  * on-chain quote (valueNowPls, pnlPct) - see lib/livePrice.js - computed
  * fresh on every request rather than cached, so the dashboard reflects
- * what the position is actually worth right now.
+ * what the position is actually worth right now. Closed positions don't
+ * need a live quote (nothing to price - the trade is over, or a rugged one
+ * has no live price to trust anyway), but still get a token symbol looked
+ * up so a Closed/Rugged Positions row says what token it actually was,
+ * not just a truncated address. Same for Recent Trades' fires - every
+ * token shown anywhere on the dashboard should say what it is, not just a
+ * truncated address, consistently.
  */
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -26,9 +32,13 @@ export default async function handler(req, res) {
   }
   const vault = address.toLowerCase();
   const positions = getPositions(vault);
-  const open = await priceOpenPositions(positions.open, vault);
+  const [open, closed, fires] = await Promise.all([
+    priceOpenPositions(positions.open, vault),
+    attachSymbols(positions.closed),
+    attachSymbols(getRecentFires(vault)),
+  ]);
   res.status(200).json({
-    positions: { open, closed: positions.closed },
-    fires: getRecentFires(vault),
+    positions: { open, closed },
+    fires,
   });
 }

@@ -41,7 +41,12 @@ function getPositions(vault) {
   ).all(vault.toLowerCase());
   return {
     open: rows.filter((r) => r.status === "open"),
-    closed: rows.filter((r) => r.status !== "open"),
+    // Sorted by when each position actually CLOSED, not opened - the shared
+    // query above orders everything by opened_at, which is right for open
+    // positions but scrambles the closed list: a position opened early but
+    // closed late (or the reverse) no longer lines up with when it actually
+    // happened, so "most recent" at the top wasn't reliably most recent.
+    closed: rows.filter((r) => r.status !== "open").sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0)),
   };
 }
 

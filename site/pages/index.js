@@ -773,11 +773,14 @@ export default function Dashboard() {
               </>
             ) : (
               <div className="panel">
-                <p className="hint" style={{ margin: 0 }}>
-                  {historyError
-                    ? "Couldn't load your positions right now - most likely the PulseChain RPC is congested. Retrying automatically every 20 seconds, no action needed."
-                    : "Loading your positions..."}
-                </p>
+                <div className="row" style={{ gap: 10, flexWrap: "nowrap", alignItems: "flex-start" }}>
+                  <span className="spinner" aria-hidden="true" style={{ marginTop: 3 }} />
+                  <p className="hint" style={{ margin: 0, flex: 1, minWidth: 0 }}>
+                    {historyError
+                      ? "Couldn't load your positions right now - most likely the PulseChain RPC is congested. Retrying automatically every 20 seconds, no action needed."
+                      : "Loading your positions..."}
+                  </p>
+                </div>
               </div>
             )}
 

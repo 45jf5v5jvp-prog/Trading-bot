@@ -66,7 +66,17 @@ async function quoteV2(token, amountRaw) {
     const router = new Contract(ROUTER, ROUTER_ABI, getProvider());
     const amounts = await withTimeout(router.getAmountsOut(amountRaw, [token, WRAPPED]), 8000);
     return amounts[amounts.length - 1];
-  } catch {
+  } catch (e) {
+    // A revert here (no pair, or a pair with reserves too thin to quote) and
+    // an RPC-level failure (timeout, rate limit, connection drop) both land
+    // in this catch and both return null the same way - which is correct
+    // for pricing (either way there's no usable quote right now), but meant
+    // there was previously no way to tell a genuinely illiquid/rugged token
+    // apart from "the shared public RPC hiccuped" from server logs alone.
+    // Logged, not swallowed, so a mass "no liquidity" reading across many
+    // unrelated tokens at once (an RPC problem) is distinguishable from real
+    // liquidity loss (which wouldn't correlate across tokens like that).
+    console.error(`[livePrice] quoteV2(${token}) failed: ${e?.message || e}`);
     return null;
   }
 }

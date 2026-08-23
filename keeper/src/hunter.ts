@@ -199,8 +199,19 @@ function openPositionCount(vault: string): number {
   return r.n;
 }
 
+// Both Strictest (the shared, loosest-across-subscribers detection config)
+// and HunterConfig (a single vault's real settings) carry these same five
+// fields, so checkTriggers can be called once with strictest for detection
+// and again per-vault with each vault's own H for buy-time re-verification -
+// see dispatch() below.
+interface TriggerConfig {
+  requireRsi: boolean; rsiOversold: number;
+  requireMacdCross: boolean;
+  requireBollinger: boolean; bollingerPercentBMax: number;
+}
+
 function checkTriggers(
-  snap: NonNullable<ReturnType<typeof snapshot>>, strictest: Strictest,
+  snap: NonNullable<ReturnType<typeof snapshot>>, strictest: TriggerConfig,
 ): string[] {
   const hits: string[] = [];
   if (strictest.requireRsi && snap.rsi !== null && snap.rsi <= strictest.rsiOversold)
@@ -323,6 +334,7 @@ async function personalizedOrSharedAi(v: VaultRecord, sharedAi: AiVerdict | null
 async function dispatch(
   id: number, token: string, ai: AiVerdict | null, s: DiscoveryScreen, atrPct: number | null, candidates: VaultRecord[],
   profile: TokenProfile | null, liqPls: number, trades24hEquivalent: number,
+  snap: NonNullable<ReturnType<typeof snapshot>>,
 ): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const H = v.hunter;
@@ -340,6 +352,17 @@ async function dispatch(
     // liquidity token.
     if (liqPls < H.minLiquidityPls) return;
     if (trades24hEquivalent < H.minTrades24h) return;
+    // Same bug, same fix, for the RSI/MACD/Bollinger trigger thresholds and
+    // volume-ratio confirmation: the shared detection stage above only ever
+    // checked the loosest-across-subscribers strictest values, never each
+    // vault's own H.rsiOversold/H.bollingerPercentBMax/etc, so a vault with
+    // a strict RSI or Bollinger requirement (or one requiring an indicator
+    // a looser subscriber didn't) could get bought into on a signal that
+    // only cleared some OTHER vault's bar. Re-derive this vault's own
+    // triggers from the same real snap data and require them to clear this
+    // vault's own MIN_AGREEING_SIGNALS bar before buying.
+    if (checkTriggers(snap, H).length < MIN_AGREEING_SIGNALS) return;
+    if (H.requireVolumeConfirmation && (snap.volRatio === null || snap.volRatio < H.minVolumeRatio)) return;
     if (discoveryActions.has(v.address, id)) return;
     if (actionsToday(v.address) >= H.maxPerDay) return;
 
@@ -467,7 +490,7 @@ async function evaluateWatchedToken(
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
   if (s.verdict !== "pass") return;
-  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile, last.liq, trades24hEquivalent);
+  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile, last.liq, trades24hEquivalent, snap);
 }
 
 interface FullModeRow {

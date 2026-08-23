@@ -27,6 +27,7 @@ import HistoryPanel from "../components/HistoryPanel";
 import PnlSnapshot from "../components/PnlSnapshot";
 import Sun from "../components/Sun";
 import ManageVaultByAddress from "../components/ManageVaultByAddress";
+import CopyAddressButton from "../components/CopyAddressButton";
 
 /** Balance in the chain's wrapped base token. The per-chain decimal budget
  * comes from the chain preset: WPLS balances are millions where fractional
@@ -658,7 +659,10 @@ export default function Dashboard() {
                 <span className="n num">{fmtBalance(vaultInfo.baseBalance)}</span>
                 <span className="u">{CHAIN.baseSymbol}</span>
               </div>
-              <p className="hero-sub mono-addr">{vaultAddress}</p>
+              <p className="hero-sub mono-addr" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {vaultAddress}
+                <CopyAddressButton address={vaultAddress} />
+              </p>
               <div className="hero-actions">
                 <button className="btn btn-small" onClick={handleRefresh} disabled={refreshing}>
                   {refreshing ? "Refreshing..." : "Refresh"}

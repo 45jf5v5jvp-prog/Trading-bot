@@ -123,6 +123,7 @@ export default function Dashboard() {
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(""); // shown IN the fixed unsaved-bar itself - see handleSave
   const [history, setHistory] = useState(null);
+  const [historyError, setHistoryError] = useState(false);
   const [portfolio, setPortfolio] = useState(null);
   const [hunterIQ, setHunterIQ] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
@@ -247,7 +248,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (!vaultAddress) return;
     let cancelled = false;
-    const refresh = () => loadHistory(vaultAddress).then((h) => { if (!cancelled) setHistory(h); }).catch(() => {});
+    const refresh = () => loadHistory(vaultAddress)
+      .then((h) => { if (!cancelled) { setHistory(h); setHistoryError(false); } })
+      .catch(() => { if (!cancelled) setHistoryError(true); });
     refresh();
     const id = setInterval(refresh, 20_000);
     return () => { cancelled = true; clearInterval(id); };
@@ -755,16 +758,28 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="hero">
-              <PnlSnapshot history={history} />
-            </div>
+            {history ? (
+              <>
+                <div className="hero">
+                  <PnlSnapshot history={history} />
+                </div>
 
-            <div className="panel">
-              <HistoryPanel
-                history={history} onClosePosition={handleClosePosition} closeStates={closeStates}
-                onWithdrawStuckToken={handleWithdrawStuckToken} withdrawStuckStates={stuckWithdrawStates}
-              />
-            </div>
+                <div className="panel">
+                  <HistoryPanel
+                    history={history} onClosePosition={handleClosePosition} closeStates={closeStates}
+                    onWithdrawStuckToken={handleWithdrawStuckToken} withdrawStuckStates={stuckWithdrawStates}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="panel">
+                <p className="hint" style={{ margin: 0 }}>
+                  {historyError
+                    ? "Couldn't load your positions right now - most likely the PulseChain RPC is congested. Retrying automatically every 20 seconds, no action needed."
+                    : "Loading your positions..."}
+                </p>
+              </div>
+            )}
 
             <div className="panel">
               <PortfolioPanel portfolio={portfolio} />

@@ -806,7 +806,8 @@ export default function Dashboard() {
                 </BotCard>
 
                 <BotCard
-                  title="Hunter IQ Bot"
+                  title={<>Hunter<span className="iq-accent">IQ</span> Bot</>}
+                  titleText="HunterIQ Bot"
                   icon={<HunterIcon />}
                   active={config.hunter.enabled}
                   statLine={botStatLine(history, "hunter")}

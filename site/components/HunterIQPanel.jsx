@@ -140,7 +140,7 @@ export default function HunterIQPanel({ hunterIQ, chatMessages, onSendChat }) {
 
   return (
     <div className="hunter-iq">
-      <div className="section-label">Hunter IQ</div>
+      <div className="section-label">Hunter<span className="iq-accent">IQ</span></div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         Every trade below is justified in plain English. Talk to it below about your strategy, or
         paste a token address to ask what it thinks - it weighs everything you tell it on every

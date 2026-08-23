@@ -12,9 +12,13 @@ import InfoButton from "./InfoButton";
  * hidden until asked for. Most people checking "how's Hunter doing" never
  * need to see a single input field.
  */
-export default function BotCard({ title, active, statLine, perfDetail, info, icon, children, defaultOpen = false }) {
+export default function BotCard({ title, titleText, active, statLine, perfDetail, info, icon, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // title can be JSX (e.g. a two-tone name) - InfoButton needs a plain
+  // string for its aria-label, so titleText is the accessible fallback,
+  // defaulting to title itself when it's already a plain string.
+  const a11yTitle = titleText ?? title;
 
   return (
     <div className={`bot-card${open ? " is-open" : ""}${active ? "" : " is-off"}`}>
@@ -30,7 +34,7 @@ export default function BotCard({ title, active, statLine, perfDetail, info, ico
         <div className="bot-card-titles">
           <div className="row" style={{ gap: 8 }}>
             <span className="bot-card-title">{title}</span>
-            {info && <InfoButton title={title}>{info}</InfoButton>}
+            {info && <InfoButton title={a11yTitle}>{info}</InfoButton>}
             <BotStatusBadge active={active} />
           </div>
           {statLine && <div className="bot-card-stat">{statLine}</div>}

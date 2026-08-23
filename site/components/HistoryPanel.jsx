@@ -367,11 +367,11 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
   const reallyClosed = positions.closed.filter((p) => p.status !== "stuck");
   const rugged = positions.closed.filter((p) => p.status === "stuck");
   const fires = history.fires.filter((f) => matches(f.bot));
-  // Largest current value first - the position worth the most (or losing the
-  // most) is the one most worth seeing without having to scroll for it.
+  // Most recently bought first - what just opened is what you want to see
+  // without scrolling for it.
   const priced = positions.open
     .filter((p) => !hasNoLiquidity(p))
-    .sort((a, b) => (b.valueNowPls ?? 0) - (a.valueNowPls ?? 0));
+    .sort((a, b) => b.opened_at - a.opened_at);
   const noLiquidity = positions.open.filter(hasNoLiquidity);
   const visiblePriced = showMorePositions ? priced : priced.slice(0, DEFAULT_VISIBLE_POSITIONS);
   const hiddenPricedCount = priced.length - visiblePriced.length;

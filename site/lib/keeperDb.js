@@ -44,7 +44,7 @@ function getPositions(vault) {
   const rows = d.prepare(
     `SELECT p.id, p.bot, p.token, p.opened_at, p.entry_price, p.spent_pls, p.tokens_held, p.high_water,
             p.tp_pct, p.sl_pct, p.trail_pct, p.time_exit_min, p.exit_mode, p.status, p.closed_at,
-            p.proceeds_pls, p.close_reason,
+            p.proceeds_pls, p.close_reason, p.last_retry_at,
             o.narrative, o.ai_reasoning AS aiReasoning, o.signal_count AS signalCount
      FROM positions p
      LEFT JOIN fires f ON f.tx_hash = p.source_tx_hash

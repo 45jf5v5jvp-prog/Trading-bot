@@ -20,6 +20,7 @@ setup.exec(`
     spent_pls REAL NOT NULL, tokens_held TEXT NOT NULL, high_water REAL NOT NULL,
     tp_pct REAL, sl_pct REAL, trail_pct REAL, time_exit_min INTEGER, exit_mode TEXT,
     status TEXT NOT NULL DEFAULT 'open', closed_at INTEGER, proceeds_pls REAL, close_reason TEXT,
+    last_retry_at INTEGER,
     source_tx_hash TEXT
   );
   CREATE TABLE fires (

@@ -249,6 +249,14 @@ CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY 
   if (!cols.some((c) => c.name === "loss_sell_pending")) {
     db.exec("ALTER TABLE positions ADD COLUMN loss_sell_pending INTEGER NOT NULL DEFAULT 0");
   }
+  // Stamped every time retryStuckPositions actually checks a stuck position,
+  // whether or not the check finds anything sellable - the dashboard shows
+  // this as "last checked" on Stuck Positions so it's visible proof the
+  // sweep is still alive and retrying, not silently giving up. NULL until a
+  // stuck position's first retry pass.
+  if (!cols.some((c) => c.name === "last_retry_at")) {
+    db.exec("ALTER TABLE positions ADD COLUMN last_retry_at INTEGER");
+  }
 }
 
 // Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request

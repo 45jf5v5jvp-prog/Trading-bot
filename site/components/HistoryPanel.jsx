@@ -13,6 +13,18 @@ function short(addr) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+/** How long ago, in the coarsest unit that still reads as "recent" - proof
+ * for a Stuck Position that the retry sweep is actually still alive on it,
+ * not a precise log. */
+function fmtRelative(unixSeconds) {
+  if (!unixSeconds) return null;
+  const sec = Math.floor(Date.now() / 1000) - unixSeconds;
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
 /** Date for a dense list row. The full toLocaleString wraps to three lines
  * inside a narrow cell on a phone; month/day plus time is enough to place
  * a trade, and seconds never matter here. */
@@ -85,6 +97,11 @@ function ClosedPositionRow({ p, onWithdrawStuckToken, withdrawState }) {
       </div>
       {stuck && (
         <div className="closed-row-action">
+          <span className="hint" style={{ margin: 0 }}>
+            {fmtRelative(p.last_retry_at)
+              ? `Bot last retried this ${fmtRelative(p.last_retry_at)}`
+              : "Waiting on the next retry sweep"}
+          </span>
           <button
             type="button"
             className="btn btn-small btn-danger"

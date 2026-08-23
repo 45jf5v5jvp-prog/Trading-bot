@@ -402,8 +402,16 @@ export async function retryStuckPositions(): Promise<void> {
   const rows = db.prepare(`SELECT * FROM positions WHERE status='stuck'`).all() as Row[];
   if (rows.length === 0) return;
   await mapLimit(rows, CFG.keeperConcurrency, async (r) => {
+    // Stamped regardless of outcome, before the price check below - this is
+    // the dashboard's only visible proof the sweep is still alive on a
+    // position that keeps failing to recover, not just silently giving up.
+    db.prepare(`UPDATE positions SET last_retry_at=? WHERE id=?`).run(Math.floor(Date.now() / 1000), r.id);
+
     const m = await markToMarket(r);
-    if (!m.ok) return; // still can't even price it - leave stuck, try again next sweep
+    if (!m.ok) {
+      log("debug", "positions", `${r.token} in ${r.vault}: still stuck (${m.reason}), will retry next sweep`);
+      return; // still can't even price it - leave stuck, try again next sweep
+    }
 
     log("info", "positions", `${r.token} in ${r.vault}: stuck position prices fine again, attempting to sell`);
     const res = await executeSwap({

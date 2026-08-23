@@ -121,6 +121,17 @@ test("allows hunter maxPerTradePls larger than allocatedPls when allocatedPls is
   assert.equal(out.hunter.maxPerTradePls, 5000);
 });
 
+test("allows hunter maxPerTradePls larger than allocatedPls when allocatedUnlimited is true", () => {
+  const out = normalizeConfig({ hunter: { allocatedPls: 1000, allocatedUnlimited: true, maxPerTradePls: 5000 } });
+  assert.equal(out.hunter.allocatedUnlimited, true);
+  assert.equal(out.hunter.maxPerTradePls, 5000);
+});
+
+test("hunter allocatedUnlimited defaults to false", () => {
+  const out = normalizeConfig({ hunter: { allocatedPls: 1000 } });
+  assert.equal(out.hunter.allocatedUnlimited, false);
+});
+
 test("hunter ATR stop and volume confirmation default off", () => {
   const c = emptyConfig();
   assert.equal(c.hunter.useAtrStop, false);

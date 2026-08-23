@@ -62,18 +62,44 @@ function botStatLine(history, botKey) {
 }
 
 /** Fuller breakdown shown once a BotCard is actually opened - realized vs
- * unrealized, and how many positions are open right now. */
-function botPerfDetail(history, botKey) {
+ * unrealized, and how many positions are open right now. `hunterConfig` is
+ * only passed for the "hunter" card - it's how the near-limit warning below
+ * knows the actual cap to compare against. */
+function botPerfDetail(history, botKey, hunterConfig) {
   if (!history) return null;
   const { realizedPls, unrealizedPls, tradeCount } = pnlForWindow(history, null, botKey);
-  if (tradeCount === 0) return null;
-  const openCount = history.positions.open.filter((p) => p.bot === botKey).length;
+  const openPositions = history.positions.open.filter((p) => p.bot === botKey);
+  const openCount = openPositions.length;
   const unit = CHAIN.nativeSymbol;
   const fmt = (v) => `${v > 0 ? "+" : ""}${v.toLocaleString(undefined, { maximumFractionDigits: CHAIN.valueMaxDecimals })} ${unit}`;
+
+  // Hunter-only: warn once its own dedicated budget is close to full, since
+  // that's exactly what silently looks like "the bot stopped buying" from
+  // the dashboard - see hunter.ts's deployedPls/executeHunterBuy. Only
+  // meaningful when there's still a real cap to run out of.
+  let nearLimit = null;
+  if (botKey === "hunter" && hunterConfig && !hunterConfig.allocatedUnlimited && hunterConfig.allocatedPls > 0) {
+    const deployedPls = openPositions.reduce((sum, p) => sum + (p.spent_pls || 0), 0);
+    const pctUsed = deployedPls / hunterConfig.allocatedPls;
+    if (pctUsed >= 0.9) {
+      nearLimit = (
+        <p className="hint" style={{ marginBottom: 0, marginTop: 4, color: "var(--amber)" }}>
+          {fmt(deployedPls)} of its {fmt(hunterConfig.allocatedPls)} allocation deployed
+          ({Math.round(pctUsed * 100)}%) - new buys will be skipped once it's full. Raise "Allocated
+          {" "}{CHAIN.nativeSymbol}" below, turn on "No cap," or wait for an open position to close.
+        </p>
+      );
+    }
+  }
+
+  if (tradeCount === 0) return nearLimit;
   return (
-    <p className="hint" style={{ marginBottom: 0 }}>
-      {fmt(realizedPls)} realized, {fmt(unrealizedPls)} unrealized &middot; {openCount} open position{openCount === 1 ? "" : "s"}
-    </p>
+    <>
+      <p className="hint" style={{ marginBottom: 0 }}>
+        {fmt(realizedPls)} realized, {fmt(unrealizedPls)} unrealized &middot; {openCount} open position{openCount === 1 ? "" : "s"}
+      </p>
+      {nearLimit}
+    </>
   );
 }
 
@@ -811,7 +837,7 @@ export default function Dashboard() {
                   icon={<HunterIcon />}
                   active={config.hunter.enabled}
                   statLine={botStatLine(history, "hunter")}
-                  perfDetail={botPerfDetail(history, "hunter")}
+                  perfDetail={botPerfDetail(history, "hunter", config.hunter)}
                   info={
                     <>
                       Watches tokens already trading for technical dips - RSI oversold, a bullish MACD

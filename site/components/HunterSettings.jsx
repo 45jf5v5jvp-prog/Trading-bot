@@ -34,7 +34,18 @@ export default function HunterSettings({ hunter, onChange }) {
 
       <div className="field-inline">
         <label>Allocated {CHAIN.nativeSymbol}</label>
-        <NumberField {...num("allocatedPls")} min="0" style={{ width: 110 }} />
+        {hunter.allocatedUnlimited ? (
+          <span className="hint" style={{ margin: 0, fontStyle: "italic" }}>No cap</span>
+        ) : (
+          <NumberField {...num("allocatedPls")} min="0" style={{ width: 110 }} />
+        )}
+        <button
+          type="button"
+          className="btn btn-small"
+          onClick={() => onChange({ ...hunter, allocatedUnlimited: !hunter.allocatedUnlimited })}
+        >
+          {hunter.allocatedUnlimited ? "Set a cap" : "No cap / Unlimited"}
+        </button>
         <label>Max {CHAIN.nativeSymbol} per buy</label>
         <NumberField {...num("maxPerTradePls")} min="0" style={{ width: 100 }} />
         <label>Max buys/day</label>
@@ -46,11 +57,21 @@ export default function HunterSettings({ hunter, onChange }) {
         Hunter Bot never has more than "Allocated" deployed at once across its own open positions -
         it's the amount you're choosing to risk on this bot specifically, separate from the rest of
         the vault. Freed back up as positions close, win or lose, so it can keep reusing that amount.
-        "Max per buy" is a ceiling, not a fixed size - with AI approval on, the AI decides how much
-        of that ceiling to actually spend on each buy (less when it's less confident), full authority
-        up to the number you set here, never more. "Max open positions" caps how many separate bets
-        it can be carrying at once regardless of leftover budget - 0 means no cap.
+        "No cap" removes that budget ceiling entirely - "Max per buy" (still enforced) becomes the
+        only real limit on any one trade. "Max per buy" is a ceiling, not a fixed size - with AI
+        approval on, the AI decides how much of that ceiling to actually spend on each buy (less when
+        it's less confident), full authority up to the number you set here, never more. "Max open
+        positions" caps how many separate bets it can be carrying at once regardless of leftover
+        budget - 0 means no cap.
       </p>
+      {hunter.allocatedUnlimited && Number(hunter.maxOpenPositions) === 0 && (
+        <p className="hint" style={{ marginTop: -6, marginBottom: 14, color: "var(--bad)" }}>
+          With no allocation cap and no "Max open positions" either, this vault's Hunter Bot can open
+          as many positions as it wants - which also means more of its trades competing for the same
+          keeper queue every other vault's bots share. Set a real "Max open positions" number above
+          to keep that bounded without capping your PLS budget.
+        </p>
+      )}
 
       <div className="sub-label">Technical setup (at least one enabled trigger must fire)</div>
 

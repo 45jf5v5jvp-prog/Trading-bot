@@ -219,12 +219,14 @@ function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, 
  */
 async function executeHunterBuy(v: VaultRecord, id: number, token: string, amountPls: number, atrPct: number | null): Promise<void> {
   const H = v.hunter;
-  if (amountPls <= 0 || H.allocatedPls <= 0) return;
+  if (amountPls <= 0 || (!H.allocatedUnlimited && H.allocatedPls <= 0)) return;
 
-  const deployed = deployedPls(v.address);
-  if (deployed + amountPls > H.allocatedPls) {
-    log("info", "hunter", `${v.address} ${token}: ${amountPls} PLS would exceed its ${H.allocatedPls} PLS allocation (${deployed} already deployed), skipping`);
-    return;
+  if (!H.allocatedUnlimited) {
+    const deployed = deployedPls(v.address);
+    if (deployed + amountPls > H.allocatedPls) {
+      log("info", "hunter", `${v.address} ${token}: ${amountPls} PLS would exceed its ${H.allocatedPls} PLS allocation (${deployed} already deployed), skipping`);
+      return;
+    }
   }
 
   if (H.maxOpenPositions > 0 && openPositionCount(v.address) >= H.maxOpenPositions) {
@@ -765,10 +767,12 @@ async function checkPendingRebuys(): Promise<void> {
     if (taxAdjustedPrice > p.targetPrice) return; // hasn't dropped far enough yet
 
     const amountPls = H.maxPerTradePls > 0 ? Math.min(p.amountPls, H.maxPerTradePls) : p.amountPls;
-    if (amountPls <= 0 || H.allocatedPls <= 0) { pendingRebuys.remove(p.id); return; }
+    if (amountPls <= 0 || (!H.allocatedUnlimited && H.allocatedPls <= 0)) { pendingRebuys.remove(p.id); return; }
 
-    const deployed = deployedPls(v.address);
-    if (deployed + amountPls > H.allocatedPls) return; // try again next tick - allocation may free up
+    if (!H.allocatedUnlimited) {
+      const deployed = deployedPls(v.address);
+      if (deployed + amountPls > H.allocatedPls) return; // try again next tick - allocation may free up
+    }
 
     if (H.maxOpenPositions > 0 && openPositionCount(v.address) >= H.maxOpenPositions) return; // try again next tick - a slot may free up
 

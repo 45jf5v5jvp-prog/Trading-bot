@@ -49,12 +49,6 @@ export default function LimitOrdersList({ orders, onChange }) {
 
   return (
     <div>
-      <p className="hint" style={{ marginBottom: 14 }}>
-        Hold a token in this vault (deposit it, or let a buy order fill) and set the exact price
-        you want to sell at or buy more at. Each order fires the instant the market gets there -
-        no screening beyond the trade itself succeeding, since this is a token you already chose.
-        However many you have outstanding, they stay collapsed until you tap one.
-      </p>
       {orders.length === 0 && <p className="hint">No orders yet. Add one to set a target price.</p>}
       {orders.map((o, i) => {
         const open = openIds.has(o.id);

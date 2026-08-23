@@ -15,14 +15,6 @@ export default function HunterSettings({ hunter, onChange }) {
 
   return (
     <div>
-      <p className="hint" style={{ marginBottom: 14 }}>
-        Hunts for oversold dip-buying setups on {CHAIN.dexName} using technical indicators (RSI,
-        MACD, Bollinger Bands), instead of reacting to a new launch or a price/liquidity breakout.
-        Trades a dedicated slice of the vault you choose, not the whole balance. Every candidate
-        still runs the full honeypot/tax/LP-lock/renounce screen, plus a check that catches a price
-        crash caused by liquidity being pulled before it's mistaken for a real dip.
-      </p>
-
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
         <input type="checkbox" checked={hunter.enabled} onChange={(e) => onChange({ ...hunter, enabled: e.target.checked })} />
         {hunter.enabled ? "Hunter Bot is ON" : "Hunter Bot is OFF - settings are saved but it will not hunt for you"}

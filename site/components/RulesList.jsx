@@ -7,9 +7,6 @@ import { addRule, removeRuleAt, updateRuleAt } from "../lib/rulesListOps";
 export default function RulesList({ rules, onChange }) {
   return (
     <div>
-      <p className="hint" style={{ marginBottom: 14 }}>
-        Each one watches a single token and buys the dip (or the top) on its own - add as many as you want.
-      </p>
       {rules.length === 0 && <p className="hint">No bots yet. Add one to start.</p>}
       {rules.map((r, i) => (
         <RuleEditor

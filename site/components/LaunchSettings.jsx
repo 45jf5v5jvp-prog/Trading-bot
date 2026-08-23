@@ -22,8 +22,6 @@ export default function LaunchSettings({ launch, onChange }) {
 
   return (
     <div>
-      <p className="hint" style={{ marginBottom: 14 }}>Buys brand-new {CHAIN.dexName} pairs on {CHAIN.chainName} the moment they open.</p>
-
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
         <input type="checkbox" checked={launch.enabled} onChange={(e) => onChange({ ...launch, enabled: e.target.checked })} />
         {launch.enabled ? "Launch Bot is ON — it will buy new pairs automatically" : "Launch Bot is OFF — settings are saved but it will not trade"}

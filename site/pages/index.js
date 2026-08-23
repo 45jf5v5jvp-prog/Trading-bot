@@ -673,15 +673,17 @@ export default function Dashboard() {
             </div>
 
             <div className="panel">
-              <div className="section-label">Deposit a Token</div>
-              <p className="hint" style={{ marginTop: 0 }}>
-                Already holding a token and want the bot watching it for a take-profit target? Paste
-                its contract address below - this sends it straight from your wallet into the vault
-                (not through the {CHAIN.baseSymbol} Deposit above, which only handles {CHAIN.baseSymbol}
-                itself). Once it lands, it shows up on Current Holdings with a Close Position and
-                Withdraw to Wallet button, same as anything the bot bought itself - add a Limit Order
-                below for your actual target price.
-              </p>
+              <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+                <div className="section-label" style={{ margin: 0 }}>Deposit a Token</div>
+                <InfoButton title="Deposit a Token">
+                  Already holding a token and want the bot watching it for a take-profit target? Paste
+                  its contract address below - this sends it straight from your wallet into the vault
+                  (not through the {CHAIN.baseSymbol} Deposit above, which only handles {CHAIN.baseSymbol}
+                  itself). Once it lands, it shows up on Current Holdings with a Close Position and
+                  Withdraw to Wallet button, same as anything the bot bought itself - add a Limit Order
+                  below for your actual target price.
+                </InfoButton>
+              </div>
               <div className="field-inline">
                 <label>Token address</label>
                 <input

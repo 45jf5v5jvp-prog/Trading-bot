@@ -9,7 +9,7 @@ import { db, aiExitRequests } from "./db.js";
 import { log } from "./log.js";
 
 export interface OpenArgs {
-  vault: string; bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask"; token: string;
+  vault: string; bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask" | "deposit"; token: string;
   spentPls: number; tokensOut: bigint;
   tpPct: number; slPct: number; timeExitMin: number;
   trailPct?: number;
@@ -60,7 +60,7 @@ export function openPosition(a: OpenArgs): void {
 interface Row {
   id: number; vault: string; token: string; opened_at: number; entry_price: number;
   spent_pls: number; tokens_held: string; high_water: number;
-  bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask";
+  bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask" | "deposit";
   tp_pct: number | null; sl_pct: number | null; trail_pct: number | null; time_exit_min: number | null;
   fail_count: number | null; exit_mode: string | null;
 }

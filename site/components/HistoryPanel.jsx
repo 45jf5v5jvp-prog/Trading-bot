@@ -230,10 +230,12 @@ function ExitProgress({ p }) {
 /** One currently-held token: what the bot bought, what it's worth right now
  * (a live DEX quote, not a cached price), and whether that's up or down
  * since entry. This is the "should I close this?" view. */
-function HoldingCard({ p, onClose, closeState }) {
+function HoldingCard({ p, onClose, closeState, onWithdrawStuckToken, withdrawState }) {
   const [showWhy, setShowWhy] = useState(false);
   const requested = closeState === "requested" || closeState === "pending";
   const unit = CHAIN.nativeSymbol;
+  const withdrawing = withdrawState === "pending";
+  const withdrawn = withdrawState === "done";
   // Only Hunter/Discovery buys go through opportunities - see keeperDb.js's
   // getPositions comment. A Launch/Snipe/Rules/Limit/Ask position just has
   // nothing here, same as its narrative already being null - no button to
@@ -284,6 +286,21 @@ function HoldingCard({ p, onClose, closeState }) {
         >
           {closeState === "pending" ? "Requesting..." : requested ? "Close Requested" : "Close Position"}
         </button>
+        {/* Deposit-tracked positions bypassed every screen the bots normally
+            run (tax, honeypot, LP lock) - Close Position needs a real sale
+            to go through, which may not be possible for a bad token. This
+            is the same fallback stuck/rugged positions already have: pull
+            it out directly regardless of whether it can be sold. */}
+        {p.bot === "deposit" && (
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => onWithdrawStuckToken(p.id, p.token)}
+            disabled={withdrawing || withdrawn}
+          >
+            {withdrawn ? "Withdrawn" : withdrawing ? "Withdrawing..." : "Withdraw to Wallet"}
+          </button>
+        )}
       </div>
       {requested && (
         <p className="hint" style={{ marginTop: 6 }}>
@@ -297,7 +314,7 @@ function HoldingCard({ p, onClose, closeState }) {
 
 const BOT_LABELS = {
   all: "All", launch: "Launch", discovery: "Discovery", hunter: "Hunter",
-  trading: "Rules", snipe: "Snipe", limit: "Limit Order", ask: "Ask Icaria",
+  trading: "Rules", snipe: "Snipe", limit: "Limit Order", ask: "Ask Icaria", deposit: "Deposit",
 };
 
 /** Every bot identifier actually present in this vault's history, in a
@@ -389,7 +406,10 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
         <p className="hint">Nothing open worth showing right now - {noLiquidity.length} {noLiquidity.length === 1 ? "position" : "positions"} with no liquidity below.</p>
       )}
       {visiblePriced.map((p) => (
-        <HoldingCard key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]} />
+        <HoldingCard
+          key={p.id} p={p} onClose={onClosePosition} closeState={closeStates?.[p.id]}
+          onWithdrawStuckToken={onWithdrawStuckToken} withdrawState={withdrawStuckStates?.[p.id]}
+        />
       ))}
       {hiddenPricedCount > 0 && (
         <button type="button" className="btn btn-small" style={{ marginBottom: 14 }} onClick={() => setShowMorePositions(true)}>

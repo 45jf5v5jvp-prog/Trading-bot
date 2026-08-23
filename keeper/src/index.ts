@@ -9,6 +9,7 @@ import * as limits from "./limits.js";
 import * as hunter from "./hunter.js";
 import * as marketSeed from "./marketSeed.js";
 import * as ask from "./ask.js";
+import * as deposits from "./deposits.js";
 import * as positions from "./positions.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
@@ -89,6 +90,10 @@ async function main(): Promise<void> {
   // A user waiting on their own "Buy it" click deserves a fast poll, same
   // urgency as snipe/limit orders.
   loop("ask", CFG.positionCheckSec, ask.tick);
+  // Same urgency as ask - an owner who just sent tokens to their vault
+  // wants to see it show up on the dashboard promptly, not wait on a slow
+  // background sweep.
+  loop("deposits", CFG.positionCheckSec, deposits.tick);
   loop("rules", CFG.ruleEvalSec, rules.tick);
   loop("positions", CFG.positionCheckSec, positions.tick);
 

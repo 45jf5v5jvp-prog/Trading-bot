@@ -35,6 +35,12 @@ function getDb() {
       amount_pls   REAL NOT NULL,
       requested_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS deposit_notices (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      vault        TEXT NOT NULL,
+      token        TEXT NOT NULL,
+      requested_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS referrals (
       vault    TEXT PRIMARY KEY,
       referrer TEXT NOT NULL,
@@ -238,6 +244,27 @@ function pendingAskBuyRequests(vault) {
     .map((r) => ({ id: r.id, token: r.token, amountPls: r.amount_pls, requestedAt: r.requested_at }));
 }
 
+function requestDepositNotice(vault, token, nowMs) {
+  const info = getDb()
+    .prepare(`INSERT INTO deposit_notices (vault, token, requested_at) VALUES (?, ?, ?)`)
+    .run(vault.toLowerCase(), token.toLowerCase(), nowMs);
+  return Number(info.lastInsertRowid);
+}
+
+// 24h - plenty of time for a wallet transfer to land, but bounded so a
+// mistyped address or an abandoned deposit doesn't have the keeper checking
+// an empty balance forever. The keeper's own dedup is "does an open deposit
+// position already exist for this token" (see keeper/src/deposits.ts) - this
+// window only bounds how long it keeps trying before that's ever true.
+const DEPOSIT_NOTICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function pendingDepositNotices(vault) {
+  return getDb()
+    .prepare(`SELECT id, token, requested_at FROM deposit_notices WHERE vault = ? AND requested_at >= ? ORDER BY id ASC`)
+    .all(vault.toLowerCase(), Date.now() - DEPOSIT_NOTICE_MAX_AGE_MS)
+    .map((r) => ({ id: r.id, token: r.token, requestedAt: r.requested_at }));
+}
+
 /**
  * Referral program, off-chain by design (see the git history around this
  * feature for why: BotVault.sol's fee split is fixed on chain, and this
@@ -400,6 +427,7 @@ module.exports = {
   requestHunterFeedback, pendingHunterFeedback,
   addHunterChatMessage, getHunterChatMessages,
   requestAskBuy, pendingAskBuyRequests,
+  requestDepositNotice, pendingDepositNotices,
   getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer,
   getReferredVaults, getReferralPaidTotal, recordReferralPayout,
   getOrCreateReferralCode, resolveReferralCode,

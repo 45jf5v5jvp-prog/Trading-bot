@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestHunterFeedback, pendingHunterFeedback, requestAskBuy, pendingAskBuyRequests, getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestHunterFeedback, pendingHunterFeedback, requestAskBuy, pendingAskBuyRequests, requestDepositNotice, pendingDepositNotices, getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -156,6 +156,28 @@ test("requestAskBuy does NOT dedupe - asking to buy the same token twice is two 
   requestAskBuy(vault, token, 100, Date.now());
   requestAskBuy(vault, token, 100, Date.now());
   assert.equal(pendingAskBuyRequests(vault).length, 2);
+});
+
+test("pendingDepositNotices is empty for a vault with no notices", () => {
+  const vault = "0x9".padEnd(42, "9");
+  assert.deepEqual(pendingDepositNotices(vault), []);
+});
+
+test("requestDepositNotice then pendingDepositNotices round-trips the token", () => {
+  const vault = "0x1a".padEnd(42, "a");
+  const token = "0x" + "c".repeat(40);
+  const id = requestDepositNotice(vault, token, Date.now());
+  const pending = pendingDepositNotices(vault);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].id, id);
+  assert.equal(pending[0].token, token);
+});
+
+test("pendingDepositNotices excludes a notice older than the 24h window", () => {
+  const vault = "0x1b".padEnd(42, "b");
+  const token = "0x" + "d".repeat(40);
+  requestDepositNotice(vault, token, Date.now() - 25 * 60 * 60 * 1000);
+  assert.deepEqual(pendingDepositNotices(vault), []);
 });
 
 test("requestClose is case-insensitive on the vault address, like config", () => {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BrowserProvider, Contract, JsonRpcProvider, formatEther, parseEther, ZeroAddress } from "ethers";
+import { BrowserProvider, Contract, JsonRpcProvider, formatEther, formatUnits, parseEther, parseUnits, ZeroAddress } from "ethers";
 import { CHAIN, CHAIN_ID, VAULT_FACTORY, MULTI_VENUE_VAULT_FACTORY, MULTI_VENUE_V4_VAULT_FACTORY, VAULT_FACTORY_ABI, VAULT_ABI, WRAPPED, ERC20_ABI, RPC_URL } from "./contracts";
 import { getWalletConnectProvider, walletConnectConfigured } from "./walletConnect";
+import { notifyDeposit } from "./depositTokenNotice";
 
 /**
  * Waits for a transaction to confirm by polling our own known-good RPC
@@ -285,6 +286,70 @@ export function useVault() {
   }, [vaultAddress, getProvider, refreshVaultInfo]);
 
   /**
+   * Symbol, decimals, and the CONNECTED WALLET's balance of an arbitrary
+   * token - not the vault's balance (that's vaultInfo/getPortfolioToken's
+   * job). Feeds the "Deposit a Token" panel: paste an address, see what you
+   * actually hold before typing an amount, same reasoning as
+   * vaultInfo.walletBaseBalance existing so WPLS deposits aren't a guess.
+   * Returns null on any failure (not a real token, wrong network, etc.) -
+   * the caller shows "can't find that token" rather than a stack trace.
+   */
+  const getTokenWalletInfo = useCallback(async (tokenAddress) => {
+    try {
+      const provider = getProvider();
+      const erc = new Contract(tokenAddress, ERC20_ABI, provider);
+      const [symbol, decimals, balanceRaw] = await Promise.all([
+        erc.symbol(), erc.decimals(), erc.balanceOf(account),
+      ]);
+      return { symbol, decimals, balance: formatUnits(balanceRaw, decimals) };
+    } catch {
+      return null;
+    }
+  }, [account, getProvider]);
+
+  /**
+   * Deposits a token OTHER than the base currency directly into the vault -
+   * a plain wallet-to-vault transfer, not the vault's own deposit()
+   * function (that one only accepts its allow-listed tokens, which on
+   * PulseChain is WPLS alone - see BotVault.sol's deposit()). A plain
+   * ERC20 transfer works for any token regardless of that allow-list, since
+   * the vault doesn't need to cooperate to receive it. After it confirms,
+   * signs and sends a deposit notice so the keeper starts tracking it as a
+   * position (see lib/depositTokenNotice.js and keeper/src/deposits.ts) -
+   * best-effort: if the notice fails to send, the deposit itself already
+   * succeeded, and the keeper will still pick up the balance whenever the
+   * next notice or a manual retry gets through.
+   */
+  const depositToken = useCallback(async (tokenAddress, amount_, onProgress) => {
+    setError(null);
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const erc = new Contract(tokenAddress, ERC20_ABI, signer);
+      const decimals = await erc.decimals();
+      const amount = parseUnits(String(amount_), decimals);
+      onProgress?.("Confirm the transfer in your wallet...");
+      const tx = await erc.transfer(vaultAddress, amount);
+      onProgress?.("Waiting for it to confirm on-chain...");
+      await waitForReceipt(tx.hash);
+      onProgress?.("Telling the bot to start tracking it...");
+      try {
+        await notifyDeposit(getProvider, vaultAddress, tokenAddress);
+      } catch (e) {
+        // The transfer already succeeded - this is just the "please look"
+        // notice failing to send, not the deposit itself. Surfaced as a
+        // status message, not thrown, so the caller doesn't report the
+        // whole deposit as failed when the tokens are already in the vault.
+        onProgress?.(`Deposit sent, but couldn't notify the bot yet: ${e.message}`);
+      }
+      await refreshVaultInfo(vaultAddress);
+    } catch (e) {
+      setError(e.message || String(e));
+      throw e;
+    }
+  }, [vaultAddress, getProvider, refreshVaultInfo]);
+
+  /**
    * Withdraw the wrapped base token from the connected vault back to the
    * owner's wallet. Owner-only on chain - the escape hatch, available
    * directly from the UI.
@@ -388,6 +453,6 @@ export function useVault() {
   return {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
     connectInjected, connectWalletConnect, disconnect,
-    createVault, depositBase, withdrawBase, withdrawToken, setPaused, revokeExecutor, refreshVaultInfo, getProvider,
+    createVault, depositBase, depositToken, getTokenWalletInfo, withdrawBase, withdrawToken, setPaused, revokeExecutor, refreshVaultInfo, getProvider,
   };
 }

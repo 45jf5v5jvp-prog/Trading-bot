@@ -80,7 +80,8 @@ function botPerfDetail(history, botKey) {
 export default function Dashboard() {
   const {
     account, vaultAddress, vaultKind, vaultInfo, connecting, initializing, error,
-    connectInjected, connectWalletConnect, createVault, depositBase, withdrawBase, withdrawToken, setPaused, revokeExecutor, refreshVaultInfo, getProvider,
+    connectInjected, connectWalletConnect, createVault, depositBase, depositToken, getTokenWalletInfo,
+    withdrawBase, withdrawToken, setPaused, revokeExecutor, refreshVaultInfo, getProvider,
   } = useVault();
   const [config, setConfig] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -98,6 +99,13 @@ export default function Dashboard() {
   const [stuckWithdrawStates, setStuckWithdrawStates] = useState({}); // { [positionId]: "pending" | "done" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
+  const [depositTokenAddr, setDepositTokenAddr] = useState("");
+  // null = nothing resolved yet, "loading" mid-lookup, "notfound" resolved
+  // and failed, otherwise { symbol, decimals, balance } for the CONNECTED
+  // WALLET's holding of that token - see useVault's getTokenWalletInfo.
+  const [depositTokenInfo, setDepositTokenInfo] = useState(null);
+  const [depositTokenAmount, setDepositTokenAmount] = useState("");
+  const [depositTokenBusy, setDepositTokenBusy] = useState(false);
   const [referralCode, setReferralCode] = useState(""); // captured from ?ref=, or pasted in manually
   const [referred, setReferred] = useState(false); // whether THIS vault has a referrer bound, once known
   const [myReferralCode, setMyReferralCode] = useState(""); // this wallet's own referral link code
@@ -155,6 +163,23 @@ export default function Dashboard() {
     const id = setInterval(refresh, 20_000);
     return () => { cancelled = true; clearInterval(id); };
   }, [account]);
+
+  // Resolves the "Deposit a Token" address field as soon as it looks like a
+  // real address - debounced so it doesn't fire an RPC call on every
+  // keystroke while someone's still typing or pasting. Shows the wallet's
+  // own balance and symbol before they type an amount, same reasoning as
+  // vaultInfo.walletBaseBalance - no guessing how much they actually hold.
+  useEffect(() => {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(depositTokenAddr)) { setDepositTokenInfo(null); return; }
+    let cancelled = false;
+    setDepositTokenInfo("loading");
+    const id = setTimeout(() => {
+      getTokenWalletInfo(depositTokenAddr).then((info) => {
+        if (!cancelled) setDepositTokenInfo(info ?? "notfound");
+      });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(id); };
+  }, [depositTokenAddr, getTokenWalletInfo]);
 
   /** Every edit to config goes through here so "unsaved changes" stays accurate -
    * nothing takes effect for the keeper until Save All Settings actually signs
@@ -319,6 +344,27 @@ export default function Dashboard() {
       setStatus(`Deposit failed: ${e.message}`);
     } finally {
       setTxBusy(false);
+    }
+  }
+
+  /** Sends a token OTHER than the base currency straight into the vault,
+   * then tells the keeper to start tracking it as a position - see
+   * useVault's depositToken. Distinct from handleDeposit (WPLS only,
+   * through the vault's own deposit() function). */
+  async function handleDepositToken() {
+    if (!depositTokenAddr || !depositTokenAmount) return;
+    setDepositTokenBusy(true);
+    setStatus("");
+    try {
+      await depositToken(depositTokenAddr, depositTokenAmount, setStatus);
+      setStatus(`Deposited ${depositTokenAmount} ${typeof depositTokenInfo === "object" && depositTokenInfo ? depositTokenInfo.symbol : "tokens"}. It'll show up on Current Holdings once the bot notices it.`);
+      setDepositTokenAddr("");
+      setDepositTokenAmount("");
+      setDepositTokenInfo(null);
+    } catch (e) {
+      setStatus(`Token deposit failed: ${e.message}`);
+    } finally {
+      setDepositTokenBusy(false);
     }
   }
 
@@ -622,6 +668,51 @@ export default function Dashboard() {
                 </button>
                 <button type="button" className="btn btn-small" onClick={() => setAmount(vaultInfo.baseBalance)}>
                   Max
+                </button>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="section-label">Deposit a Token</div>
+              <p className="hint" style={{ marginTop: 0 }}>
+                Already holding a token and want the bot watching it for a take-profit target? Paste
+                its contract address below - this sends it straight from your wallet into the vault
+                (not through the {CHAIN.baseSymbol} Deposit above, which only handles {CHAIN.baseSymbol}
+                itself). Once it lands, it shows up on Current Holdings with a Close Position and
+                Withdraw to Wallet button, same as anything the bot bought itself - add a Limit Order
+                below for your actual target price.
+              </p>
+              <div className="field-inline">
+                <label>Token address</label>
+                <input
+                  type="text" placeholder="0x..." value={depositTokenAddr}
+                  onChange={(e) => setDepositTokenAddr(e.target.value.trim())}
+                  style={{ width: 320, fontFamily: "monospace" }}
+                />
+              </div>
+              {depositTokenAddr && (
+                <p className="hint" style={{ marginTop: -6 }}>
+                  {depositTokenInfo === "loading" && "Looking it up..."}
+                  {depositTokenInfo === "notfound" && "Couldn't find that token - check the address."}
+                  {depositTokenInfo && typeof depositTokenInfo === "object" &&
+                    `${depositTokenInfo.symbol}: wallet balance ${fmtBalance(depositTokenInfo.balance)}`}
+                </p>
+              )}
+              <div className="field-inline">
+                <label>Amount</label>
+                <NumberField value={depositTokenAmount} onChange={setDepositTokenAmount} asString style={{ width: 160 }} />
+                {depositTokenInfo && typeof depositTokenInfo === "object" && (
+                  <button type="button" className="btn btn-small" onClick={() => setDepositTokenAmount(depositTokenInfo.balance)}>
+                    Max
+                  </button>
+                )}
+              </div>
+              <div className="row">
+                <button
+                  className="btn btn-primary" onClick={handleDepositToken}
+                  disabled={depositTokenBusy || !depositTokenAmount || typeof depositTokenInfo !== "object" || !depositTokenInfo}
+                >
+                  {depositTokenBusy ? "Working..." : "Deposit Token"}
                 </button>
               </div>
             </div>

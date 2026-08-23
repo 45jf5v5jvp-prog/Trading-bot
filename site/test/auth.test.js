@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet } = require("ethers");
 const { id } = require("ethers");
-const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage } = require("../lib/auth");
+const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage } = require("../lib/auth");
 
 const VAULT = "0x" + "e".repeat(40);
 const wallet = Wallet.createRandom();
@@ -209,6 +209,36 @@ test("authorizeAskBuy rejects an expired timestamp without ever calling the chai
   const readOwner = fakeReader(wallet.address);
   await assert.rejects(
     authorizeAskBuy({ vaultAddress: VAULT, token: ASK_TOKEN, amountPls: 500, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    /expired/,
+  );
+  assert.equal(readOwner.calls.length, 0);
+});
+
+test("authorizeDepositNotice accepts a correctly-signed notice from the real owner", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildDepositNoticeMessage(VAULT, ASK_TOKEN, ts));
+  const readOwner = fakeReader(wallet.address);
+  const result = await authorizeDepositNotice({ vaultAddress: VAULT, token: ASK_TOKEN, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+});
+
+test("authorizeDepositNotice rejects a signature made for a DIFFERENT token", async () => {
+  const ts = Date.now();
+  const otherToken = "0x" + "d".repeat(40);
+  const signature = await wallet.signMessage(buildDepositNoticeMessage(VAULT, ASK_TOKEN, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeDepositNotice({ vaultAddress: VAULT, token: otherToken, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /invalid signature|not this vault's owner/,
+  );
+});
+
+test("authorizeDepositNotice rejects an expired timestamp without ever calling the chain reader", async () => {
+  const staleTs = Date.now() - 10 * 60 * 1000;
+  const signature = await wallet.signMessage(buildDepositNoticeMessage(VAULT, ASK_TOKEN, staleTs));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeDepositNotice({ vaultAddress: VAULT, token: ASK_TOKEN, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);

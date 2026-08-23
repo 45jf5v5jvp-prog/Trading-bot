@@ -61,6 +61,17 @@ function buildReferralMessage(vaultAddress, code, timestampMs) {
   return `Icaria: set referrer via code ${code} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** Same shape, for "I just sent this token to my vault, please start
+ * tracking it" - see pages/api/vaults/[address]/deposit-notices.js. This
+ * doesn't authorize spending anything (the transfer itself is the owner's
+ * own separate signed wallet transaction, not this message) - it only tells
+ * the keeper which token to look at, so the signature exists mainly to stop
+ * an unauthenticated caller from making the keeper burn RPC calls checking
+ * arbitrary token addresses against someone else's vault all day. */
+function buildDepositNoticeMessage(vaultAddress, token, timestampMs) {
+  return `Icaria: track a deposited token ${token.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 /** Same shape, for a Talk to Your Hunter chat message. Binds a hash of the
  * text rather than the text itself - the signed message a wallet shows the
  * owner stays a fixed, readable length regardless of how long their message
@@ -150,8 +161,14 @@ async function authorizeHunterChat({ vaultAddress, textHash, timestampMs, signat
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeDepositNotice({ vaultAddress, token, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildDepositNoticeMessage(vaultAddress, token, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage, MESSAGE_MAX_AGE_MS,
   defaultReadOwner,
 };

@@ -1,5 +1,5 @@
 const { getPositions, getRecentFires } = require("../../../../lib/keeperDb");
-const { priceOpenPositions, attachSymbols } = require("../../../../lib/livePrice");
+const { priceOpenPositions, attachSymbols, attachRealBalance } = require("../../../../lib/livePrice");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -32,11 +32,16 @@ export default async function handler(req, res) {
   }
   const vault = address.toLowerCase();
   const positions = getPositions(vault);
-  const [open, closed, fires] = await Promise.all([
+  const [open, closedWithSymbols, fires] = await Promise.all([
     priceOpenPositions(positions.open, vault),
     attachSymbols(positions.closed),
     attachSymbols(getRecentFires(vault)),
   ]);
+  // A live balanceOf check on top of the symbol lookup, stuck positions
+  // only - see attachRealBalance's own comment. Confirmed-empty ones are
+  // filtered out entirely below rather than shown as if still pending.
+  const closedChecked = await attachRealBalance(closedWithSymbols, vault);
+  const closed = closedChecked.filter((p) => !(p.status === "stuck" && p.hasRealBalance === false));
   res.status(200).json({
     positions: { open, closed },
     fires,

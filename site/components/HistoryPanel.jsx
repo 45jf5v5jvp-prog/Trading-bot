@@ -90,7 +90,9 @@ function ClosedPositionRow({ p, onWithdrawStuckToken, withdrawState }) {
       <div className="closed-row-bottom">
         <span className={`closed-pnl ${pnlClass(pnlPct)}`}>
           {pnlPls === null
-            ? "Never sold - tokens are still in the vault"
+            ? p.hasRealBalance === true
+              ? "Never sold - confirmed still in the vault"
+              : "Never sold - couldn't confirm the live balance just now"
             : `${fmtSignedAmount(pnlPls)} ${unit}${pnlPct !== null ? ` (${fmtPnl(pnlPct)})` : ""}`}
         </span>
         <span className="closed-reason">{shortReason(p.close_reason, p.status)}</span>
@@ -492,7 +494,7 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
 
       <DrillInScreen
         title="Stuck Positions"
-        subtitle={`${rugged.length} the bot couldn't sell - stuck, not confirmed rugged. Could be a real rug pull, or just a bad quote/RPC hiccup it hasn't recovered from yet, and it keeps retrying on its own. Tokens are still in the vault - withdraw them directly any time.`}
+        subtitle={`${rugged.length} the bot couldn't sell - stuck, not confirmed rugged. Could be a real rug pull, or just a bad quote/RPC hiccup it hasn't recovered from yet, and it keeps retrying on its own. A live check confirms these still have a real balance to withdraw - any position with a confirmed-empty balance is left out of this list entirely, since there's nothing left to do for it.`}
         open={showRuggedScreen}
         onClose={() => setShowRuggedScreen(false)}
       >

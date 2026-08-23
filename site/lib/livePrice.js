@@ -306,6 +306,30 @@ async function getTokenMeta(token) {
  * same way so a vault with many closed positions doesn't reintroduce the
  * concurrent-RPC-burst problem that caused false "no liquidity" readings.
  */
+/**
+ * For stuck positions specifically: a real, live balanceOf(vault) check,
+ * independent of the keeper's own retry sweep - done fresh on every
+ * dashboard load. This dashboard used to tell every stuck position's owner
+ * "tokens are still in the vault, withdraw them directly," unconditionally,
+ * even for ones where a live check confirms the real balance is exactly
+ * 0 - misleading an owner into expecting Withdraw to Wallet to find
+ * something it never will. hasRealBalance is null (not false) when the
+ * check itself fails, so the UI can fall back to the old, honest "not sure
+ * either way" wording instead of asserting something it doesn't know.
+ */
+async function attachRealBalance(positions, vaultAddress) {
+  return mapLimit(positions, RPC_CONCURRENCY, async (p) => {
+    if (p.status !== "stuck") return p;
+    try {
+      const erc = new Contract(p.token, ERC20_ABI, getProvider());
+      const bal = await withTimeout(erc.balanceOf(vaultAddress), 8000);
+      return { ...p, hasRealBalance: bal > 0n };
+    } catch {
+      return { ...p, hasRealBalance: null };
+    }
+  });
+}
+
 async function attachSymbols(positions) {
   return mapLimit(positions, RPC_CONCURRENCY, async (p) => {
     try {
@@ -394,4 +418,4 @@ async function getUnitPrice(token) {
   return Number(formatEther(best));
 }
 
-module.exports = { priceOpenPositions, attachSymbols, quotePlsValue, getPortfolio, getUnitPrice };
+module.exports = { priceOpenPositions, attachSymbols, attachRealBalance, quotePlsValue, getPortfolio, getUnitPrice };

@@ -33,5 +33,16 @@ export function pnlForWindow(history, hours, botFilter) {
     }
   }
 
-  return { realizedPls, unrealizedPls, totalPls: realizedPls + unrealizedPls, tradeCount: closedCount + openCount };
+  return {
+    realizedPls, unrealizedPls, totalPls: realizedPls + unrealizedPls,
+    // "How many positions have anything to do with this window at all" -
+    // opened or closed, matching PnlSnapshot's own "positions opened or
+    // closed" copy. NOT the same thing as a completed round trip: a
+    // position that closes doesn't add to this, it just moves from the
+    // open side of the sum to the closed side, so this stays flat across a
+    // close even though real money just came back. closedCount below is
+    // the number that actually means "round trips completed."
+    tradeCount: closedCount + openCount,
+    closedCount,
+  };
 }

@@ -44,16 +44,21 @@ function fmtBalance(v) {
 }
 
 /** One line of context for a bot's collapsed BotCard header - lifetime P&L
- * and how many trades it's actually made, so "how's Hunter doing" is
- * answered before you even tap the card open. Null history (still loading,
- * or no keeper.db reachable yet) shows nothing rather than a misleading 0. */
+ * and how many round trips it's actually completed, so "how's Hunter doing"
+ * is answered before you even tap the card open. Deliberately closedCount,
+ * not tradeCount (open + closed): a position that closes just moves from
+ * the open side of tradeCount to the closed side, so tradeCount doesn't
+ * budge when a real sale happens - closedCount is the number that actually
+ * means "round trips completed," and only moves on a real close, not a buy.
+ * Null history (still loading, or no keeper.db reachable yet) shows nothing
+ * rather than a misleading 0. */
 function botStatLine(history, botKey) {
   if (!history) return null;
-  const { totalPls, tradeCount } = pnlForWindow(history, null, botKey);
+  const { totalPls, tradeCount, closedCount } = pnlForWindow(history, null, botKey);
   if (tradeCount === 0) return "No trades yet";
   const sign = totalPls > 0 ? "+" : "";
   const amount = `${sign}${totalPls.toLocaleString(undefined, { maximumFractionDigits: CHAIN.valueMaxDecimals })} ${CHAIN.nativeSymbol}`;
-  return `${amount} lifetime · ${tradeCount} trade${tradeCount === 1 ? "" : "s"}`;
+  return `${amount} lifetime · ${closedCount} round trip${closedCount === 1 ? "" : "s"} completed`;
 }
 
 /** Fuller breakdown shown once a BotCard is actually opened - realized vs

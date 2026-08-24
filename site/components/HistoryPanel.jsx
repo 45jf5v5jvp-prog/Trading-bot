@@ -66,18 +66,52 @@ function realizedPnlPls(p) {
   return p.proceeds_pls - p.spent_pls;
 }
 
+/** PLS per whole token - these run from a fraction of a cent to many
+ * decimal places depending on the token, so a fixed decimal count either
+ * truncates a tiny price to 0 or pads a large one with noise. Same
+ * toPrecision(6) convention LimitOrderEditor already uses for a price. */
+function fmtPrice(v) {
+  if (v === null || v === undefined || !Number.isFinite(v) || v <= 0) return "-";
+  return v.toPrecision(6);
+}
+
+/** How many whole tokens a closed position's buy actually got, backed out
+ * from spent_pls/entry_price - same relationship hunter.ts's own auto-rebuy
+ * math uses server-side, and it doesn't need a separate decimals lookup
+ * since entry_price is already denominated in real per-token PLS. */
+function tokensSold(p) {
+  if (!p.entry_price || p.entry_price <= 0 || !p.spent_pls) return null;
+  return p.spent_pls / p.entry_price;
+}
+
+/** The average PLS-per-token price a closed position actually sold at,
+ * derived the same way rather than stored separately - proceeds_pls divided
+ * across the same token quantity the buy side implies. Null for a position
+ * that never sold (no proceeds to divide). */
+function exitPrice(p) {
+  const qty = tokensSold(p);
+  if (qty === null || p.proceeds_pls === null || p.proceeds_pls === undefined) return null;
+  return p.proceeds_pls / qty;
+}
+
 /** A "stuck" position is one the keeper gave up retrying (see positions.ts's
  * MAX_STRUCTURAL_EXIT_FAILURES / retirePosition) - it never sold, so it has
  * no proceeds, and nothing will ever retry it automatically. The tokens are
  * still sitting in the vault; this is the only recorded status where a
  * direct-withdraw button is the actual next step. */
 function ClosedPositionRow({ p, onWithdrawStuckToken, withdrawState }) {
+  const [showDetails, setShowDetails] = useState(false);
   const pnlPls = realizedPnlPls(p);
   const pnlPct = realizedPnlPct(p);
   const unit = CHAIN.nativeSymbol;
   const stuck = p.status === "stuck";
   const withdrawing = withdrawState === "pending";
   const withdrawn = withdrawState === "done";
+  // Only a real, completed round trip has a bought-vs-sold story to tell -
+  // a stuck position never sold, so there's no exit price to show.
+  const qty = tokensSold(p);
+  const exit = exitPrice(p);
+  const hasDetails = pnlPls !== null && qty !== null;
   return (
     <div className="closed-row" title={p.close_reason || ""}>
       <div className="closed-row-top">
@@ -97,6 +131,28 @@ function ClosedPositionRow({ p, onWithdrawStuckToken, withdrawState }) {
         </span>
         <span className="closed-reason">{shortReason(p.close_reason, p.status)}</span>
       </div>
+      {hasDetails && (
+        <>
+          <button
+            type="button"
+            className="btn btn-small"
+            style={{ marginTop: 8 }}
+            onClick={() => setShowDetails((s) => !s)}
+          >
+            {showDetails ? "Hide trade details" : "Trade details"}
+          </button>
+          {showDetails && (
+            <div className="hint" style={{ marginTop: 6, lineHeight: 1.6 }}>
+              Bought {qty.toLocaleString(undefined, { maximumFractionDigits: 4 })} {p.symbol || "tokens"}
+              {" "}at {fmtPrice(p.entry_price)} {unit} each ({fmtAmount(p.spent_pls)} {unit} spent)
+              <br />
+              Sold at {fmtPrice(exit)} {unit} each ({fmtAmount(p.proceeds_pls)} {unit} back)
+              <br />
+              = {fmtSignedAmount(pnlPls)} {unit}{pnlPct !== null ? ` (${fmtPnl(pnlPct)})` : ""}
+            </div>
+          )}
+        </>
+      )}
       {stuck && (
         <div className="closed-row-action">
           <span className="hint" style={{ margin: 0 }}>

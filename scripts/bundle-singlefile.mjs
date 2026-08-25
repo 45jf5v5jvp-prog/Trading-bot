@@ -72,16 +72,19 @@ const html = `<!doctype html>
     <link rel="icon" type="image/png" sizes="192x192" href="${icon192}" />
 
     <!-- ==========================================================
-         SHARED LEADERBOARD (optional)
-         Paste your Supabase project URL and public anon key here to let
-         everyone in the group follow the leaderboard on their own phone.
-         Leave both blank to run solo (one phone keeps the card).
-         This is plain text you can edit by hand — no rebuild needed.
+         SETTINGS (optional) — plain text you can edit by hand, no rebuild.
+         • SHARED LEADERBOARD: paste your Supabase project URL + public anon
+           key so the group can follow the money on their own phones. Leave
+           both blank to run solo (one phone keeps the card).
+         • SEARCH ANY COURSE: after deploying the "courses" relay in Supabase,
+           paste its URL into GOLF_PROXY. Your GolfCourseAPI key stays a server
+           secret, never in this file. Leave blank for built-in + manual entry.
          ========================================================== -->
     <script>
       window.SIDE_ACTION_CONFIG = {
         SUPABASE_URL: "",
-        SUPABASE_ANON_KEY: ""
+        SUPABASE_ANON_KEY: "",
+        GOLF_PROXY: ""
       };
     </script>
   </head>

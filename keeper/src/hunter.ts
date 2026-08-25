@@ -3,7 +3,7 @@ import { CFG } from "./config.js";
 import { provider, type Dyn } from "./chain.js";
 import { ERC20_ABI } from "./abis.js";
 import { registry, type VaultRecord, type HunterConfig } from "./registry.js";
-import { watched, opportunities, discoveryActions, aiExitRequests, hunterLessons, pendingRebuys, prices, db } from "./db.js";
+import { watched, opportunities, discoveryActions, aiExitRequests, hunterLessons, pendingRebuys, prices, tokenTraders, db } from "./db.js";
 import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./discovery.js";
 import { candlesForToken } from "./candles.js";
 import { snapshot, liquidityDropIsSuspicious } from "./indicators.js";
@@ -129,6 +129,7 @@ interface Strictest {
   requireVolumeConfirmation: boolean; minVolumeRatio: number;
   minLiquidityPls: number;
   minTrades24h: number;
+  minUniqueTraders24h: number;
   maxBuyTaxBps: number; maxSellTaxBps: number;
   requireLpLock: boolean; requireOwnerRenounced: boolean;
   anyRequireAi: boolean;
@@ -340,7 +341,7 @@ async function personalizedOrSharedAi(v: VaultRecord, sharedAi: AiVerdict | null
 
 async function dispatch(
   id: number, token: string, ai: AiVerdict | null, s: DiscoveryScreen, atrPct: number | null, candidates: VaultRecord[],
-  profile: TokenProfile | null, liqPls: number, trades24hEquivalent: number,
+  profile: TokenProfile | null, liqPls: number, trades24hEquivalent: number, uniqueTraders24h: number,
   snap: NonNullable<ReturnType<typeof snapshot>>,
 ): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
@@ -359,6 +360,10 @@ async function dispatch(
     // liquidity token.
     if (liqPls < H.minLiquidityPls) return;
     if (trades24hEquivalent < H.minTrades24h) return;
+    // Same re-verification, for the same reason - see registry.ts's
+    // minUniqueTraders24h comment for what this actually catches that
+    // trades24hEquivalent alone can't (one wallet trading with itself).
+    if (uniqueTraders24h < H.minUniqueTraders24h) return;
     // Same bug, same fix, for the RSI/MACD/Bollinger trigger thresholds and
     // volume-ratio confirmation: the shared detection stage above only ever
     // checked the loosest-across-subscribers strictest values, never each
@@ -446,6 +451,14 @@ async function evaluateWatchedToken(
   const trades24hEquivalent = hoursAvailable > 0 ? (tradesRecent / hoursAvailable) * 24 : 0;
   if (strictest.minTrades24h > 0 && trades24hEquivalent < strictest.minTrades24h) return;
 
+  // Distinct-wallet check - see db.ts's tokenTraders/registry.ts's
+  // minUniqueTraders24h comments for why this exists alongside trade count
+  // rather than instead of it. Computed regardless of whether the shared
+  // strictest.minUniqueTraders24h is 0, same reasoning as trades24hEquivalent
+  // just above - dispatch() needs the real number for each vault's own floor.
+  const uniqueTraders24h = tokenTraders.count(w.token, dayAgo);
+  if (strictest.minUniqueTraders24h > 0 && uniqueTraders24h < strictest.minUniqueTraders24h) return;
+
   // Hard gate, not configurable - the exact trap this bot exists to avoid.
   // Recorded and shown rather than silently dropped, same as a failed
   // screen: seeing "this looked oversold but liquidity looks pulled" is
@@ -497,7 +510,7 @@ async function evaluateWatchedToken(
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
   if (s.verdict !== "pass") return;
-  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile, last.liq, trades24hEquivalent, snap);
+  await dispatch(id, w.token, ai, s, snap.atrPct, candidates, profile, last.liq, trades24hEquivalent, uniqueTraders24h, snap);
 }
 
 interface FullModeRow {
@@ -1001,6 +1014,7 @@ export async function tick(): Promise<void> {
     minVolumeRatio: volSubs.length ? Math.min(...volSubs.map((c) => c.hunter.minVolumeRatio)) : 0,
     minLiquidityPls: Math.min(...candidates.map((c) => c.hunter.minLiquidityPls)),
     minTrades24h: Math.min(...candidates.map((c) => c.hunter.minTrades24h)),
+    minUniqueTraders24h: Math.min(...candidates.map((c) => c.hunter.minUniqueTraders24h)),
     maxBuyTaxBps: Math.max(...candidates.map((c) => c.hunter.maxBuyTaxBps)),
     maxSellTaxBps: Math.max(...candidates.map((c) => c.hunter.maxSellTaxBps)),
     // Always false here, NOT candidates.every(...) - that was a real bug.

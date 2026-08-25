@@ -179,6 +179,18 @@ export interface HunterConfig {
   // nothing like a small cap's). 0 disables the check.
   minTrades24h: number;
 
+  // How many DIFFERENT wallets need to have traded this token in the last
+  // 24 hours - see hunter.ts's minUniqueTraders24h check and db.ts's
+  // tokenTraders. Answers a question minTrades24h/requireVolumeConfirmation
+  // both miss: a token can clear a trade-count or volume-ratio floor on one
+  // wallet trading with itself repeatedly (wash trading), which reads
+  // exactly like real activity to both of those checks. This can't be
+  // faked the same way - distinct real wallets is what real, broad
+  // interest actually looks like on-chain. Free to compute (reuses the
+  // Swap event's own "to" address, already fetched for volume/trade-count -
+  // no extra RPC cost). 0 disables the check.
+  minUniqueTraders24h: number;
+
   // Auto-rebuy: when a Hunter position closes on a bearish/profit-taking
   // read (an AI exit, a take-profit, or a trailing stop - never a stop-loss
   // or a manual close, see hunter.ts's considerAutoRebuys), place a resting
@@ -333,6 +345,13 @@ const DEFAULT_HUNTER: HunterConfig = {
   // is a real floor a fresh vault gets automatically, not a strict one - an
   // owner who wants tighter or looser can still change it.
   minTrades24h: 30,
+  // New (2026-08-24), alongside the trade-count/volume-ratio checks above -
+  // catches what neither of those can: one wallet trading with itself
+  // repeatedly to fake real activity. 5 is a low bar on purpose - a
+  // genuinely real, actively-traded token clears this easily; a wash-traded
+  // one usually can't clear it at all, since it means finding 5 actually
+  // different wallets, not just 5 trades or a volume surge.
+  minUniqueTraders24h: 5,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
   maxOpenPositions: 0,
 };

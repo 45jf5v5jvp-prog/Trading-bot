@@ -2,7 +2,7 @@ import { Contract, Interface, formatUnits, formatEther, id } from "ethers";
 import { CFG } from "./config.js";
 import { provider, logsProvider, factory, type Dyn } from "./chain.js";
 import { ERC20_ABI, PAIR_ABI } from "./abis.js";
-import { prices, watched, meta, volumeAccum } from "./db.js";
+import { prices, watched, meta, volumeAccum, tokenTraders } from "./db.js";
 import { log } from "./log.js";
 
 /**
@@ -120,12 +120,24 @@ export async function scanSwapVolume(): Promise<void> {
         let parsed;
         try { parsed = SWAP_IFACE.parseLog(l); } catch { continue; }
         if (!parsed) continue;
-        const { amount0In, amount1In, amount0Out, amount1Out } = parsed.args;
+        const { amount0In, amount1In, amount0Out, amount1Out, to } = parsed.args;
         const wplsAmount: bigint = hit.plsFirst
           ? (amount0In as bigint) + (amount0Out as bigint)
           : (amount1In as bigint) + (amount1Out as bigint);
         if (wplsAmount <= 0n) continue;
         volumeAccum.add(hit.token, Number(formatEther(wplsAmount)));
+        // "to" is the swap's real output recipient - the router forwards
+        // each hop's output to the actual next address, and these are
+        // single-pair token/WPLS swaps (not multi-hop), so it's the real
+        // trader's own wallet on both a buy and a sell, not the router
+        // itself (that's "sender", which is unused here - see PAIR_ABI's
+        // comment and token_traders' own comment in db.ts for why this
+        // matters: distinct wallets, not just a trade count). Stamped with
+        // "now" like every other value scanSwapVolume feeds into this poll
+        // cycle (see pollAll's own single `ts`), not the swap's real block
+        // time - consistent with the rest of this file, and avoids an
+        // extra per-log RPC call just for a timestamp.
+        tokenTraders.record(hit.token, to as string, Math.floor(Date.now() / 1000));
         totalMatched++;
       }
       meta.set("last_swap_block", String(chunkEnd));
@@ -155,6 +167,10 @@ export async function pollAll(): Promise<void> {
   log("debug", "prices", `Sampled ${ok}/${list.length} tokens`);
   // Keep 45 days. Longer lookbacks than that are not useful on these markets.
   if (ts % 3600 < CFG.pricePollSec) prices.prune(ts - 45 * 86400);
+  // Keep 2 days - nothing reads token_traders further back than the 24h/48h
+  // windows minUniqueTraders24h actually checks, unlike prices' own real
+  // indicator lookback.
+  if (ts % 3600 < CFG.pricePollSec) tokenTraders.prune(ts - 2 * 86400);
 }
 
 export interface Window { high: number; low: number; last: number; points: number; hours: number }

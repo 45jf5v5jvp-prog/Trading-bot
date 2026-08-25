@@ -78,6 +78,12 @@ const DEFAULT_HUNTER = {
   // hunter.ts's DEFAULT_HUNTER/MIN_AGREEING_SIGNALS comments. A real floor
   // by default, not a strict one - still fully owner-changeable.
   minTrades24h: 30,
+  // New (2026-08-24) - catches what neither trade count nor volume ratio
+  // can: one wallet trading with itself repeatedly to fake real activity.
+  // Counts DISTINCT wallets, not trades - see keeper/src/registry.ts's
+  // minUniqueTraders24h comment. 5 is a low bar; a genuinely traded token
+  // clears it easily, a wash-traded one usually can't clear it at all.
+  minUniqueTraders24h: 5,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
   maxOpenPositions: 0,
 };
@@ -229,7 +235,7 @@ function normalizeHunter(h) {
   for (const field of [
     "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
     "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
-    "atrStopMultiplier", "minVolumeRatio", "minTrades24h",
+    "atrStopMultiplier", "minVolumeRatio", "minTrades24h", "minUniqueTraders24h",
     "autoRebuyDipPct", "autoRebuyExpireHours", "maxOpenPositions",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
@@ -283,6 +289,7 @@ function normalizeHunter(h) {
     requireVolumeConfirmation: Boolean(merged.requireVolumeConfirmation),
     minVolumeRatio: merged.minVolumeRatio,
     minTrades24h: merged.minTrades24h,
+    minUniqueTraders24h: merged.minUniqueTraders24h,
     autoRebuyOnExit: Boolean(merged.autoRebuyOnExit),
     autoRebuyDipPct: merged.autoRebuyDipPct,
     autoRebuyExpireHours: merged.autoRebuyExpireHours,

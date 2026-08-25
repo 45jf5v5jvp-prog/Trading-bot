@@ -28,6 +28,27 @@ CREATE TABLE IF NOT EXISTS token_volume_accum (
   trades INTEGER NOT NULL DEFAULT 0
 );
 
+-- One row per matched Swap event's real trader wallet (the swap's "to"
+-- address - see prices.ts's scanSwapVolume) - free to collect, since it's
+-- the same log already being fetched and parsed for volume/trade-count, no
+-- extra RPC cost. Answers a different question than trades: minTrades24h
+-- (token_volume_accum -> prices.trades) counts separate SWAPS, which one
+-- wallet trading with itself 30 times satisfies just as easily as 30 real
+-- buyers each trading once - COUNT(DISTINCT address) here can't be faked
+-- that way. Rows are NOT deduped at insert time (the same wallet trading
+-- twice in a window just adds two rows) - correctness only needs
+-- COUNT(DISTINCT address) over a window, not a unique-row guarantee, and a
+-- day or two of rows for even a hyperactive token is cheap. Kept to a short
+-- window (see prune below) - unlike prices (45 days, real indicator
+-- lookback), nothing here needs history older than the 24h/48h windows
+-- that actually read it.
+CREATE TABLE IF NOT EXISTS token_traders (
+  token   TEXT NOT NULL,
+  address TEXT NOT NULL,
+  ts      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS token_traders_token_ts ON token_traders(token, ts DESC);
+
 CREATE TABLE IF NOT EXISTS watched (
   token      TEXT PRIMARY KEY,
   symbol     TEXT,
@@ -416,6 +437,30 @@ export const volumeAccum = {
       .get(t) as { vol: number; trades: number } | undefined;
     if (r) db.prepare("UPDATE token_volume_accum SET vol=0, trades=0 WHERE token=?").run(t);
     return { vol: r?.vol ?? 0, trades: r?.trades ?? 0 };
+  },
+};
+
+/**
+ * Distinct-wallet trading activity per token - see token_traders' own
+ * comment for why this exists alongside trade count rather than instead of
+ * it. record() is called once per matched Swap event's real trader wallet
+ * (prices.ts's scanSwapVolume); count() answers "how many DIFFERENT
+ * wallets traded this token in the last N hours" (hunter.ts's
+ * minUniqueTraders24h); prune() bounds the table to a short rolling window
+ * since nothing here reads further back than a day or two.
+ */
+export const tokenTraders = {
+  record(token: string, address: string, ts: number): void {
+    db.prepare("INSERT INTO token_traders(token,address,ts) VALUES(?,?,?)")
+      .run(token.toLowerCase(), address.toLowerCase(), ts);
+  },
+  count(token: string, sinceTs: number): number {
+    const r = db.prepare("SELECT COUNT(DISTINCT address) n FROM token_traders WHERE token=? AND ts>=?")
+      .get(token.toLowerCase(), sinceTs) as { n: number };
+    return r.n;
+  },
+  prune(beforeTs: number): void {
+    db.prepare("DELETE FROM token_traders WHERE ts<?").run(beforeTs);
   },
 };
 

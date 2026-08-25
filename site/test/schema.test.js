@@ -192,6 +192,20 @@ test("accepts requireVolumeConfirmation on with a minVolumeRatio", () => {
   assert.equal(out.hunter.minVolumeRatio, 2);
 });
 
+// New (2026-08-24) - catches what neither trade count nor volume ratio can:
+// one wallet trading with itself repeatedly. See registry.ts/schema.js's
+// minUniqueTraders24h comments.
+test("hunter min unique traders defaults to 5", () => {
+  const c = emptyConfig();
+  assert.equal(c.hunter.minUniqueTraders24h, 5);
+});
+
+test("accepts a custom minUniqueTraders24h and rejects a negative one", () => {
+  const out = normalizeConfig({ hunter: { minUniqueTraders24h: 20 } });
+  assert.equal(out.hunter.minUniqueTraders24h, 20);
+  assert.throws(() => normalizeConfig({ hunter: { minUniqueTraders24h: -1 } }), /minUniqueTraders24h/);
+});
+
 test("accepts a minimal valid snipe target", () => {
   const out = normalizeConfig({
     snipes: [{ enabled: true, token: "0x" + "2".repeat(40), amountPls: 1000 }],

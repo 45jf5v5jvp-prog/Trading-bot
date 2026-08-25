@@ -137,6 +137,17 @@ export default function HunterSettings({ hunter, onChange }) {
         a fixed PLS amount.
       </p>
 
+      <div className="field-inline">
+        <label>Min different wallets trading in the last 24h</label>
+        <NumberField {...num("minUniqueTraders24h")} min="0" style={{ width: 70 }} />
+        <span className="hint" style={{ margin: 0 }}>(0 = off)</span>
+      </div>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        A trade-count floor alone can be faked by one wallet trading with itself over and over -
+        this counts actual DIFFERENT wallets instead, which is much harder to fake and a better
+        sign of real, broad interest rather than one whale making noise.
+      </p>
+
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
         <input
           type="checkbox" checked={hunter.requireVolumeConfirmation}

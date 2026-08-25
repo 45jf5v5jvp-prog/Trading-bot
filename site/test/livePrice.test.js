@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { priceOpenPositions, quotePlsValue, attachRealBalance } = require("../lib/livePrice");
+const { priceOpenPositions, quotePlsValue, attachRealBalance, _rawQuoteCacheForTests } = require("../lib/livePrice");
 
 test("quotePlsValue returns 0 for a fully-exited position without touching the network", async () => {
   const value = await quotePlsValue("0x1111111111111111111111111111111111111111", "0");
@@ -48,4 +48,46 @@ test("attachRealBalance marks a stuck position's balance as null (not false) whe
   );
   assert.equal(result.length, 1);
   assert.equal(result[0].hasRealBalance, null);
+});
+
+// The cross-request raw-quote cache (added so many vault owners' dashboards
+// polling at once don't each independently re-quote the same token+amount -
+// see cachedRawPlsValue's own comment). This sandbox has no network access,
+// so a genuine cache MISS always fails with "no venue could price this
+// token" - these tests seed the cache directly (the exported test-only
+// _rawQuoteCacheForTests Map) and prove quotePlsValue reads a HIT straight
+// back without ever reaching the network, which a real miss could not do.
+test("quotePlsValue returns a cached raw quote without touching the network", async () => {
+  const token = "0x4444444444444444444444444444444444444444";
+  const heldRaw = "5000000000000000000"; // 5 tokens, 18 decimals
+  _rawQuoteCacheForTests.set(`${token}:${heldRaw}`, { value: 42, at: Date.now() });
+  const value = await quotePlsValue(token, heldRaw); // no vaultAddress - skips fee netting, returns the raw cached value
+  assert.equal(value, 42);
+});
+
+test("quotePlsValue rethrows a cached failure without touching the network", async () => {
+  const token = "0x5555555555555555555555555555555555555555";
+  const heldRaw = "1000000000000000000";
+  _rawQuoteCacheForTests.set(`${token}:${heldRaw}`, { error: "TEST_SEEDED_ERROR", at: Date.now() });
+  await assert.rejects(quotePlsValue(token, heldRaw), /TEST_SEEDED_ERROR/);
+});
+
+test("quotePlsValue ignores an expired cache entry and attempts a fresh (here, failing) quote instead", async () => {
+  const token = "0x6666666666666666666666666666666666666666";
+  const heldRaw = "1000000000000000000";
+  // Well past the 12s TTL - a fresh lookup in this network-less sandbox
+  // fails with the real "no venue could price" message, distinct from the
+  // seeded sentinel, proving the stale entry was NOT what answered this.
+  _rawQuoteCacheForTests.set(`${token}:${heldRaw}`, { error: "TEST_SEEDED_ERROR", at: Date.now() - 60_000 });
+  await assert.rejects(quotePlsValue(token, heldRaw), /no venue could price this token/);
+});
+
+test("different held amounts of the same token are cached separately - never share a size-dependent price", async () => {
+  const token = "0x7777777777777777777777777777777777777777";
+  _rawQuoteCacheForTests.set(`${token}:1000000000000000000`, { value: 10, at: Date.now() }); // 1 token -> 10 PLS
+  _rawQuoteCacheForTests.set(`${token}:9000000000000000000`, { value: 55, at: Date.now() }); // 9 tokens -> 55 PLS (worse per-token, real slippage)
+  const small = await quotePlsValue(token, "1000000000000000000");
+  const large = await quotePlsValue(token, "9000000000000000000");
+  assert.equal(small, 10);
+  assert.equal(large, 55);
 });

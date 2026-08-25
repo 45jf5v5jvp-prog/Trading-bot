@@ -9,9 +9,12 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
  * and it needs to be visible to the vault's owner without a separate signed
  * request just to look at a dashboard. Read-only against the keeper's own
  * database - see lib/keeperDb.js. Open positions additionally get a live
- * on-chain quote (valueNowPls, pnlPct) - see lib/livePrice.js - computed
- * fresh on every request rather than cached, so the dashboard reflects
- * what the position is actually worth right now. Closed positions don't
+ * on-chain quote (valueNowPls, pnlPct) - see lib/livePrice.js. The raw
+ * cross-venue quote itself is shared across requests for a few seconds
+ * (cachedRawPlsValue, keyed on the exact token+amount) so many vault
+ * owners' dashboards polling at once don't each re-quote the same token
+ * from scratch, but it never serves a stale price past that short window,
+ * and the per-vault fee/gas netting on top always runs fresh. Closed positions don't
  * need a live quote (nothing to price - the trade is over, or a rugged one
  * has no live price to trust anyway), but still get a token symbol looked
  * up so a Closed/Rugged Positions row says what token it actually was,
@@ -46,9 +49,10 @@ export default async function handler(req, res) {
     positions: { open, closed },
     fires,
     // True lifetime closed-trade totals per bot, unbounded - NOT the same
-    // as summing `closed` above, which (like `open`) only ever holds the
-    // vault's 100 most recently opened positions - see keeperDb.js's
-    // getLifetimeStats for why that matters for a fast-trading vault.
+    // as summing `closed` above, which only ever holds the vault's 100
+    // most recently closed positions (open positions have no such cap -
+    // see keeperDb.js's getPositions) - see keeperDb.js's getLifetimeStats
+    // for why that distinction matters for a fast-trading vault.
     lifetime: getLifetimeStats(vault),
   });
 }

@@ -230,28 +230,52 @@ async function netOfExitCostsPls(rawValuePls, vaultAddress) {
 }
 
 /**
- * Live value of a held token amount in the chain's base units (PLS or ETH),
- * quoted straight off whichever venue prices it best right now - V2, V3, or
- * V4 - not a cached/lagging price. Quoted at the size actually held, same
- * reasoning as the keeper's own positions.ts:markToMarket - a thin pair
- * prices worse at size than at a small probe amount, and the dashboard
- * should show what the position would actually sell for right now, not a
- * misleadingly good mid price.
+ * Raw (pre-vault-fee) quote for an exact token+amount, shared across EVERY
+ * request this server process handles - not just the mapLimit batch within
+ * one dashboard load. Without this, a vault owner's own page already double-
+ * quotes the same token+amount (Current Holdings' tokens_held and the
+ * Portfolio panel's live balance are usually the same number, fetched by two
+ * separate polling requests seconds apart), and two different vault owners
+ * happening to hold the same token get no benefit from each other's request
+ * at all. Confirmed live 2026-08-25: a vault owner asked whether many vault
+ * users polling at once would compound RPC load, and the honest answer at
+ * the time was yes - this is the fix.
  *
- * The V2 leg is discounted by the keeper's own measured sell tax before
- * comparing venues, same fix as positions.ts's markToMarket and hunter.ts's
- * reviewFullModePositions: getAmountsOut is pure reserve arithmetic with no
- * idea a token takes a cut on transfer, so an undiscounted quote reads as
- * far more than a real sale would return - which is exactly what let a
- * position display as up 40% on this dashboard while actually closing at a
- * real loss. V3/V4 aren't discounted since this codebase has no way to
- * measure tax on those venues (see askIcaria.js's simulateV3/simulateV4 -
- * their probes don't return a tax figure at all, same limitation the
- * keeper's own screener.ts has).
+ * Keyed on the exact raw amount, not just the token, deliberately - an AMM
+ * quote is size-dependent (a thin pair prices worse at size than at a small
+ * probe amount, see quotePlsValue's own comment below), so serving one
+ * vault's quote for 1,000,000 held tokens to a different vault holding 100
+ * of the same token would be a wrong price, not just a stale one. This
+ * mostly only ever coalesces genuinely identical lookups (the same
+ * position's own repeat polls, or the rarer case of two vaults holding the
+ * literal same amount) - it does NOT make differently-sized positions in a
+ * popular token share a price, and shouldn't.
+ *
+ * Short TTL (well under the 20s dashboard poll interval) so this never reads
+ * as the getTokenMeta caching bug this codebase already hit once (a single
+ * bad/transient read frozen in as permanent truth) - a failed quote here is
+ * still cached, deliberately, to stop a thin/rugged token from being
+ * retried by every single request within the TTL window (each attempt is up
+ * to three 8s-timeout RPC calls), but only for a few seconds, and the very
+ * next real poll tries fresh again.
  */
-async function quotePlsValue(token, tokensHeldRaw, vaultAddress) {
-  const held = BigInt(tokensHeldRaw);
-  if (held === 0n) return 0;
+const RAW_QUOTE_TTL_MS = 12_000;
+// Prune stale entries once the map grows past this rather than never - a
+// long-uptime process sees many distinct token+amount pairs over weeks
+// (every position ever opened, not just currently-open ones), and this
+// cache has no other cleanup.
+const RAW_QUOTE_CACHE_MAX = 5000;
+const rawQuoteCache = new Map();
+
+function pruneRawQuoteCache() {
+  if (rawQuoteCache.size <= RAW_QUOTE_CACHE_MAX) return;
+  const now = Date.now();
+  for (const [key, entry] of rawQuoteCache) {
+    if (now - entry.at >= RAW_QUOTE_TTL_MS) rawQuoteCache.delete(key);
+  }
+}
+
+async function computeRawPlsValue(token, held) {
   const [v2, v3, v4] = await Promise.all([quoteV2(token, held), quoteV3(token, held), quoteV4(token, held)]);
   const sellTaxBps = getSellTaxBps(token);
   const v2AfterTax = v2 !== null && sellTaxBps
@@ -264,7 +288,44 @@ async function quotePlsValue(token, tokensHeldRaw, vaultAddress) {
   // thrown error, caught below).
   if (candidates.length === 0) throw new Error("no venue could price this token");
   const best = candidates.reduce((a, b) => (b > a ? b : a));
-  const rawValuePls = Number(formatEther(best));
+  return Number(formatEther(best));
+}
+
+async function cachedRawPlsValue(token, held) {
+  const key = `${token.toLowerCase()}:${held.toString()}`;
+  const cached = rawQuoteCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.at < RAW_QUOTE_TTL_MS) {
+    if (cached.error) throw new Error(cached.error);
+    return cached.value;
+  }
+  try {
+    const value = await computeRawPlsValue(token, held);
+    rawQuoteCache.set(key, { value, at: now });
+    return value;
+  } catch (e) {
+    rawQuoteCache.set(key, { error: e.message, at: now });
+    throw e;
+  } finally {
+    pruneRawQuoteCache();
+  }
+}
+
+/**
+ * Live value of a held token amount in the chain's base units (PLS or ETH),
+ * quoted straight off whichever venue prices it best right now - V2, V3, or
+ * V4. Quoted at the size actually held, same reasoning as the keeper's own
+ * positions.ts:markToMarket - a thin pair prices worse at size than at a
+ * small probe amount, and the dashboard should show what the position would
+ * actually sell for right now, not a misleadingly good mid price. The raw
+ * cross-venue quote itself comes from cachedRawPlsValue above (shared,
+ * short-lived); the per-vault fee/gas netting below always runs fresh, since
+ * that part genuinely can differ vault to vault.
+ */
+async function quotePlsValue(token, tokensHeldRaw, vaultAddress) {
+  const held = BigInt(tokensHeldRaw);
+  if (held === 0n) return 0;
+  const rawValuePls = await cachedRawPlsValue(token, held);
   return vaultAddress ? netOfExitCostsPls(rawValuePls, vaultAddress) : rawValuePls;
 }
 
@@ -418,4 +479,12 @@ async function getUnitPrice(token) {
   return Number(formatEther(best));
 }
 
-module.exports = { priceOpenPositions, attachSymbols, attachRealBalance, quotePlsValue, getPortfolio, getUnitPrice };
+module.exports = {
+  priceOpenPositions, attachSymbols, attachRealBalance, quotePlsValue, getPortfolio, getUnitPrice,
+  // Test-only seam: lets a test prove the cross-request cache is actually
+  // being read (seed a value, then confirm quotePlsValue returns it without
+  // ever reaching the network - this sandbox has none, so a real cache miss
+  // fails loudly and distinguishably from a seeded hit) without needing a
+  // mockable provider, which nothing in this file currently has.
+  _rawQuoteCacheForTests: rawQuoteCache,
+};

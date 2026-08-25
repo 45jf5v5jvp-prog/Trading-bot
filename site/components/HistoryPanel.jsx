@@ -472,18 +472,35 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
         )}
       </div>
       {history.positions.open.length > 1 && onCloseAll && (
-        <div className="row" style={{ marginBottom: 10 }}>
-          <button
-            type="button"
-            className="btn btn-small"
-            disabled={closeAllState === "pending"}
-            onClick={onCloseAll}
-            title="Signs once and requests the bot close every open position, across all bots, at whatever the market gives."
-          >
-            {closeAllState === "pending"
-              ? "Requesting..."
-              : `Close All ${history.positions.open.length} Open Positions`}
-          </button>
+        <div style={{ marginBottom: 10 }}>
+          <div className="row">
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={closeAllState?.phase === "pending"}
+              onClick={onCloseAll}
+              title="Signs once and requests the bot close every open position, across all bots, at whatever the market gives."
+            >
+              {closeAllState?.phase === "pending"
+                ? "Requesting..."
+                : `Close All ${history.positions.open.length} Open Positions`}
+            </button>
+          </div>
+          {/* Stays visible right here, not just as a status line elsewhere on
+              the page that's easy to miss after scrolling down to Current
+              Holdings - confirmed live 2026-08-25: an owner closed 57
+              positions, saw no acknowledgment near the button, and couldn't
+              tell the request had actually gone through. */}
+          {closeAllState?.phase === "requested" && (
+            <p className="hint" style={{ marginTop: 6, color: "var(--good)" }}>
+              Close requested for all {closeAllState.count} positions - the bot works through them over the next few minutes, one at a time under the trade rate limit. This list will shrink as each one actually sells.
+            </p>
+          )}
+          {closeAllState?.phase === "error" && (
+            <p className="hint" style={{ marginTop: 6, color: "var(--bad)" }}>
+              Close-all request failed: {closeAllState.message}
+            </p>
+          )}
         </div>
       )}
       {noHistoryYet && <p className="hint">No trades yet. This is normal for a brand-new vault - the bot buys on its own schedule once its settings are saved and it finds a launch that passes screening.</p>}

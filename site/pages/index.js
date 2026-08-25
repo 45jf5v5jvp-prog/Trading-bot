@@ -135,7 +135,7 @@ export default function Dashboard() {
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
-  const [closeAllState, setCloseAllState] = useState(null); // null | "pending" | "requested" | "error"
+  const [closeAllState, setCloseAllState] = useState(null); // null | { phase: "pending" } | { phase: "requested", count } | { phase: "error", message }
   const [stuckWithdrawStates, setStuckWithdrawStates] = useState({}); // { [positionId]: "pending" | "done" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
@@ -519,13 +519,16 @@ export default function Dashboard() {
     const openCount = history?.positions?.open?.length ?? 0;
     if (openCount === 0) return;
     if (!window.confirm(`Close all ${openCount} open position${openCount === 1 ? "" : "s"}? The bot will sell each one at whatever the market gives, not wait for a good exit.`)) return;
-    setCloseAllState("pending");
+    setCloseAllState({ phase: "pending" });
     try {
       await closeAllPositions(getProvider, vaultAddress);
-      setCloseAllState("requested");
+      // Carries its own count rather than reading history.positions.open.length
+      // at render time - that count shrinks as positions actually close, and
+      // this confirmation needs to keep saying what was originally requested.
+      setCloseAllState({ phase: "requested", count: openCount });
       setStatus(`Requested close on all ${openCount} open positions - the bot will work through them over the next few minutes.`);
     } catch (e) {
-      setCloseAllState("error");
+      setCloseAllState({ phase: "error", message: e.message });
       setStatus(`Close-all request failed: ${e.message}`);
     }
   }

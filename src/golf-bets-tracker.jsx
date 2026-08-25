@@ -422,6 +422,20 @@ async function searchCourseDb(q) {
   return (d.courses || []).map(normalizeDbCourse).filter(c => c.tees.length);
 }
 
+/* Turn a thrown fetch error into a short, plain-English reason. A blocked /
+   offline / CORS request surfaces as a TypeError ("Failed to fetch" in Chrome,
+   "Load failed" in Safari, "NetworkError" in Firefox) with no HTTP status. A
+   server that answered with an error code comes through as `Error('... 429')`. */
+function courseSearchReason(e) {
+  const msg = String(e?.message || e || '');
+  const status = (msg.match(/\b(\d{3})\b/) || [])[1];
+  if (status === '429') return 'The course database is busy right now (rate limit). Try again in a minute, or set the card by hand below.';
+  if (status === '401' || status === '403') return 'The course database refused the request (key problem). Set the card by hand below.';
+  if (status) return `The course database returned an error (${status}). Set the card by hand below.`;
+  // No status → the request never completed: offline, DNS, or CORS-blocked.
+  return 'Could not reach the course database — the phone is offline or the browser blocked it. Search your home course above, or set the card by hand below.';
+}
+
 /* --- OpenGolfAPI (keyless fallback) --- */
 const OG = 'https://api.opengolfapi.org/api/v1';
 
@@ -1002,7 +1016,7 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
   const run = async (fn) => {
     setBusy(true); setErr(null);
     try { setList(await fn()); }
-    catch { setErr('Could not reach the course database. Search by name, or set the card by hand below.'); setList(null); }
+    catch (e) { setErr(courseSearchReason(e)); setList(null); }
     setBusy(false);
   };
 

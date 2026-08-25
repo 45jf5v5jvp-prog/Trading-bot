@@ -127,6 +127,23 @@ setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).
 setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 2000, 1.2, 520000, 15);
 setup.prepare(`INSERT INTO prices (token,ts,price,liq,vol) VALUES (?,?,?,?,?)`).run(PRICE_TOKEN, 500, 0.9, 480000, 8); // before the window
 
+// Fixture for getLifetimeStats - a second hunter close (on top of the
+// HUNTER_OPP_TOKEN position already open above, an unrelated closed one
+// here), a stuck position with no proceeds (must be excluded), and a
+// closed position on OTHER_VAULT (must not leak into VAULT's totals).
+setup.prepare(`INSERT INTO positions
+  (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status,closed_at,proceeds_pls,close_reason)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(VAULT, "hunter", "0x" + "5".repeat(40), 800, 1, 1000, "0", 2, "closed", 1300, 1800, "take profit");
+setup.prepare(`INSERT INTO positions
+  (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status,close_reason)
+  VALUES (?,?,?,?,?,?,?,?,?,?)`)
+  .run(VAULT, "hunter", "0x" + "4".repeat(40), 700, 1, 500, "0", 1, "stuck", "cannot sell");
+setup.prepare(`INSERT INTO positions
+  (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status,closed_at,proceeds_pls,close_reason)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+  .run(OTHER_VAULT, "hunter", "0x" + "3".repeat(40), 800, 1, 999, "0", 2, "closed", 1300, 5000, "take profit");
+
 setup.close();
 
 test("returns positions and fires for a vault that has real trading history", () => {
@@ -147,8 +164,13 @@ test("returns positions and fires for a vault that has real trading history", ()
   // The Rules position never went through opportunities/discovery_actions,
   // so it has nothing to resolve - null, not a crash.
   assert.equal(open[1].narrative, null);
-  assert.equal(closed.length, 1);
-  assert.equal(closed[0].close_reason, "take profit 25%");
+  // 3, not 1 - the launch close from the original fixture, plus the hunter
+  // close and hunter stuck position added for getLifetimeStats' own fixture
+  // below (status !== 'open' puts both 'closed' and 'stuck' rows in this
+  // bucket - see getPositions' own comment).
+  assert.equal(closed.length, 3);
+  const launchClose = closed.find((p) => p.bot === "launch");
+  assert.equal(launchClose.close_reason, "take profit 25%");
 
   const fires = getRecentFires(VAULT);
   assert.equal(fires.length, 3);
@@ -172,6 +194,46 @@ test("getTotalFees is 0 for a vault with no trading history at all", () => {
   delete require.cache[require.resolve("../lib/keeperDb")];
   const { getTotalFees } = require("../lib/keeperDb");
   assert.equal(getTotalFees("0x" + "9".repeat(40)), 0);
+});
+
+test("getLifetimeStats returns true unbounded totals per bot, excluding stuck positions and other vaults", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getLifetimeStats } = require("../lib/keeperDb");
+
+  const rows = getLifetimeStats(VAULT);
+  const byBot = Object.fromEntries(rows.map((r) => [r.bot, r]));
+
+  // "launch" closed once: proceeds 250, spent 200 -> +50.
+  assert.equal(byBot.launch.closedCount, 1);
+  assert.equal(byBot.launch.realizedPls, 50);
+  // "hunter" closed once (proceeds 1800, spent 1000 -> +800) - the stuck
+  // hunter position (no proceeds_pls) must NOT be counted or crash the sum.
+  assert.equal(byBot.hunter.closedCount, 1);
+  assert.equal(byBot.hunter.realizedPls, 800);
+  // "trading" only has an open position in this fixture, never closed - no
+  // row at all, not a zeroed-out one, since GROUP BY only emits rows with
+  // at least one match.
+  assert.equal(byBot.trading, undefined);
+});
+
+test("getLifetimeStats is scoped to the requested vault only", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getLifetimeStats } = require("../lib/keeperDb");
+
+  const rows = getLifetimeStats(OTHER_VAULT);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].bot, "hunter");
+  assert.equal(rows[0].closedCount, 1);
+  assert.equal(rows[0].realizedPls, 5000 - 999);
+});
+
+test("getLifetimeStats is empty for a vault with no closed trades", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getLifetimeStats } = require("../lib/keeperDb");
+  assert.deepEqual(getLifetimeStats("0x" + "f".repeat(40)), []);
 });
 
 test("only returns data scoped to the requested vault, never another vault's", () => {

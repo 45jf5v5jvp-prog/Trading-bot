@@ -1,4 +1,4 @@
-const { getPositions, getRecentFires } = require("../../../../lib/keeperDb");
+const { getPositions, getLifetimeStats, getRecentFires } = require("../../../../lib/keeperDb");
 const { priceOpenPositions, attachSymbols, attachRealBalance } = require("../../../../lib/livePrice");
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -45,5 +45,10 @@ export default async function handler(req, res) {
   res.status(200).json({
     positions: { open, closed },
     fires,
+    // True lifetime closed-trade totals per bot, unbounded - NOT the same
+    // as summing `closed` above, which (like `open`) only ever holds the
+    // vault's 100 most recently opened positions - see keeperDb.js's
+    // getLifetimeStats for why that matters for a fast-trading vault.
+    lifetime: getLifetimeStats(vault),
   });
 }

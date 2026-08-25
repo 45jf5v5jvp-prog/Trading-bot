@@ -63,6 +63,32 @@ function getPositions(vault) {
   };
 }
 
+/**
+ * True lifetime closed-trade totals per bot, unbounded - NOT derived from
+ * getPositions' own list, which caps at the vault's 100 most recently
+ * OPENED positions (open and closed combined, across every bot). Found
+ * live (2026-08-24): a vault trading fast enough burns through 100
+ * positions in about a day, so anything computed from that list and
+ * labeled "lifetime" (BotCard's stat line, the P&L Snapshot's "All" tab)
+ * was quietly losing real, older closed trades from both the round-trip
+ * count and the realized total the more active the vault got - the exact
+ * opposite of what a hyperactive bot's owner would expect from "lifetime."
+ * This is a separate, unbounded aggregate query instead, grouped by bot so
+ * callers can look up their own bot's row (or sum every row for a
+ * vault-wide total). 'closed' here means proceeds_pls is set - a stuck
+ * position never has one and is correctly excluded, same convention
+ * pnl.js's own realized-P&L logic already uses.
+ */
+function getLifetimeStats(vault) {
+  const d = getDb();
+  if (!d) return [];
+  return d.prepare(
+    `SELECT bot, COUNT(*) as closedCount, COALESCE(SUM(proceeds_pls - spent_pls), 0) as realizedPls
+     FROM positions WHERE vault = ? AND status = 'closed' AND proceeds_pls IS NOT NULL
+     GROUP BY bot`,
+  ).all(vault.toLowerCase());
+}
+
 function getRecentFires(vault, limit = 25) {
   const d = getDb();
   if (!d) return [];
@@ -265,7 +291,7 @@ function resetForTests() {
 }
 
 module.exports = {
-  getPositions, getRecentFires, getTotalFees, getV4PoolsForToken,
+  getPositions, getLifetimeStats, getRecentFires, getTotalFees, getV4PoolsForToken,
   getOpportunities, getDiscoveryActionsForVault, getRecentPrices,
   getHunterLessons, getHunterTrades, getSellTaxBps,
   resetForTests, resolveDbPath,

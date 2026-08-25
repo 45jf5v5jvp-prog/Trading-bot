@@ -7,6 +7,7 @@ import { sellSignal } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
 import { db, aiExitRequests } from "./db.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 export interface OpenArgs {
   vault: string; bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask" | "deposit"; token: string;
@@ -239,7 +240,7 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
   const api = process.env.CONFIG_API;
   if (!api) return new Set();
   try {
-    const res = await fetch(`${api}/vaults/${vault}/close-requests`);
+    const res = await fetchWithTimeout(`${api}/vaults/${vault}/close-requests`);
     if (!res.ok) return new Set();
     const ids = (await res.json()) as number[];
     return new Set(ids);

@@ -7,6 +7,7 @@ import { executeSwap } from "./executor.js";
 import { openPosition } from "./positions.js";
 import { mapLimit } from "./concurrency.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 /**
  * Executes "Buy it" requests from Ask Icaria (the site's on-demand token
@@ -28,7 +29,7 @@ async function fetchAskBuyRequests(vault: string): Promise<AskBuyRequest[]> {
   const api = process.env.CONFIG_API;
   if (!api) return [];
   try {
-    const res = await fetch(`${api}/vaults/${vault}/ask-buy-requests`);
+    const res = await fetchWithTimeout(`${api}/vaults/${vault}/ask-buy-requests`);
     if (!res.ok) return [];
     return (await res.json()) as AskBuyRequest[];
   } catch (e) {

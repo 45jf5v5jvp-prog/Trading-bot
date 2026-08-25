@@ -1,4 +1,5 @@
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 /**
  * PLS/USD, fetched from CoinGecko's public simple-price endpoint and cached.
@@ -19,7 +20,7 @@ const FALLBACK_USD = 0.00003;
 export async function plsUsd(): Promise<number> {
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.price;
   try {
-    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=pulsechain&vs_currencies=usd");
+    const res = await fetchWithTimeout("https://api.coingecko.com/api/v3/simple/price?ids=pulsechain&vs_currencies=usd");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const j = (await res.json()) as { pulsechain?: { usd?: number } };
     const p = j.pulsechain?.usd;

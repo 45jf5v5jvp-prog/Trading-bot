@@ -8,6 +8,7 @@ import { openPosition } from "./positions.js";
 import { mapLimit } from "./concurrency.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 /**
  * Turns a manually-deposited token into a tracked position, so it shows up
@@ -27,7 +28,7 @@ async function fetchDepositNotices(vault: string): Promise<DepositNotice[]> {
   const api = process.env.CONFIG_API;
   if (!api) return [];
   try {
-    const res = await fetch(`${api}/vaults/${vault}/deposit-notices`);
+    const res = await fetchWithTimeout(`${api}/vaults/${vault}/deposit-notices`);
     if (!res.ok) return [];
     return (await res.json()) as DepositNotice[];
   } catch (e) {

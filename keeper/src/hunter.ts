@@ -14,6 +14,7 @@ import { openPosition, positionsValuePls } from "./positions.js";
 import { exceedsHoldingCap } from "./portfolio.js";
 import { mapLimit } from "./concurrency.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 /**
  * Hunter Bot: hunts technical dip-buying setups (RSI oversold, a bullish
@@ -662,7 +663,7 @@ async function fetchOwnerFeedback(vault: string): Promise<FetchedFeedback[]> {
   const api = process.env.CONFIG_API;
   if (!api) return [];
   try {
-    const res = await fetch(`${api}/vaults/${vault}/hunter-feedback-requests`);
+    const res = await fetchWithTimeout(`${api}/vaults/${vault}/hunter-feedback-requests`);
     if (!res.ok) return [];
     return (await res.json()) as FetchedFeedback[];
   } catch (e) {

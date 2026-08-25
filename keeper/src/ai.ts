@@ -1,6 +1,13 @@
 import { CFG } from "./config.js";
 import { plsUsd } from "./plsPrice.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
+
+// Longer than the default 8s used for everything else - a real completion
+// (especially with tool use) can legitimately take longer than a simple
+// JSON API call, and this should only fire on a genuine hang, not normal
+// latency.
+const CLAUDE_TIMEOUT_MS = 30_000;
 
 /**
  * Thin wrapper around the Claude API. Shared by two callers:
@@ -138,7 +145,7 @@ async function callClaude(
     return null;
   }
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -152,7 +159,7 @@ async function callClaude(
         messages: [{ role: "user", content: userContent }],
         ...(tool ? { tools: [tool], tool_choice: { type: "tool", name: tool.name } } : {}),
       }),
-    });
+    }, CLAUDE_TIMEOUT_MS);
     if (!res.ok) {
       log("warn", "ai", `Claude API returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
       return null;

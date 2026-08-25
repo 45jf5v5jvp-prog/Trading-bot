@@ -11,6 +11,7 @@ import { mapLimit } from "./concurrency.js";
 import { looksLikeStablecoin } from "./indicators.js";
 import { plsUsd } from "./plsPrice.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 /**
  * Discovery Bot: instead of waiting on a fresh launch or a user-chosen
@@ -219,7 +220,7 @@ export async function fetchBuyRequests(vault: string): Promise<BuyRequest[]> {
   const api = process.env.CONFIG_API;
   if (!api) return [];
   try {
-    const res = await fetch(`${api}/vaults/${vault}/discovery-buy-requests`);
+    const res = await fetchWithTimeout(`${api}/vaults/${vault}/discovery-buy-requests`);
     if (!res.ok) return [];
     return (await res.json()) as BuyRequest[];
   } catch (e) {

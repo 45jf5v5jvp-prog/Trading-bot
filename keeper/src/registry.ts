@@ -4,6 +4,7 @@ import { provider, type Dyn } from "./chain.js";
 import { VAULT_ABI, VAULT_FACTORY_ABI } from "./abis.js";
 import { mapLimit } from "./concurrency.js";
 import { log } from "./log.js";
+import { fetchWithTimeout } from "./httpTimeout.js";
 
 /**
  * Bot configuration lives off chain. The vault holds funds and enforces hard
@@ -403,7 +404,7 @@ async function loadConfig(vault: string): Promise<LoadedConfig> {
   const api = process.env.CONFIG_API;
   if (api) {
     try {
-      const res = await fetch(`${api}/vaults/${vault}/config`);
+      const res = await fetchWithTimeout(`${api}/vaults/${vault}/config`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return shape((await res.json()) as RawConfig);
     } catch (e) {

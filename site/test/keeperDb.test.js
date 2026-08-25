@@ -144,6 +144,27 @@ setup.prepare(`INSERT INTO positions
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
   .run(OTHER_VAULT, "hunter", "0x" + "3".repeat(40), 800, 1, 999, "0", 2, "closed", 1300, 5000, "take profit");
 
+// Fixture for the open-positions-must-never-be-capped regression: a vault
+// trading heavily enough that its open positions alone exceed the 100-row
+// cap getPositions used to apply across open+closed combined (see
+// getPositions' own comment - a fast-trading vault's real open positions
+// could be crowded out of the site's view by newer closed rows sharing the
+// same LIMIT). 120 open positions here, plus a handful of closed ones
+// newer than some of the opens, so a combined-and-capped query would drop
+// opens while this fixture's separate/uncapped query should not.
+const BUSY_VAULT = "0x" + "2".repeat(40);
+for (let i = 0; i < 120; i++) {
+  setup.prepare(`INSERT INTO positions (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status)
+    VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(BUSY_VAULT, "hunter", "0x" + i.toString(16).padStart(40, "0"), 2000 + i, 1, 10, "0", 1, "open");
+}
+for (let i = 0; i < 10; i++) {
+  setup.prepare(`INSERT INTO positions
+    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,status,closed_at,proceeds_pls,close_reason)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(BUSY_VAULT, "hunter", "0x" + (200 + i).toString(16).padStart(40, "0"), 2100 + i, 1, 10, "0", 1, "closed", 3000 + i, 9, "take profit");
+}
+
 setup.close();
 
 test("returns positions and fires for a vault that has real trading history", () => {
@@ -179,6 +200,21 @@ test("returns positions and fires for a vault that has real trading history", ()
   assert.equal(fires[0].side, null);
   assert.equal(fires[1].side, "sell");
   assert.equal(fires[2].side, "buy");
+});
+
+test("getPositions never caps open positions, even when they outnumber the closed-history cap", () => {
+  process.env.KEEPER_DB_PATH = FAKE_KEEPER_DB;
+  delete require.cache[require.resolve("../lib/keeperDb")];
+  const { getPositions } = require("../lib/keeperDb");
+
+  const { open, closed } = getPositions(BUSY_VAULT);
+  // All 120 open positions come back, not just whatever fits under the old
+  // shared 100-row combined cap - this is the exact bug a vault owner hit
+  // live with 50 open positions on 2026-08-24.
+  assert.equal(open.length, 120);
+  // Closed history stays capped (there are only 10 here, well under the
+  // 100-row cap, so this just proves closed still works alongside opens).
+  assert.equal(closed.length, 10);
 });
 
 test("getTotalFees sums every fire's fee for a vault, scoped to that vault only", () => {

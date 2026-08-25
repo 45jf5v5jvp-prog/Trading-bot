@@ -5,7 +5,7 @@ import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
 import { loadHunterIQ } from "../lib/loadHunterIQ";
-import { closePosition } from "../lib/closePosition";
+import { closePosition, closeAllPositions } from "../lib/closePosition";
 import { loadHunterChat, sendHunterChatMessage } from "../lib/talkToHunter";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { APP_VERSION } from "../lib/version";
@@ -135,6 +135,7 @@ export default function Dashboard() {
   const [txBusy, setTxBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closeStates, setCloseStates] = useState({}); // { [positionId]: "pending" | "requested" | "error" }
+  const [closeAllState, setCloseAllState] = useState(null); // null | "pending" | "requested" | "error"
   const [stuckWithdrawStates, setStuckWithdrawStates] = useState({}); // { [positionId]: "pending" | "done" | "error" }
   const [tokenWithdrawAddr, setTokenWithdrawAddr] = useState("");
   const [tokenWithdrawBusy, setTokenWithdrawBusy] = useState(false);
@@ -508,6 +509,27 @@ export default function Dashboard() {
     }
   }
 
+  /** One signature, every currently-open position requested closed - see
+   * lib/closePosition.js's closeAllPositions. Exists because closing dozens
+   * of positions one at a time needs that many separate wallet signatures,
+   * which isn't realistic to actually get through (confirmed live
+   * 2026-08-24). A native confirm() first since this touches every open
+   * position at once - cheap insurance against a stray tap. */
+  async function handleCloseAllPositions() {
+    const openCount = history?.positions?.open?.length ?? 0;
+    if (openCount === 0) return;
+    if (!window.confirm(`Close all ${openCount} open position${openCount === 1 ? "" : "s"}? The bot will sell each one at whatever the market gives, not wait for a good exit.`)) return;
+    setCloseAllState("pending");
+    try {
+      await closeAllPositions(getProvider, vaultAddress);
+      setCloseAllState("requested");
+      setStatus(`Requested close on all ${openCount} open positions - the bot will work through them over the next few minutes.`);
+    } catch (e) {
+      setCloseAllState("error");
+      setStatus(`Close-all request failed: ${e.message}`);
+    }
+  }
+
   /** Copies this wallet's own referral link. Falls back to selecting the text
    * for manual copy on a browser that blocks the clipboard API (some in-app
    * wallet browsers do), rather than failing silently. */
@@ -790,6 +812,7 @@ export default function Dashboard() {
                   <HistoryPanel
                     history={history} onClosePosition={handleClosePosition} closeStates={closeStates}
                     onWithdrawStuckToken={handleWithdrawStuckToken} withdrawStuckStates={stuckWithdrawStates}
+                    onCloseAll={handleCloseAllPositions} closeAllState={closeAllState}
                   />
                 </div>
               </>

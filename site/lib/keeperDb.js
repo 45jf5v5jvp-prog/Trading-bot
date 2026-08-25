@@ -31,36 +31,53 @@ function getDb() {
   return db;
 }
 
+// narrative/aiReasoning/signalCount: the same buy-time rationale
+// getHunterTrades already surfaces for Hunter's closed-trade feed, joined in
+// here for every position (open or closed, any bot) via source_tx_hash -
+// not just Hunter's. Only Hunter and Discovery buys actually go through
+// opportunities/discovery_actions, so a Launch/Snipe/Rules/Limit/Ask
+// position just gets null here, same as it always would have - nothing to
+// show a rationale for on those, not a bug.
+const POSITION_COLUMNS = `p.id, p.bot, p.token, p.opened_at, p.entry_price, p.spent_pls, p.tokens_held, p.high_water,
+            p.tp_pct, p.sl_pct, p.trail_pct, p.time_exit_min, p.exit_mode, p.status, p.closed_at,
+            p.proceeds_pls, p.close_reason, p.last_retry_at,
+            o.narrative, o.ai_reasoning AS aiReasoning, o.signal_count AS signalCount`;
+const POSITION_JOINS = `FROM positions p
+     LEFT JOIN fires f ON f.tx_hash = p.source_tx_hash
+     LEFT JOIN discovery_actions a ON a.vault = f.vault AND a.tx_hash = f.tx_hash AND a.action = 'bought'
+     LEFT JOIN opportunities o ON o.id = a.opportunity_id`;
+
 function getPositions(vault) {
   const d = getDb();
   if (!d) return { open: [], closed: [] };
-  // narrative/aiReasoning/signalCount: the same buy-time rationale
-  // getHunterTrades already surfaces for Hunter's closed-trade feed, joined
-  // in here for every position (open or closed, any bot) via source_tx_hash
-  // - not just Hunter's. Only Hunter and Discovery buys actually go through
-  // opportunities/discovery_actions, so a Launch/Snipe/Rules/Limit/Ask
-  // position just gets null here, same as it always would have - nothing
-  // to show a rationale for on those, not a bug.
-  const rows = d.prepare(
-    `SELECT p.id, p.bot, p.token, p.opened_at, p.entry_price, p.spent_pls, p.tokens_held, p.high_water,
-            p.tp_pct, p.sl_pct, p.trail_pct, p.time_exit_min, p.exit_mode, p.status, p.closed_at,
-            p.proceeds_pls, p.close_reason, p.last_retry_at,
-            o.narrative, o.ai_reasoning AS aiReasoning, o.signal_count AS signalCount
-     FROM positions p
-     LEFT JOIN fires f ON f.tx_hash = p.source_tx_hash
-     LEFT JOIN discovery_actions a ON a.vault = f.vault AND a.tx_hash = f.tx_hash AND a.action = 'bought'
-     LEFT JOIN opportunities o ON o.id = a.opportunity_id
-     WHERE p.vault = ? ORDER BY p.opened_at DESC LIMIT 100`,
-  ).all(vault.toLowerCase());
-  return {
-    open: rows.filter((r) => r.status === "open"),
-    // Sorted by when each position actually CLOSED, not opened - the shared
-    // query above orders everything by opened_at, which is right for open
-    // positions but scrambles the closed list: a position opened early but
-    // closed late (or the reverse) no longer lines up with when it actually
-    // happened, so "most recent" at the top wasn't reliably most recent.
-    closed: rows.filter((r) => r.status !== "open").sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0)),
-  };
+  const v = vault.toLowerCase();
+
+  // Open positions are NEVER capped - every one is live and actionable, not
+  // history. Found live (2026-08-24): the old query capped open+closed
+  // COMBINED at 100 rows, ordered by opened_at - a vault that traded
+  // heavily that same day had its own currently-open positions crowded out
+  // by newer closed trades, everywhere this list is read (Current Holdings,
+  // Talk to Your Hunter's context, the round-trip/lifetime figures fixed
+  // earlier tonight). A vault owner with 50 real open positions saw only
+  // ~8 of them - unacceptable for something the owner needs to see and be
+  // able to act on in full.
+  const open = d.prepare(
+    `SELECT ${POSITION_COLUMNS} ${POSITION_JOINS} WHERE p.vault = ? AND p.status = 'open' ORDER BY p.opened_at DESC`,
+  ).all(v);
+
+  // Closed/stuck history IS still capped, deliberately - unlike an open
+  // position, nothing about an old closed trade needs action, and this list
+  // only grows across a vault's lifetime. Ordered by when it actually
+  // CLOSED, not opened (closed_at, not opened_at - a position opened early
+  // but closed late, or the reverse, wouldn't otherwise sort as "most
+  // recent" correctly); COALESCE treats a stuck position's null closed_at
+  // as unclosed rather than crashing the sort.
+  const closed = d.prepare(
+    `SELECT ${POSITION_COLUMNS} ${POSITION_JOINS} WHERE p.vault = ? AND p.status != 'open'
+     ORDER BY COALESCE(p.closed_at, 0) DESC LIMIT 100`,
+  ).all(v);
+
+  return { open, closed };
 }
 
 /**

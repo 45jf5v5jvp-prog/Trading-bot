@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet } = require("ethers");
 const { id } = require("ethers");
-const { authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage } = require("../lib/auth");
+const { authorizeConfigWrite, authorizeClose, authorizeCloseAll, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, buildMessage, buildCloseMessage, buildCloseAllMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage } = require("../lib/auth");
 
 const VAULT = "0x" + "e".repeat(40);
 const wallet = Wallet.createRandom();
@@ -131,6 +131,47 @@ test("authorizeClose rejects an expired timestamp without ever calling the chain
     /expired/,
   );
   assert.equal(readOwner.calls.length, 0);
+});
+
+test("authorizeCloseAll accepts a correctly-signed close-all request from the real owner", async () => {
+  const ts = Date.now();
+  const signature = await wallet.signMessage(buildCloseAllMessage(VAULT, ts));
+  const readOwner = fakeReader(wallet.address);
+  const result = await authorizeCloseAll({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner });
+  assert.equal(result.signer.toLowerCase(), wallet.address.toLowerCase());
+});
+
+test("authorizeCloseAll rejects a signature made for a DIFFERENT vault (can't retarget a captured signature)", async () => {
+  const ts = Date.now();
+  const otherVault = "0x" + "f".repeat(40);
+  const signature = await wallet.signMessage(buildCloseAllMessage(otherVault, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeCloseAll({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
+});
+
+test("authorizeCloseAll rejects an expired timestamp without ever calling the chain reader", async () => {
+  const staleTs = Date.now() - 10 * 60 * 1000;
+  const signature = await wallet.signMessage(buildCloseAllMessage(VAULT, staleTs));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeCloseAll({ vaultAddress: VAULT, timestampMs: staleTs, signature, rpcUrl: "unused", readOwner }),
+    /expired/,
+  );
+  assert.equal(readOwner.calls.length, 0);
+});
+
+test("authorizeCloseAll's message is distinct from a single close's - a signature for one can't authorize the other", async () => {
+  const ts = Date.now();
+  // Signed to close position 5, replayed as if it authorized close-all.
+  const signature = await wallet.signMessage(buildCloseMessage(VAULT, 5, ts));
+  const readOwner = fakeReader(wallet.address);
+  await assert.rejects(
+    authorizeCloseAll({ vaultAddress: VAULT, timestampMs: ts, signature, rpcUrl: "unused", readOwner }),
+    /not this vault's owner/,
+  );
 });
 
 test("authorizeBuyOpportunity accepts a correctly-signed buy request from the real owner", async () => {

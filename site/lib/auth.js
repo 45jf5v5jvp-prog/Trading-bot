@@ -32,6 +32,19 @@ function buildCloseMessage(vaultAddress, positionId, timestampMs) {
   return `Icaria: close position ${positionId} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
+/** "Close everything open right now" - deliberately does NOT bind a list of
+ * position IDs into the message. Closing 50 positions one at a time would
+ * mean 50 separate wallet signature prompts, which isn't realistic to
+ * actually get through (confirmed live 2026-08-24 - a vault owner tried to
+ * close their open positions individually and most never even got
+ * submitted). The server resolves "every position open for this vault
+ * right now" itself at request time (see close-all-requests.js), rather
+ * than trusting a client-supplied ID list that could be stale or
+ * incomplete by the time it's acted on. */
+function buildCloseAllMessage(vaultAddress, timestampMs) {
+  return `Icaria: close all open positions for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
+}
+
 /** Same shape, for "buy this Discovery/Hunter Bot opportunity now" - binds
  * the specific amount into the message, same reasoning as
  * buildAskBuyMessage below: a signature authorizing 500 PLS must never be
@@ -137,6 +150,12 @@ async function authorizeClose({ vaultAddress, positionId, timestampMs, signature
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
+async function authorizeCloseAll({ vaultAddress, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
+  checkFresh(timestampMs);
+  const expectedMessage = buildCloseAllMessage(vaultAddress, timestampMs);
+  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
+}
+
 async function authorizeBuyOpportunity({ vaultAddress, opportunityId, amountPls, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
   checkFresh(timestampMs);
   const expectedMessage = buildBuyOpportunityMessage(vaultAddress, opportunityId, amountPls, timestampMs);
@@ -168,7 +187,7 @@ async function authorizeDepositNotice({ vaultAddress, token, timestampMs, signat
 }
 
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeCloseAll, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildCloseAllMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage, MESSAGE_MAX_AGE_MS,
   defaultReadOwner,
 };

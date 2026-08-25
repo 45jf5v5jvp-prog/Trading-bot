@@ -418,7 +418,7 @@ function botsPresent(history) {
 // positions doesn't turn this into the whole page.
 const DEFAULT_VISIBLE_POSITIONS = 3;
 
-export default function HistoryPanel({ history, onClosePosition, closeStates, onWithdrawStuckToken, withdrawStuckStates }) {
+export default function HistoryPanel({ history, onClosePosition, closeStates, onWithdrawStuckToken, withdrawStuckStates, onCloseAll, closeAllState }) {
   const [showNoLiquidity, setShowNoLiquidity] = useState(false);
   const [showTradesScreen, setShowTradesScreen] = useState(false);
   const [showMorePositions, setShowMorePositions] = useState(false);
@@ -471,6 +471,21 @@ export default function HistoryPanel({ history, onClosePosition, closeStates, on
           </div>
         )}
       </div>
+      {history.positions.open.length > 1 && onCloseAll && (
+        <div className="row" style={{ marginBottom: 10 }}>
+          <button
+            type="button"
+            className="btn btn-small"
+            disabled={closeAllState === "pending"}
+            onClick={onCloseAll}
+            title="Signs once and requests the bot close every open position, across all bots, at whatever the market gives."
+          >
+            {closeAllState === "pending"
+              ? "Requesting..."
+              : `Close All ${history.positions.open.length} Open Positions`}
+          </button>
+        </div>
+      )}
       {noHistoryYet && <p className="hint">No trades yet. This is normal for a brand-new vault - the bot buys on its own schedule once its settings are saved and it finds a launch that passes screening.</p>}
       {!noHistoryYet && botFilter !== "all" && positions.open.length === 0 && positions.closed.length === 0 && fires.length === 0 && (
         <p className="hint">Nothing from {BOT_LABELS[botFilter]} yet.</p>

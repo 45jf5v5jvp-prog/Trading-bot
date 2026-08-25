@@ -144,7 +144,12 @@ h1, h2, h3 { font-weight: 600; }
   font-family: 'Montserrat', system-ui, sans-serif; font-size: 10.5px;
   text-transform: uppercase; letter-spacing: 0.18em; color: var(--ash);
 }
-.hero-balance { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 4px; }
+.hero-balance-label {
+  display: block; margin-top: 14px;
+  font-family: 'Montserrat', system-ui, sans-serif; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.12em; color: var(--ash);
+}
+.hero-balance { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 4px; }
 .hero-balance .n { font-size: 38px; font-weight: 700; letter-spacing: -0.01em; }
 .hero-balance .u { font-size: 14px; color: var(--ash); font-weight: 600; }
 .hero-sub { color: var(--ash); font-size: 12px; margin: 0 0 16px; }

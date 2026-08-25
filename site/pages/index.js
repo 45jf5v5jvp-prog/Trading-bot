@@ -13,6 +13,7 @@ import { numberFieldProps } from "../lib/numberField";
 import NumberField from "../components/NumberField";
 import { CHAIN } from "../lib/contracts";
 import { pnlForWindow } from "../lib/pnl";
+import { openPositionsValue, fmtEstimate } from "../lib/accountValue";
 import RulesList from "../components/RulesList";
 import SnipesList from "../components/SnipesList";
 import PortfolioPanel from "../components/PortfolioPanel";
@@ -655,10 +656,27 @@ export default function Dashboard() {
                   {vaultInfo.paused ? "Paused" : "Active"}
                 </span>
               </div>
+              <span className="hero-balance-label">Liquid {CHAIN.baseSymbol} &middot; available to trade</span>
               <div className="hero-balance">
                 <span className="n num">{fmtBalance(vaultInfo.baseBalance)}</span>
                 <span className="u">{CHAIN.baseSymbol}</span>
               </div>
+              {(() => {
+                const openVal = openPositionsValue(history);
+                if (!openVal || openVal.count === 0) return null;
+                const totalPls = Number(vaultInfo.baseBalance) + openVal.valuePls;
+                return (
+                  <p className="hero-sub" style={{ marginBottom: 10, lineHeight: 1.6 }}>
+                    + {fmtEstimate(openVal.valuePls, CHAIN.valueMaxDecimals)} {CHAIN.nativeSymbol} working in {openVal.count} open position{openVal.count === 1 ? "" : "s"}
+                    {openVal.unpriced > 0 ? ` (${openVal.unpriced} couldn't be priced just now)` : ""}
+                    <br />
+                    <strong style={{ color: "var(--text)" }}>
+                      &asymp; {fmtEstimate(totalPls, CHAIN.valueMaxDecimals)} {CHAIN.nativeSymbol} total account value
+                    </strong>
+                    {" "}<span style={{ fontWeight: 400 }}>(estimate - not a guaranteed sale price)</span>
+                  </p>
+                );
+              })()}
               <p className="hero-sub mono-addr" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 {vaultAddress}
                 <CopyAddressButton address={vaultAddress} />

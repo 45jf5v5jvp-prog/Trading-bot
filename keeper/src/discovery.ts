@@ -8,6 +8,8 @@ import { openPosition, positionsValuePls, hasStuckHistory } from "./positions.js
 import { exceedsHoldingCap } from "./portfolio.js";
 import { vaultWplsPls } from "./launch.js";
 import { mapLimit } from "./concurrency.js";
+import { looksLikeStablecoin } from "./indicators.js";
+import { plsUsd } from "./plsPrice.js";
 import { log } from "./log.js";
 
 /**
@@ -261,6 +263,13 @@ async function evaluateWatchedToken(
   const first = rows[0]!;
   const last = rows[rows.length - 1]!;
   if (first.price <= 0 || first.liq <= 0) return;
+
+  // Hard gate, not configurable - see indicators.ts's looksLikeStablecoin.
+  // Discovery's whole signal here is "price moved unusually in PLS terms" -
+  // exactly what a USD-pegged token trivially produces whenever PLS/USD
+  // itself moves, with nothing token-specific behind it at all.
+  const usdPerPls = await plsUsd().catch(() => null);
+  if (usdPerPls !== null && looksLikeStablecoin(rows.map((r) => r.price), usdPerPls)) return;
 
   const priceMovePct = ((last.price - first.price) / first.price) * 100;
   const liqGrowthPct = ((last.liq - first.liq) / first.liq) * 100;

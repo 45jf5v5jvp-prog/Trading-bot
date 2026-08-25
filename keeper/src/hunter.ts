@@ -6,7 +6,8 @@ import { registry, type VaultRecord, type HunterConfig } from "./registry.js";
 import { watched, opportunities, discoveryActions, aiExitRequests, hunterLessons, pendingRebuys, prices, tokenTraders, db } from "./db.js";
 import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./discovery.js";
 import { candlesForToken } from "./candles.js";
-import { snapshot, liquidityDropIsSuspicious } from "./indicators.js";
+import { snapshot, liquidityDropIsSuspicious, looksLikeStablecoin } from "./indicators.js";
+import { plsUsd } from "./plsPrice.js";
 import { assess, assessExit, reflectOnLoss, reflectOnMiss, type TokenProfile, type AiVerdict, type OpenPositionContext } from "./ai.js";
 import { executeSwap, netOfExitCosts } from "./executor.js";
 import { openPosition, positionsValuePls } from "./positions.js";
@@ -411,6 +412,13 @@ async function evaluateWatchedToken(
 
   const candles = candlesForToken(w.token, from, CANDLE_MINUTES * 60);
   if (candles.length < MIN_CANDLES) return;
+
+  // Hard gate, not configurable - see indicators.ts's looksLikeStablecoin
+  // for the full reasoning. Checked before any of the real indicator math
+  // below, since a USD-pegged token's RSI/MACD/Bollinger readings aren't
+  // measuring anything real about the token at all.
+  const usdPerPls = await plsUsd().catch(() => null);
+  if (usdPerPls !== null && looksLikeStablecoin(candles.map((c) => c.close), usdPerPls)) return;
 
   const snap = snapshot(candles);
   if (!snap) return;

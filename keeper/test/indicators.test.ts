@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { toCandles } from "../src/candles.js";
-import { rsi, macd, bollinger, atr, volumeConfirmation, snapshot, liquidityDropIsSuspicious } from "../src/indicators.js";
+import { rsi, macd, bollinger, atr, volumeConfirmation, snapshot, liquidityDropIsSuspicious, looksLikeStablecoin } from "../src/indicators.js";
 
 test("toCandles buckets ticks by interval and tracks high/low/open/close", () => {
   const rows = [
@@ -202,4 +202,33 @@ test("liquidityDropIsSuspicious is true when liquidity collapsed far more than t
 test("liquidityDropIsSuspicious treats unusable inputs as suspicious rather than guessing", () => {
   assert.equal(liquidityDropIsSuspicious(0, 5, 1_000_000, 500_000), true);
   assert.equal(liquidityDropIsSuspicious(10, 5, 0, 500_000), true);
+});
+
+// Found live 2026-08-24: Hunter bought USDL/PDAI/LUSD - real, liquid,
+// heavily-traded USD-pegged tokens - on RSI/Bollinger readings computed
+// from their PLS-denominated price, which is mostly just the inverse of
+// PLS/USD, not a real move in the token. $1 at a PLS/USD rate of 0.00002
+// is 50,000 PLS/token - the fixture prices below are all built off that.
+const PLS_USD = 0.00002;
+const ONE_DOLLAR_PLS = 1 / PLS_USD; // 50,000
+
+test("looksLikeStablecoin is true when every sampled price sat within the band of $1", () => {
+  const prices = [ONE_DOLLAR_PLS, ONE_DOLLAR_PLS * 0.98, ONE_DOLLAR_PLS * 1.02, ONE_DOLLAR_PLS * 0.99];
+  assert.equal(looksLikeStablecoin(prices, PLS_USD), true);
+});
+
+test("looksLikeStablecoin is false the moment even one sample falls outside the band - a real depeg or just not a stablecoin", () => {
+  const prices = [ONE_DOLLAR_PLS, ONE_DOLLAR_PLS, ONE_DOLLAR_PLS * 1.20]; // one candle at $1.20
+  assert.equal(looksLikeStablecoin(prices, PLS_USD), false);
+});
+
+test("looksLikeStablecoin is false for a real memecoin's wildly varying price", () => {
+  const prices = [ONE_DOLLAR_PLS * 0.001, ONE_DOLLAR_PLS * 0.0015, ONE_DOLLAR_PLS * 0.0009];
+  assert.equal(looksLikeStablecoin(prices, PLS_USD), false);
+});
+
+test("looksLikeStablecoin treats unusable inputs as false, never a guessed positive", () => {
+  assert.equal(looksLikeStablecoin([], PLS_USD), false);
+  assert.equal(looksLikeStablecoin([ONE_DOLLAR_PLS], 0), false);
+  assert.equal(looksLikeStablecoin([0, ONE_DOLLAR_PLS], PLS_USD), false);
 });

@@ -134,6 +134,34 @@ export function liquidityDropIsSuspicious(
 }
 
 /**
+ * Is this token's own USD value just sitting near $1, with everything that
+ * looks like a real PLS-denominated price move actually coming from PLS/USD
+ * itself moving, not the token? Confirmed live 2026-08-24: Hunter bought
+ * USDL, PDAI, and LUSD - real, heavily-traded, well-liquidity USD-pegged
+ * tokens, on RSI-oversold/Bollinger-lower-band readings computed from their
+ * PLS-denominated price. None of those readings meant anything: a
+ * stablecoin's PLS price is, by construction, mostly just the inverse of
+ * PLS/USD, so when PLS itself swings, every USD-pegged token on the whole
+ * chain shows the exact same "oversold" or "overbought" shape at once, with
+ * nothing token-specific behind it. A dip-buying strategy's whole premise -
+ * this fell too far, it should revert - doesn't apply to a token that was
+ * never supposed to move in the first place. Liquidity/trade-count/unique-
+ * wallet filters (this session's other guards) don't catch this at all - a
+ * real stablecoin usually has MORE liquidity and MORE real traders than a
+ * fresh microcap, not less.
+ *
+ * Checked over the WHOLE sampled window, not just the latest price - has to
+ * have priced within `bandPct` of $1 on every sample to count, not just
+ * look calm right now. A real memecoin sitting inside a tight band around
+ * exactly $1.00 for the whole lookback window by pure coincidence is not a
+ * realistic false positive.
+ */
+export function looksLikeStablecoin(pricesInPls: number[], plsUsdPrice: number, bandPct = 5): boolean {
+  if (pricesInPls.length === 0 || plsUsdPrice <= 0) return false;
+  return pricesInPls.every((p) => p > 0 && Math.abs(p * plsUsdPrice - 1) <= bandPct / 100);
+}
+
+/**
  * Wilder's ATR (Average True Range) - a volatility measure, not a
  * direction/oversold signal like the other three. True range per candle is
  * the largest of: this candle's own high-low spread, or the gap from the

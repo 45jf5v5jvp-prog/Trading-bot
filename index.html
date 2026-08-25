@@ -32,7 +32,14 @@
     <script>
       window.SIDE_ACTION_CONFIG = {
         SUPABASE_URL: "",
-        SUPABASE_ANON_KEY: ""
+        SUPABASE_ANON_KEY: "",
+
+        // Search ANY course (optional). After you deploy the "courses" relay in
+        // your Supabase project, paste its URL here — it looks like:
+        //   https://YOURPROJECT.supabase.co/functions/v1/courses
+        // Your GolfCourseAPI key stays a server secret, never in this file.
+        // Leave blank and the app just uses your built-in home course + manual entry.
+        GOLF_PROXY: ""
       };
     </script>
   </head>

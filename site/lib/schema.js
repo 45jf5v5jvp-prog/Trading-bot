@@ -64,7 +64,13 @@ const DEFAULT_HUNTER = {
   requireAiApproval: true, minAiConfidence: "medium",
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
   trailingStopPct: 0, timeExitMin: 0,
-  requireVolumeConfirmation: false, minVolumeRatio: 1.5,
+  // requireVolumeConfirmation was false by default - turned on for the same
+  // 2026-08-24 reason as minTrades24h just below (see its comment): an
+  // oversold/overbought reading on a token nobody is actually trading isn't
+  // much of a signal. This checks a volume SURGE vs. the token's own
+  // baseline; minTrades24h checks a raw trade COUNT - different things,
+  // meant to work together.
+  requireVolumeConfirmation: true, minVolumeRatio: 1.5,
   // Was 0 (off) - raised after live results (2026-08-24) showed a vault
   // left at the old default kept buying tokens that then sat for up to 16
   // hours with no further trades, the same thin trading behind a run of

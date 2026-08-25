@@ -146,11 +146,20 @@ test("rejects hunter allocatedUnlimited and allocatedResetDaily both true", () =
   );
 });
 
-test("hunter ATR stop and volume confirmation default off", () => {
+test("hunter ATR stop defaults off", () => {
   const c = emptyConfig();
   assert.equal(c.hunter.useAtrStop, false);
   assert.equal(c.hunter.atrStopMultiplier, 3);
-  assert.equal(c.hunter.requireVolumeConfirmation, false);
+});
+
+// requireVolumeConfirmation used to default off ("hasn't earned it yet") -
+// turned on after live results (2026-08-24) showed the opposite: a raw
+// technical trigger with no real volume behind it on a thin token is
+// exactly the noise that produced a run of losing "AI exit: RSI deeply
+// overbought" closes. See registry.ts/schema.js's DEFAULT_HUNTER comments.
+test("hunter volume confirmation defaults on", () => {
+  const c = emptyConfig();
+  assert.equal(c.hunter.requireVolumeConfirmation, true);
   assert.equal(c.hunter.minVolumeRatio, 1.5);
 });
 

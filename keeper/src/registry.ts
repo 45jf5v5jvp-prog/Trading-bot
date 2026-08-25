@@ -315,17 +315,23 @@ const DEFAULT_HUNTER: HunterConfig = {
   requireAiApproval: true, minAiConfidence: "medium",
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
   trailingStopPct: 0, timeExitMin: 0,
-  requireVolumeConfirmation: false, minVolumeRatio: 1.5,
-  // Used to default to 0 (off) - "no default this deployment hasn't earned
-  // yet," same reasoning as requireVolumeConfirmation just above. Changed
-  // after live results (2026-08-24): a vault left at the 0 default kept
-  // buying tokens that then sat with no further trades for up to 16 hours,
-  // and that same thin trading is what produces the noisy, easily-swung RSI/
-  // MACD/Bollinger readings behind a run of losing "AI exit: RSI deeply
-  // overbought" closes (see MIN_AGREEING_SIGNALS' comment above) - unlike
-  // requireVolumeConfirmation, this default earned real evidence it was
-  // wrong. 30 is a real floor a fresh vault gets automatically, not a strict
-  // one - an owner who wants tighter or looser can still change it.
+  // requireVolumeConfirmation used to default to false - "no default this
+  // deployment hasn't earned yet." Turned on after the same 2026-08-24
+  // review as minTrades24h just below: an oversold/overbought reading on a
+  // token nobody is actually trading isn't much of a signal, and that's
+  // exactly the shape behind a run of live losing "AI exit: RSI deeply
+  // overbought" closes. This and minTrades24h test different things (a
+  // volume SURGE vs. baseline here, a raw trade COUNT there) and are meant
+  // to work together, not duplicate each other.
+  requireVolumeConfirmation: true, minVolumeRatio: 1.5,
+  // Used to default to 0 (off) - same "hasn't earned it yet" reasoning as
+  // requireVolumeConfirmation used to have, until live results (2026-08-24)
+  // showed a vault left at 0 kept buying tokens that then sat with no
+  // further trades for up to 16 hours, and that same thin trading is what
+  // produces the noisy, easily-swung RSI/MACD/Bollinger readings behind
+  // those same losing closes (see MIN_AGREEING_SIGNALS' comment above). 30
+  // is a real floor a fresh vault gets automatically, not a strict one - an
+  // owner who wants tighter or looser can still change it.
   minTrades24h: 30,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
   maxOpenPositions: 0,

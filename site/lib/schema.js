@@ -65,7 +65,13 @@ const DEFAULT_HUNTER = {
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
   trailingStopPct: 0, timeExitMin: 0,
   requireVolumeConfirmation: false, minVolumeRatio: 1.5,
-  minTrades24h: 0,
+  // Was 0 (off) - raised after live results (2026-08-24) showed a vault
+  // left at the old default kept buying tokens that then sat for up to 16
+  // hours with no further trades, the same thin trading behind a run of
+  // losing "AI exit: RSI deeply overbought" closes - see keeper/src/
+  // hunter.ts's DEFAULT_HUNTER/MIN_AGREEING_SIGNALS comments. A real floor
+  // by default, not a strict one - still fully owner-changeable.
+  minTrades24h: 30,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
   maxOpenPositions: 0,
 };

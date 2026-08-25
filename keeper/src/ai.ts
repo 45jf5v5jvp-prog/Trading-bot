@@ -287,6 +287,14 @@ const EXIT_SYSTEM_PROMPT =
   "it (RSI/MACD/Bollinger clearly turning against the position, not just sitting near neutral) or the " +
   "loss is closing in on the stop-loss, not because the position happens to be slightly red at the " +
   "moment you were asked. " +
+  "RSI/MACD/Bollinger here come from 15-minute candles on typically thin, newly-launched tokens - a " +
+  "single large trade can swing them to an extreme reading that reflects one trade, not sustained " +
+  "buying or selling, especially when 'Recent volume vs. baseline' is low or absent. Treat an extreme " +
+  "reading with real skepticism, not automatic trust, and notice when it contradicts the position's " +
+  "own P&L: an 'overbought' reading is ordinarily a reason to defend a REAL gain, not a reason to " +
+  "accept a loss - if RSI/Bollinger look deeply overbought while Current P&L is flat or negative, that " +
+  "mismatch itself is evidence the reading is noise from thin trading, not a real signal, and should " +
+  "make you LESS willing to sell at a loss on its strength, not more. " +
   "Closing at a loss is a bad outcome, not a neutral one - it is money that is actually gone, not just " +
   "a number on a screen, and it should be treated as something to avoid, not something you're indifferent " +
   "to. There is no such symmetry on the other side: taking a genuine, well-earned profit is always fine, " +

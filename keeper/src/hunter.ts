@@ -99,18 +99,25 @@ const MISS_REVIEW_WINDOW_DAYS = 14;
 const REFLECTION_BATCH_LIMIT = 5;
 
 // How many of {RSI oversold, bullish MACD cross, Bollinger lower band} have
-// to agree before this counts as a real setup at all. One real technical
-// signal is real data behind the decision, not a blind buy - it doesn't
-// need multiple indicators to agree with each other. See evaluateWatchedToken
-// and technicalConfidence() below - confidence still scales with how many
-// actually hit, it's just not a requirement to clear the bar at all.
-const MIN_AGREEING_SIGNALS = 1;
+// to agree before this counts as a real setup at all. Raised from 1 to 2
+// after live results (2026-08-24) showed a clear pattern: exits reasoning
+// "RSI deeply overbought" landing at a realized LOSS, again and again, on
+// thin-liquidity microcaps. A single indicator on a token that trades a
+// handful of times an hour is easily swung by one large trade - that's not
+// real data behind the decision, it's noise from a candle with almost
+// nothing in it. Two independent signals agreeing is a much weaker claim
+// for a wash-traded wick to satisfy by accident. See evaluateWatchedToken
+// and technicalConfidence() below - "high" confidence already meant 2+
+// agreeing; this just makes that the buy bar too, not only a confidence
+// label.
+const MIN_AGREEING_SIGNALS = 2;
 
 /** Confidence grounded in something a person can verify - how many
  * independent technical signals actually agree - rather than only the AI's
- * own self-reported word for it. One reliable signal is enough to call it a
- * real setup ("confident"); two or more agreeing is "high" confidence.
- * Never called below MIN_AGREEING_SIGNALS. */
+ * own self-reported word for it. Never called below MIN_AGREEING_SIGNALS,
+ * which is now 2 itself, so the single-signal "confident" case can no
+ * longer actually happen - left in rather than deleted, since it's still
+ * correct and MIN_AGREEING_SIGNALS could reasonably move again later. */
 function technicalConfidence(signalCount: number): "confident" | "high" {
   return signalCount >= 2 ? "high" : "confident";
 }

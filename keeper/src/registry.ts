@@ -316,10 +316,17 @@ const DEFAULT_HUNTER: HunterConfig = {
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
   trailingStopPct: 0, timeExitMin: 0,
   requireVolumeConfirmation: false, minVolumeRatio: 1.5,
-  // Same "no default this deployment hasn't earned yet" reasoning as
-  // requireVolumeConfirmation just above - off until an owner turns it on
-  // and picks a number for their own risk tolerance.
-  minTrades24h: 0,
+  // Used to default to 0 (off) - "no default this deployment hasn't earned
+  // yet," same reasoning as requireVolumeConfirmation just above. Changed
+  // after live results (2026-08-24): a vault left at the 0 default kept
+  // buying tokens that then sat with no further trades for up to 16 hours,
+  // and that same thin trading is what produces the noisy, easily-swung RSI/
+  // MACD/Bollinger readings behind a run of losing "AI exit: RSI deeply
+  // overbought" closes (see MIN_AGREEING_SIGNALS' comment above) - unlike
+  // requireVolumeConfirmation, this default earned real evidence it was
+  // wrong. 30 is a real floor a fresh vault gets automatically, not a strict
+  // one - an owner who wants tighter or looser can still change it.
+  minTrades24h: 30,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
   maxOpenPositions: 0,
 };

@@ -34,6 +34,24 @@ async function estimateGasFee(gasUnits: bigint, urgent: boolean): Promise<bigint
   return (gasUnits * gp * headroom) / 100n;
 }
 
+// Confirmed live 2026-08-26: a submitted transaction that never gets mined
+// (dropped, stuck in an underpriced mempool, an RPC that stops reporting
+// confirmations) left tx.wait() below waiting forever, with no default
+// timeout of its own. txQueue is a single serialized chain SHARED across
+// every vault and every bot (see chain.ts's own comment) - one stuck wait
+// therefore blocks every other trade in the entire keeper behind it,
+// permanently, not just the one that got stuck. Symptom in the logs: the
+// health loop's queue=N (txQueue.pending) sitting frozen for hours while
+// open/fires24h never move, across every vault at once. Ethers' own
+// wait(confirms, timeoutMs) already supports exactly this - no custom
+// wrapper needed, unlike the plain-fetch hangs fixed in httpTimeout.ts.
+// Giving up here does not cancel the broadcast transaction; it may still
+// confirm later on its own. That's an accepted tradeoff over blocking the
+// whole queue forever - a retried close on the next tick just attempts a
+// fresh executeSwap, which safely no-ops/fails if the original already
+// sold the position's tokens by the time it lands.
+const TX_WAIT_TIMEOUT_MS = 120_000;
+
 export interface SwapResult {
   ok: boolean;
   amountOut: bigint;
@@ -158,7 +176,7 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
       const tx = await vault.executeSwap(req.path, req.amountIn, minOut, gasFee, {
         gasLimit: (est * 130n) / 100n,
       });
-      const rc = await tx.wait();
+      const rc = await tx.wait(1, TX_WAIT_TIMEOUT_MS);
 
       // `quoted` is a pre-trade estimate - on a sell the contract deducts the
       // platform fee AND gas reimbursement from it afterward (BotVault.sol's

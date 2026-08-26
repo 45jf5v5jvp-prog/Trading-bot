@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CHAIN, EXPLORER_URL } from "../lib/contracts";
 import DrillInScreen from "./DrillInScreen";
 import CopyAddressButton from "./CopyAddressButton";
+import InfoButton from "./InfoButton";
 
 function fmtTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -306,8 +307,31 @@ function ExitProgress({ p }) {
 /** One currently-held token: what the bot bought, what it's worth right now
  * (a live DEX quote, not a cached price), and whether that's up or down
  * since entry. This is the "should I close this?" view. */
+/** Market Price is what everyone else is looking at (DexScreener, PulseX) -
+ * the plain per-token price, no position-size or cost adjustments. Exit
+ * Price is the more conservative "what would I actually get" figure this
+ * dashboard has always computed - correct for a real sale, but confusing
+ * to compare against what the rest of the world calls "the price," since a
+ * large position in a thin pool sells for meaningfully less per token than
+ * the market price suggests. Showing Market Price by default (with Exit
+ * Price one click away) matches what an owner already expects to see;
+ * showing only the exit-adjusted number by default was the source of a
+ * vault owner's confusion on 2026-08-26 comparing this dashboard against
+ * DexScreener. */
+const PRICE_MODE_INFO = {
+  market: {
+    title: "Market Price",
+    body: "The token's current market price - the same number DexScreener or PulseX would show. A simple reference price, not adjusted for the size of this position.",
+  },
+  exit: {
+    title: "Exit Price",
+    body: "What this position would actually net if it sold right now, for the exact amount held. Selling a large position in a thin-liquidity pool moves the price against itself as it sells - that's usually the biggest reason this comes in lower than the market price, not fees or tax. This is the more conservative, realistic number for deciding whether to sell.",
+  },
+};
+
 function HoldingCard({ p, onClose, closeState, onWithdrawStuckToken, withdrawState }) {
   const [showWhy, setShowWhy] = useState(false);
+  const [showExitPrice, setShowExitPrice] = useState(false);
   const requested = closeState === "requested" || closeState === "pending";
   const unit = CHAIN.nativeSymbol;
   const withdrawing = withdrawState === "pending";
@@ -317,6 +341,12 @@ function HoldingCard({ p, onClose, closeState, onWithdrawStuckToken, withdrawSta
   // nothing here, same as its narrative already being null - no button to
   // show for those, not a bug.
   const rationale = p.narrative || p.aiReasoning;
+  // marketPricePct can be null (unpriceable token, or no entry_price on
+  // record) even when the exit-price pnlPct isn't - fall back to whichever
+  // is actually available rather than show a blank number.
+  const displayExit = showExitPrice || p.marketPricePct === null || p.marketPricePct === undefined;
+  const displayedPct = displayExit ? p.pnlPct : p.marketPricePct;
+  const priceInfo = displayExit ? PRICE_MODE_INFO.exit : PRICE_MODE_INFO.market;
   return (
     <div className="holding-card">
       <div className="holding-card-top">
@@ -328,7 +358,25 @@ function HoldingCard({ p, onClose, closeState, onWithdrawStuckToken, withdrawSta
           </div>
           <div className="holding-meta">{p.bot} · opened {fmtTs(p.opened_at)}</div>
         </div>
-        <div className={`num holding-pnl ${pnlClass(p.pnlPct)}`}>{fmtPnl(p.pnlPct)}</div>
+        <div style={{ textAlign: "right" }}>
+          <div className={`num holding-pnl ${pnlClass(displayedPct)}`}>{fmtPnl(displayedPct)}</div>
+          <div className="row" style={{ gap: 4, justifyContent: "flex-end", marginTop: 2 }}>
+            <span className="holding-price-mode-label">{priceInfo.title}</span>
+            <InfoButton title={priceInfo.title}>{priceInfo.body}</InfoButton>
+          </div>
+          {/* Only worth offering the toggle when there's a real market price
+              to switch to - otherwise this is just a dead button. */}
+          {p.marketPricePct !== null && p.marketPricePct !== undefined && (
+            <button
+              type="button"
+              className="btn btn-small"
+              style={{ marginTop: 4, fontSize: 11, padding: "3px 8px" }}
+              onClick={() => setShowExitPrice((s) => !s)}
+            >
+              {displayExit ? "Show Market Price" : "Show Exit Price"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="holding-meta">
         {p.tokensHeld !== null && p.tokensHeld !== undefined

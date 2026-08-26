@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { priceOpenPositions, quotePlsValue, attachRealBalance, _rawQuoteCacheForTests } = require("../lib/livePrice");
+const { priceOpenPositions, quotePlsValue, attachRealBalance, _rawQuoteCacheForTests, _marketPriceCacheForTests } = require("../lib/livePrice");
 
 test("quotePlsValue returns 0 for a fully-exited position without touching the network", async () => {
   const value = await quotePlsValue("0x1111111111111111111111111111111111111111", "0");
@@ -90,4 +90,49 @@ test("different held amounts of the same token are cached separately - never sha
   const large = await quotePlsValue(token, "9000000000000000000");
   assert.equal(small, 10);
   assert.equal(large, 55);
+});
+
+// marketPricePct - the plain "what has the market done since I bought"
+// number shown on Current Holdings, deliberately separate from pnlPct
+// (which is size/tax/fee-aware - see livePrice.js's own comment on why
+// showing that as the headline number confused a vault owner comparing it
+// against DexScreener, 2026-08-26). Seeded via the same test-only cache
+// seam as the raw-quote tests above.
+test("priceOpenPositions attaches marketPricePct computed from a cached market price and the position's entry_price", async () => {
+  const token = "0x8888888888888888888888888888888888888888";
+  _marketPriceCacheForTests.set(token, { value: 1.5, at: Date.now() }); // market has moved to 1.5 PLS/token
+  const result = await priceOpenPositions([
+    { id: 1, token, tokens_held: "1000000000000000000", spent_pls: 100, entry_price: 1 }, // bought at 1 PLS/token
+  ]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].marketPricePct, 50); // (1.5 - 1) / 1 * 100
+});
+
+test("priceOpenPositions leaves marketPricePct null when the position has no entry_price on record", async () => {
+  const result = await priceOpenPositions([
+    { id: 1, token: "0x2222222222222222222222222222222222222222", tokens_held: "1000000000000000000", spent_pls: 100 },
+  ]);
+  assert.equal(result[0].marketPricePct, null);
+});
+
+test("priceOpenPositions leaves marketPricePct null, without throwing, when the market quote itself fails", async () => {
+  // Has a real entry_price so the null-short-circuit above doesn't apply,
+  // but no cache seed and no network access in this sandbox - the quote
+  // genuinely fails, and that must degrade to null, not blow up the list.
+  const result = await priceOpenPositions([
+    { id: 1, token: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tokens_held: "1000000000000000000", spent_pls: 100, entry_price: 1 },
+  ]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].marketPricePct, null);
+});
+
+test("marketPricePct is identical for two differently-sized positions in the same token - unlike pnlPct, it is not size-dependent", async () => {
+  const token = "0x9999999999999999999999999999999999999999";
+  _marketPriceCacheForTests.set(token, { value: 2, at: Date.now() }); // market at 2 PLS/token, regardless of trade size
+  const result = await priceOpenPositions([
+    { id: 1, token, tokens_held: "1000000000000000000", spent_pls: 100, entry_price: 1 }, // small position
+    { id: 2, token, tokens_held: "500000000000000000000", spent_pls: 50000, entry_price: 1 }, // large position, same entry price
+  ]);
+  assert.equal(result[0].marketPricePct, 100);
+  assert.equal(result[1].marketPricePct, 100);
 });

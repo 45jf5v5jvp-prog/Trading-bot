@@ -329,6 +329,61 @@ async function quotePlsValue(token, tokensHeldRaw, vaultAddress) {
   return vaultAddress ? netOfExitCostsPls(rawValuePls, vaultAddress) : rawValuePls;
 }
 
+/**
+ * Market price for one whole token, in base currency - the plain "what does
+ * DexScreener/PulseX say this token is worth" number, deliberately separate
+ * from quotePlsValue above. Quoted at a fixed reference size (1 whole
+ * token) rather than the amount actually held, and never discounted for
+ * sell tax or netted for the vault's own fee/gas reimbursement - those are
+ * real costs, but they're not part of what a plain market-price tracker
+ * shows, and baking them in here would just reproduce the same "the number
+ * on this dashboard doesn't match what everyone else is looking at"
+ * complaint this exists to fix. Confirmed live 2026-08-26: a vault owner
+ * compared a position's live number against what the token had actually
+ * done and the size/tax/fee-aware figure (correct for "what would I really
+ * get right now") looked nothing like the market's own move. quotePlsValue
+ * stays the real-sell-value number - still what "worth ... now" and Close
+ * Position use - this is an additional figure, not a replacement.
+ */
+const marketPriceCache = new Map();
+async function cachedMarketPricePerToken(token, decimals) {
+  const key = token.toLowerCase();
+  const cached = marketPriceCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.at < RAW_QUOTE_TTL_MS) {
+    if (cached.error) throw new Error(cached.error);
+    return cached.value;
+  }
+  try {
+    const oneUnit = parseUnits("1", decimals);
+    const [v2, v3, v4] = await Promise.all([quoteV2(token, oneUnit), quoteV3(token, oneUnit), quoteV4(token, oneUnit)]);
+    const candidates = [v2, v3, v4].filter((v) => v !== null);
+    if (candidates.length === 0) throw new Error("no venue could price this token");
+    const best = candidates.reduce((a, b) => (b > a ? b : a));
+    const value = Number(formatEther(best));
+    marketPriceCache.set(key, { value, at: now });
+    return value;
+  } catch (e) {
+    marketPriceCache.set(key, { error: e.message, at: now });
+    throw e;
+  }
+}
+
+/**
+ * Percent move since entry, using the market price above rather than the
+ * size/tax/fee-aware exit value. entry_price is already PLS-per-token at
+ * buy time (positions.ts's openPosition, keeper-side), and
+ * cachedMarketPricePerToken is the same PLS-per-token unit, so the two
+ * compare directly with no unit conversion. Null (never a fake 0) when
+ * either side is unusable, same rule quotePlsValue's own callers already
+ * follow.
+ */
+async function marketPricePct(token, entryPrice, decimals) {
+  if (!entryPrice || entryPrice <= 0) return null;
+  const current = await cachedMarketPricePerToken(token, decimals);
+  return ((current - entryPrice) / entryPrice) * 100;
+}
+
 // Decimals and symbol never change for a given token - cached per server
 // process so pricing five open positions in the same token (or the same
 // position re-priced on every poll) doesn't repeat two RPC calls it already
@@ -411,6 +466,12 @@ async function attachSymbols(positions) {
  * hold 1,204.5 INC does. A quote or metadata failure leaves those fields
  * null rather than throwing - one unpriceable token shouldn't blank out the
  * whole dashboard.
+ *
+ * Also adds marketPricePct - the plain "what has the market done since I
+ * bought" number (see marketPricePct's own comment for why this is a
+ * separate figure from pnlPct, not the same thing computed a different
+ * way). Needs decimals, so it runs after the metadata lookup above rather
+ * than in parallel with it.
  */
 async function priceOpenPositions(openPositions, vaultAddress) {
   return mapLimit(openPositions, RPC_CONCURRENCY, async (p) => {
@@ -418,16 +479,22 @@ async function priceOpenPositions(openPositions, vaultAddress) {
     let pnlPct = null;
     let tokensHeld = null;
     let symbol = null;
-    try {
-      valueNowPls = await quotePlsValue(p.token, p.tokens_held, vaultAddress);
-      pnlPct = p.spent_pls > 0 ? ((valueNowPls - p.spent_pls) / p.spent_pls) * 100 : null;
-    } catch { /* leave valueNowPls/pnlPct null */ }
+    let decimals = 18;
     try {
       const meta = await getTokenMeta(p.token);
       tokensHeld = Number(formatUnits(BigInt(p.tokens_held), meta.decimals));
       symbol = meta.symbol;
-    } catch { /* leave tokensHeld/symbol null */ }
-    return { ...p, valueNowPls, pnlPct, tokensHeld, symbol };
+      decimals = meta.decimals;
+    } catch { /* leave tokensHeld/symbol null, decimals keeps its 18 fallback */ }
+    try {
+      valueNowPls = await quotePlsValue(p.token, p.tokens_held, vaultAddress);
+      pnlPct = p.spent_pls > 0 ? ((valueNowPls - p.spent_pls) / p.spent_pls) * 100 : null;
+    } catch { /* leave valueNowPls/pnlPct null */ }
+    let marketPricePctValue = null;
+    try {
+      marketPricePctValue = await marketPricePct(p.token, p.entry_price, decimals);
+    } catch { /* leave marketPricePctValue null */ }
+    return { ...p, valueNowPls, pnlPct, tokensHeld, symbol, marketPricePct: marketPricePctValue };
   });
 }
 
@@ -487,4 +554,5 @@ module.exports = {
   // fails loudly and distinguishably from a seeded hit) without needing a
   // mockable provider, which nothing in this file currently has.
   _rawQuoteCacheForTests: rawQuoteCache,
+  _marketPriceCacheForTests: marketPriceCache,
 };

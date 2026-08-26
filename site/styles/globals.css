@@ -417,6 +417,10 @@ input::placeholder { color: #6b6c76; }
 .holding-symbol { font-size: 14px; font-weight: 600; color: var(--amber); }
 .holding-pnl { font-size: 20px; }
 .holding-meta { color: var(--ash); font-size: 12.5px; margin-top: 6px; }
+.holding-price-mode-label {
+  font-family: 'Montserrat', system-ui, sans-serif; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--ash);
+}
 
 /* Where an open position sits between its stop-loss floor and take-profit
    target - see HistoryPanel.jsx's ExitProgress. */

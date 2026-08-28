@@ -24,14 +24,41 @@ export interface SwapRequest {
  * contract caps this absolutely and at 1% of the trade, so an over-claim is
  * bounded no matter what this code does.
  */
-async function estimateGasFee(gasUnits: bigint, urgent: boolean): Promise<bigint> {
+/**
+ * The real price-per-gas-unit this trade will actually bid on chain - used
+ * both for the vault's gas REIMBURSEMENT estimate below and, critically,
+ * passed as the literal gasPrice override on the transaction itself further
+ * down in executeSwap. Those used to be two disconnected things: this
+ * function only ever fed the reimbursement math, while the real send had no
+ * gasPrice override at all and was left to ethers' own default - so raising
+ * this number used to change what the vault got charged without changing
+ * what the transaction actually bid to get mined, a real bug found while
+ * chasing a live incident (see below).
+ *
+ * Launch buys bid harder still. During a spike a transaction that does not
+ * outbid simply sits in the mempool, and for a sniper that is the same as
+ * not trading.
+ *
+ * The non-urgent tier (everything else - Hunter/Rules/Discovery/Snipe buys
+ * AND every position exit, tp/sl/AI/owner-requested alike) used to bid only
+ * 115% over the base reading. Confirmed live 2026-08-27/28: at 115%
+ * headroom, every exit attempt across several different Hunter positions
+ * (the AI explicitly recommending "take the win" each time) submitted a
+ * transaction that then sat unconfirmed for the full 2-minute wait timeout,
+ * tick after tick, for hours - nothing was structurally broken, the bid
+ * just wasn't competitive enough to get mined, and (see the bug above)
+ * raising the reimbursement estimate alone would never have fixed that,
+ * since it never touched the real transaction's price. Raised to 200%
+ * (double the base reading) on the owner's explicit call: pay more for the
+ * certainty of a fast confirmation over minimizing gas spend - an
+ * unconfirmed exit sitting for hours is a worse outcome than overpaying gas
+ * on trades sized in the tens of thousands of PLS.
+ */
+async function boostedGasPrice(urgent: boolean): Promise<bigint> {
   const fee = await provider.getFeeData();
   const gp = fee.gasPrice ?? 0n;
-  // Launch buys bid harder. During a spike a transaction that does not outbid
-  // simply sits in the mempool, and for a sniper that is the same as not
-  // trading. Rule trades are patient and take the base estimate.
-  const headroom = urgent ? 250n : 115n;
-  return (gasUnits * gp * headroom) / 100n;
+  const headroom = urgent ? 250n : 200n;
+  return (gp * headroom) / 100n;
 }
 
 // Confirmed live 2026-08-26: a submitted transaction that never gets mined
@@ -139,8 +166,12 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
   if (minOut === 0n) return { ok: false, amountOut: 0n, reason: "computed floor is zero" };
 
   // Gas reimbursement, priced in the input token. Only exact when the input is
-  // WPLS, which covers every buy. On a sell the vault caps it anyway.
-  const gasFee = await estimateGasFee(400_000n, req.bot === "launch");
+  // WPLS, which covers every buy. On a sell the vault caps it anyway. Same
+  // boosted price the real transaction below actually bids with - see
+  // boostedGasPrice's own comment for why those must never be two different
+  // numbers.
+  const gasPrice = await boostedGasPrice(req.bot === "launch");
+  const gasFee = 400_000n * gasPrice;
 
   // The vault enforces the owner's gas ceilings, but failing here first saves a
   // pointless RPC round trip and gives a readable reason in the log.
@@ -173,8 +204,13 @@ export async function executeSwap(req: SwapRequest): Promise<SwapResult> {
   return txQueue.run(`${req.bot}:${req.vault}`, async () => {
     try {
       const est: bigint = await vault.executeSwap.estimateGas(req.path, req.amountIn, minOut, gasFee);
+      // gasPrice here is the fix - previously omitted entirely, leaving the
+      // real transaction's bid up to ethers' own default rather than the
+      // boosted price computed above, which is the root cause this comment
+      // block on boostedGasPrice explains.
       const tx = await vault.executeSwap(req.path, req.amountIn, minOut, gasFee, {
         gasLimit: (est * 130n) / 100n,
+        gasPrice,
       });
       const rc = await tx.wait(1, TX_WAIT_TIMEOUT_MS);
 
@@ -249,7 +285,7 @@ async function cachedMaxGasFeeBps(vaultAddr: string): Promise<number> {
 // Gas price moves slowly enough that re-fetching it fresh for every open
 // position on every check tick (positions.ts's markToMarket runs this once
 // per position) would just be needless RPC load - a short TTL keeps this
-// close to live without that cost. Kept separate from estimateGasFee's own
+// close to live without that cost. Kept separate from boostedGasPrice's own
 // fresh-every-call read above, which backs the real trade path and should
 // stay as accurate as possible right before broadcasting.
 let cachedGasPriceWei: { value: bigint; at: number } | null = null;

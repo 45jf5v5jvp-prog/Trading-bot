@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.04b';
+const BUILD_ID = '2026.09.04c';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -251,8 +251,15 @@ const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.
 
 function strokesFor(round, pid, h) {
   if (!round.useNet) return 0;
-  const low = Math.min(...round.players.map(p => Number(p.hcp) || 0));
-  const rel = Math.max(0, Math.round((Number(round.players.find(p => p.id === pid)?.hcp) || 0) - low));
+  const self = Number(round.players.find(p => p.id === pid)?.hcp) || 0;
+  /* 'full' gives every player their whole handicap, dropped on the holes where
+     it falls by stroke index. Otherwise (the default when unset) play off the
+     low man: the field's lowest handicap plays scratch and everyone else gets
+     the difference. */
+  const base = round.hcpMode === 'full'
+    ? self
+    : self - Math.min(...round.players.map(p => Number(p.hcp) || 0));
+  const rel = Math.max(0, Math.round(base));
   const si = round.si[h];
   return Math.floor(rel / 18) + (si <= (rel % 18) ? 1 : 0);
 }
@@ -1226,6 +1233,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
   const [games, setGames] = useState(E ? [...E.games] : ['skins']);
   const [stakes, setStakes] = useState(E ? { ...E.stakes } : {});
   const [useNet, setUseNet] = useState(E ? !!E.useNet : true);
+  const [hcpMode, setHcpMode] = useState(E ? (E.hcpMode || 'low') : 'full');
   const [holes, setHoles] = useState(E ? E.holes : 18);
   const [teamSwap, setTeamSwap] = useState(E ? Math.max(0, pairingIndex(E, E.teams)) : 0);
   const [partnerMode, setPartnerMode] = useState(E?.partnerMode || 'fixed');
@@ -1298,7 +1306,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
       else if (needsTeams) { const pr = PAIRINGS[teamSwap]; teams = [pr[0].map(i => players[i].id), pr[1].map(i => players[i].id)]; }
       onStart({
         ...E,
-        games, teams, useNet, yardMode, partnerMode, vegasPain, skinsCarry,
+        games, teams, useNet, hcpMode, yardMode, partnerMode, vegasPain, skinsCarry,
         blindDraw: oddMan && blindDraw,
         stakes: Object.fromEntries(games.map(k => [k, Number(stakeOf(k)) || 1])),
         course: courseName, pars: pars.slice(0, holes), si: si.slice(0, holes),
@@ -1322,7 +1330,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
       teams = [pr[0].map(i => players[i].id), pr[1].map(i => players[i].id)];
     }
     onStart({
-      games, players, teams, holes, useNet,
+      games, players, teams, holes, useNet, hcpMode,
       stakes: Object.fromEntries(games.map(k => [k, Number(stakeOf(k)) || 1])),
       course: courseName, pars: pars.slice(0, holes), si: si.slice(0, holes),
       yards: yards.slice(0, holes).map((y, i) => Number(y) || defYards(pars[i])), yardMode,
@@ -1654,6 +1662,20 @@ function Setup({ onStart, onBack, roster, editRound }) {
             <Btn active={useNet} onClick={() => setUseNet(true)} style={{ flex: 1 }}>Net</Btn>
             <Btn active={!useNet} onClick={() => setUseNet(false)} style={{ flex: 1 }}>Gross</Btn>
           </div>
+          {useNet && (
+            <>
+              <Eyebrow style={{ marginBottom: 8 }}>how the strokes fall</Eyebrow>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <Btn active={hcpMode === 'full'} onClick={() => setHcpMode('full')} style={{ flex: 1, fontSize: 11.5 }}>Full, where they fall</Btn>
+                <Btn active={hcpMode === 'low'} onClick={() => setHcpMode('low')} style={{ flex: 1, fontSize: 11.5 }}>Off the low man</Btn>
+              </div>
+              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
+                {hcpMode === 'full'
+                  ? 'Everybody gets their whole handicap on the holes it lands. A 2 gets 2 shots, a 10 gets 10.'
+                  : 'The low handicap plays scratch and everyone else gets the difference. A 2 and a 10 in the same group play as 0 and 8.'}
+              </div>
+            </>
+          )}
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             <Btn active={holes === 18} onClick={() => setHoles(18)} style={{ flex: 1 }}>18 holes</Btn>
             <Btn active={holes === 9} onClick={() => setHoles(9)} style={{ flex: 1 }}>9 holes</Btn>

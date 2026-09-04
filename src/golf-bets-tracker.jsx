@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.04';
+const BUILD_ID = '2026.09.04b';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -211,8 +211,6 @@ const PARTNER_GAMES = ['vegas', 'hammer'];
 const JUNK = {
   birdie:   { name: 'Birdie Machine', sign: 1, auto: true,
     info: 'Every birdie pays. Each other player hands you the amount. An eagle pays double, an albatross triple. Scored automatically off the card, nothing to tap.' },
-  greenie:  { name: 'Greenie', sign: 1, par3: true, one: true,
-    info: 'Closest to the pin in regulation on a par 3. Most groups make you two-putt or better to keep it.' },
   polie:    { name: 'Polie', sign: 1,
     info: 'Make a putt longer than the flagstick, roughly seven feet or more. Some groups lay the pin down to measure.' },
   barkie:   { name: 'Barkie', sign: 1,
@@ -221,9 +219,9 @@ const JUNK = {
     info: 'Up and down out of a bunker for par or better.' },
   hazzie:   { name: 'Hazzie', sign: 1,
     info: 'Find a penalty area and still save par.' },
-  arnie:    { name: 'Arnie', sign: 1,
-    info: 'Make par without ever touching the fairway. Named for Arnold Palmer, who did it constantly.' },
-  chippie:  { name: 'Chippie', sign: 1,
+  arnie:    { name: 'Seve', sign: 1,
+    info: 'Make par without ever touching the fairway. Named for Seve Ballesteros, the Spaniard famous for scrambling par from everywhere but the short grass.' },
+  chippie:  { name: 'Chippindales', sign: 1,
     info: 'Hole out with a chip or pitch from off the green.' },
   ferret:   { name: 'Golden Ferret', sign: 1,
     info: 'Hole out straight from a bunker. Rare enough that most groups pay it double.' },
@@ -613,13 +611,13 @@ function calcVegas(round, stake) {
     const anyGross = info.some(x => x.grossBirdie);
     const maxPain = round.vegasPain === 'maxpain';
 
-    /* House rule: only a GROSS birdie flips. A NET birdie cancels the flip for
-       the team that has it, but never causes one.
-         maxpain - any gross birdie flips every team that has no net birdie
-         ditty   - your opponent's gross birdie flips you, unless you have a net
-                   birdie of your own to cancel it */
+    /* House rule: only a GROSS birdie flips, and only your own GROSS birdie
+       cancels the flip for your team. A net birdie does nothing.
+         maxpain - any gross birdie flips every team that has no gross birdie
+         ditty   - your opponent's gross birdie flips you, unless you have a
+                   gross birdie of your own to cancel it (protects only you) */
     const numFor = (i, j) => {
-      const flip = maxPain ? (anyGross && !info[i].netBirdie) : (info[j].grossBirdie && !info[i].netBirdie);
+      const flip = maxPain ? (anyGross && !info[i].grossBirdie) : (info[j].grossBirdie && !info[i].grossBirdie);
       return combine(info[i].sc[0], info[i].sc[1], flip);
     };
 
@@ -630,7 +628,7 @@ function calcVegas(round, stake) {
         const diff = Math.abs(a - b);
         if (!diff) continue;
         const [w, l] = a < b ? [i, j] : [j, i];
-        const v = diff * stake / 2;
+        const v = diff * stake;
         tms[w].forEach(id => { m[id] = (m[id] || 0) + v; });
         tms[l].forEach(id => { m[id] = (m[id] || 0) - v; });
         pts[w] += diff; pts[l] -= diff;
@@ -642,8 +640,8 @@ function calcVegas(round, stake) {
 
     const shown = tms.map((t, i) => {
       const nat = combine(info[i].sc[0], info[i].sc[1], false);
-      const flipped = maxPain && anyGross && !info[i].netBirdie;
-      return `${tag(t)} ${flipped ? combine(info[i].sc[0], info[i].sc[1], true) : nat}${info[i].netBirdie ? '🐦' : ''} ${pts[i] > 0 ? '+' : ''}${pts[i]}`;
+      const flipped = maxPain && anyGross && !info[i].grossBirdie;
+      return `${tag(t)} ${flipped ? combine(info[i].sc[0], info[i].sc[1], true) : nat}${info[i].grossBirdie ? '🐦' : ''} ${pts[i] > 0 ? '+' : ''}${pts[i]}`;
     }).join('  ·  ');
     const head = anyGross ? (maxPain ? 'Max pain, everybody flips. ' : 'Birdie flip. ') : '';
     log.push({ h, text: head + shown, m });
@@ -1218,45 +1216,50 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
    SETUP
    ========================================================================== */
 
-function Setup({ onStart, onBack, roster }) {
+function Setup({ onStart, onBack, roster, editRound }) {
+  const E = editRound || null;
   const [step, setStep] = useState(0);
-  const [rawCount, setRawCount] = useState(4);
-  const [picked, setPicked] = useState(roster ? roster.slice(0, 4).map(p => p.id) : []);
-  const [names, setNames] = useState(Array(16).fill(''));
-  const [hcps, setHcps] = useState(Array(16).fill(''));
-  const [games, setGames] = useState(['skins']);
-  const [stakes, setStakes] = useState({});
-  const [useNet, setUseNet] = useState(true);
-  const [holes, setHoles] = useState(18);
-  const [teamSwap, setTeamSwap] = useState(0);
-  const [partnerMode, setPartnerMode] = useState('fixed');
-  const [lineup, setLineup] = useState([]);
-  const [vegasPain, setVegasPain] = useState('ditty');
-  const [blindDraw, setBlindDraw] = useState(true);
+  const [rawCount, setRawCount] = useState(E ? E.players.length : 4);
+  const [picked, setPicked] = useState(E ? E.players.map(p => p.id) : roster ? roster.slice(0, 4).map(p => p.id) : []);
+  const [names, setNames] = useState(() => { const a = Array(16).fill(''); if (E) E.players.forEach((p, i) => { a[i] = p.name; }); return a; });
+  const [hcps, setHcps] = useState(() => { const a = Array(16).fill(''); if (E) E.players.forEach((p, i) => { a[i] = p.hcp ? String(p.hcp) : ''; }); return a; });
+  const [games, setGames] = useState(E ? [...E.games] : ['skins']);
+  const [stakes, setStakes] = useState(E ? { ...E.stakes } : {});
+  const [useNet, setUseNet] = useState(E ? !!E.useNet : true);
+  const [holes, setHoles] = useState(E ? E.holes : 18);
+  const [teamSwap, setTeamSwap] = useState(E ? Math.max(0, pairingIndex(E, E.teams)) : 0);
+  const [partnerMode, setPartnerMode] = useState(E?.partnerMode || 'fixed');
+  const [lineup, setLineup] = useState(() => {
+    if (E && E.players.length > 4 && E.teams) return E.teams.flat().map(id => E.players.findIndex(p => p.id === id)).filter(i => i >= 0);
+    return [];
+  });
+  const [vegasPain, setVegasPain] = useState(E?.vegasPain || 'ditty');
+  const [blindDraw, setBlindDraw] = useState(E ? !!E.blindDraw : true);
   const [painWarn, setPainWarn] = useState(false);
   const [painSeen, setPainSeen] = useState(false);
-  const [skinsCarry, setSkinsCarry] = useState(true);
-  const [junkOn, setJunkOn] = useState([]);
-  const [junkValue, setJunkValue] = useState('2');
-  const [junkValues, setJunkValues] = useState({});
-  const [junkEscalate, setJunkEscalate] = useState(false);
-  const [junkMode, setJunkMode] = useState('linear');
-  const [snakeBase, setSnakeBase] = useState('1');
-  const [snakeMode, setSnakeMode] = useState('linear');
+  const [skinsCarry, setSkinsCarry] = useState(E ? E.skinsCarry !== false : true);
+  const [junkOn, setJunkOn] = useState(E ? [...(E.junkOn || [])] : []);
+  const [junkValue, setJunkValue] = useState(E ? String(E.junkValue ?? '2') : '2');
+  const [junkValues, setJunkValues] = useState(E ? { ...(E.junkValues || {}) } : {});
+  const [junkEscalate, setJunkEscalate] = useState(E ? !!E.junkEscalate : false);
+  const [junkMode, setJunkMode] = useState(E?.junkMode || 'linear');
+  const [snakeBase, setSnakeBase] = useState(E ? String(E.snakeBase ?? '1') : '1');
+  const [snakeMode, setSnakeMode] = useState(E?.snakeMode || 'linear');
   const [openInfo, setOpenInfo] = useState(null);
-  const [pars, setPars] = useState([...DEF_PAR]);
-  const [si, setSi] = useState([...DEF_SI]);
-  const [yards, setYards] = useState(DEF_YDS.map(String));
-  const [yardMode, setYardMode] = useState('each');
-  const [courseName, setCourseName] = useState('');
-  const [showCourse, setShowCourse] = useState(true);
+  const [pars, setPars] = useState(E ? DEF_PAR.map((d, i) => E.pars?.[i] ?? d) : [...DEF_PAR]);
+  const [si, setSi] = useState(E ? DEF_SI.map((d, i) => E.si?.[i] ?? d) : [...DEF_SI]);
+  const [yards, setYards] = useState(E ? DEF_YDS.map((d, i) => String(E.yards?.[i] ?? d)) : DEF_YDS.map(String));
+  const [yardMode, setYardMode] = useState(E?.yardMode || 'each');
+  const [courseName, setCourseName] = useState(E?.course || '');
+  const [showCourse, setShowCourse] = useState(!E);
 
-  const count = roster ? picked.length : rawCount;
+  const count = E ? E.players.length : roster ? picked.length : rawCount;
   const setCount = setRawCount;
-  const flow = roster ? ['group', 'games', 'junk'] : ['count', 'names', 'games', 'junk'];
+  const flow = E ? ['games', 'junk'] : roster ? ['group', 'games', 'junk'] : ['count', 'names', 'games', 'junk'];
   const cur = flow[step];
   const avail = Object.keys(GAMES).filter(k => GAMES[k].ok(count));
   useEffect(() => {
+    if (E) return; // editing: field is fixed, keep the pre-filled games/teams
     setGames(g => { const keep = g.filter(k => avail.includes(k)); return keep.length ? keep : [avail[0]]; });
     setLineup([]);
   }, [count]); // eslint-disable-line
@@ -1281,6 +1284,31 @@ function Setup({ onStart, onBack, roster }) {
   const toggleGame = (k) => setGames(g => g.includes(k) ? (g.length > 1 ? g.filter(x => x !== k) : g) : [...g, k]);
 
   const start = () => {
+    // Editing an in-progress round: keep the same players (and their ids, so the
+    // scores stay attached), the scorecard, the code, and every per-hole entry.
+    // Only the games, stakes, junk, teams and settings change — and because the
+    // whole round is recomputed from these, a new dollar amount applies to every
+    // hole already played (retroactive), which is what we want.
+    if (E) {
+      const players = E.players;
+      const ids = teamOrder.map(x => players[x]?.id).filter(Boolean);
+      const groups = chunk(ids, 4);
+      let teams = E.teams || null;
+      if (bigField && teamGame) teams = chunk(ids, 2);
+      else if (needsTeams) { const pr = PAIRINGS[teamSwap]; teams = [pr[0].map(i => players[i].id), pr[1].map(i => players[i].id)]; }
+      onStart({
+        ...E,
+        games, teams, useNet, yardMode, partnerMode, vegasPain, skinsCarry,
+        blindDraw: oddMan && blindDraw,
+        stakes: Object.fromEntries(games.map(k => [k, Number(stakeOf(k)) || 1])),
+        course: courseName, pars: pars.slice(0, holes), si: si.slice(0, holes),
+        yards: yards.slice(0, holes).map((y, i) => Number(y) || defYards(pars[i])),
+        holes, groups, pointsSplit: oddSplit(count),
+        junkOn, junkValue: Number(junkValue) || 1, junkValues, junkEscalate, junkMode,
+        snakeBase: Number(snakeBase) || 1, snakeMode,
+      });
+      return;
+    }
     const players = roster
       ? roster.filter(p => picked.includes(p.id))
       : names.slice(0, count).map((n, i) => ({ id: uid(), name: n.trim() || `Player ${i + 1}`, hcp: Number(hcps[i]) || 0 }));
@@ -1307,7 +1335,7 @@ function Setup({ onStart, onBack, roster }) {
     });
   };
 
-  const STEPS = roster ? ['Group', 'Games', 'Junk'] : ['Players', 'Names', 'Games', 'Junk'];
+  const STEPS = E ? ['Games', 'Junk'] : roster ? ['Group', 'Games', 'Junk'] : ['Players', 'Names', 'Games', 'Junk'];
   const okToGo = (!roster || (picked.length >= 2 && avail.length)) && (cur !== 'games' || lineupReady);
   const NAV = (last) => (
     <div style={{ marginTop: 14 }}>
@@ -1319,7 +1347,7 @@ function Setup({ onStart, onBack, roster }) {
       <div style={{ display: 'flex', gap: 8 }}>
       <Btn onClick={() => (step > 0 ? setStep(step - 1) : onBack && onBack())} style={{ flex: '0 0 88px' }}>Back</Btn>
       <Btn kind="solid" disabled={!okToGo} onClick={() => (last ? start() : setStep(step + 1))}
-        style={{ flex: 1, padding: 16, fontSize: 15 }}>{last ? 'Tee it up' : 'Next'}</Btn>
+        style={{ flex: 1, padding: 16, fontSize: 15 }}>{last ? (E ? 'Save changes' : 'Tee it up') : 'Next'}</Btn>
       </div>
     </div>
   );
@@ -1327,8 +1355,20 @@ function Setup({ onStart, onBack, roster }) {
   return (
     <div style={{ padding: '20px 16px 40px', maxWidth: 520, margin: '0 auto' }}>
       <div style={{ marginBottom: 22 }}>
-        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 0.95 }}>{APP_NAME}</div>
-        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.ink, lineHeight: 0.95 }}>{APP_SUB}</div>
+        {E ? (
+          <>
+            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 0.95 }}>EDIT THE</div>
+            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.ink, lineHeight: 0.95 }}>GAMES &amp; BETS</div>
+            <div style={{ fontFamily: F_MONO, fontSize: 10.5, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
+              Change the games, dollar amounts or junk. It applies to the whole round — your scores stay put.
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 0.95 }}>{APP_NAME}</div>
+            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.ink, lineHeight: 0.95 }}>{APP_SUB}</div>
+          </>
+        )}
       </div>
 
 
@@ -2103,7 +2143,7 @@ function PressSheet({ round, setRound, h, onClose }) {
   );
 }
 
-function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] }) {
+function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, coverage = [] }) {
   const [h, setH] = useState(() => { for (let i = 0; i < round.holes; i++) if (!holeComplete(round, i)) return i; return round.holes - 1; });
   const [tab, setTab] = useState('play');
   const [info, setInfo] = useState(null);
@@ -2163,6 +2203,9 @@ function Play({ round, setRound, onQuit, scope, groupNo, guest, coverage = [] })
           {round.games.map(k => `${gameName(k, n)} $${round.stakes[k]}`).join(' · ')}
           {round.junkOn?.length ? <><br />{round.junkOn.length} junk</> : null}
         </div>
+        {!guest && onEditGames && (
+          <Btn onClick={onEditGames} style={{ fontSize: 10.5, padding: '6px 9px', flex: '0 0 auto' }}>Edit games</Btn>
+        )}
         <button onClick={onQuit} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 17, cursor: 'pointer', padding: 0 }}>×</button>
       </div>
 
@@ -2992,7 +3035,7 @@ function ScoreKeeper({ code, gi, initial, onLeave }) {
       setStale(false);
     } catch { setStale(true); }
   };
-  useEffect(() => { const t = setInterval(refresh, 12000); return () => clearInterval(t); }, [code, gi]); // eslint-disable-line
+  useEffect(() => { refresh(); const t = setInterval(refresh, 12000); return () => clearInterval(t); }, [code, gi]); // eslint-disable-line
 
   useEffect(() => {
     if (!dirty.current) return;
@@ -3037,6 +3080,7 @@ function Viewer({ code, initial, onLeave }) {
   };
 
   useEffect(() => {
+    refresh();
     const t = setInterval(refresh, 12000);
     return () => clearInterval(t);
   }, [code]); // eslint-disable-line
@@ -3300,7 +3344,7 @@ function TripView({ code, initial, onLeave }) {
     catch { setStale(true); }
     setBusy(false);
   };
-  useEffect(() => { const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [code]); // eslint-disable-line
+  useEffect(() => { refresh(); const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [code]); // eslint-disable-line
 
   const trip = data.trip;
   const { money, rounds, ledger, counted, live } = useMemo(() => tripTotals(trip), [trip]);
@@ -3441,6 +3485,13 @@ export default function App() {
       try { const r = await storage.get('ugb:round'); if (r?.value) setSaved(JSON.parse(r.value)); } catch {}
       try { const t = await storage.get('ugb:trip'); if (t?.value) setSavedTrip(JSON.parse(t.value)); } catch {}
       try { const th = await storage.get('ugb:theme'); if (th?.value) setTheme(th.value); } catch {}
+      // Restore a leaderboard someone was watching so a refresh doesn't kick
+      // them back to the code screen. We keep the last snapshot to render at
+      // once; the viewer re-pulls fresh data on its own right after.
+      try {
+        const v = await storage.get('ugb:view');
+        if (v?.value) { const s = JSON.parse(v.value); if (s?.view?.code && s?.screen) { setView(s.view); setScreen(s.screen); } }
+      } catch {}
       setLoaded(true);
     })();
   }, []);
@@ -3490,6 +3541,18 @@ export default function App() {
     const t = setTimeout(() => { publishTrip(trip).catch(() => {}); }, 1500);
     return () => clearTimeout(t);
   }, [trip]);
+
+  /* Remember the leaderboard being watched so a refresh restores it instead of
+     dropping back to the code screen. Cleared when the viewer leaves. */
+  useEffect(() => {
+    const watching = view?.code && ['view', 'tripview', 'keep'].includes(screen);
+    (async () => {
+      try {
+        if (watching) await storage.set('ugb:view', JSON.stringify({ screen, view }));
+        else await storage.delete('ugb:view');
+      } catch {}
+    })();
+  }, [screen, view]);
 
   /* the round currently open inside a trip */
   const tripRound = trip && activeId ? (trip.rounds.find(r => r.id === activeId) || {}).round : null;
@@ -3563,13 +3626,27 @@ export default function App() {
 
   if (screen === 'tripplay' && tripRound) return shell(
     <Play round={{ ...tripRound, code: trip.code }} setRound={setTripRound} onQuit={() => setScreen('trip')}
+      onEditGames={() => setScreen('tripedit')}
       scope={trip.code && (tripRound.groups || []).length > 1 ? tripRound.groups[0] : null} groupNo={1} coverage={coverage} />
+  );
+
+  if (screen === 'tripedit' && tripRound) return shell(
+    <Setup editRound={tripRound} roster={trip.roster}
+      onStart={(updated) => { setTripRound(updated); setScreen('tripplay'); }}
+      onBack={() => setScreen('tripplay')} />
   );
 
   if (screen === 'setup') return shell(<Setup onStart={startRound} onBack={() => setScreen('home')} />);
 
+  if (screen === 'edit' && round) return shell(
+    <Setup editRound={round}
+      onStart={(updated) => { setRound(updated); setScreen('play'); }}
+      onBack={() => setScreen('play')} />
+  );
+
   if (screen === 'play' && round) return shell(
     <Play round={round} setRound={setRound} onQuit={() => { setSaved(round); setRound(null); setScreen('home'); }}
+      onEditGames={() => setScreen('edit')}
       scope={round.code && (round.groups || []).length > 1 ? round.groups[0] : null} groupNo={1} coverage={coverage} />
   );
 

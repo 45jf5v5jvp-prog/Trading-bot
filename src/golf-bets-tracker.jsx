@@ -7,6 +7,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
+// Bump when the deployed build changes, so a stale copy is easy to spot on
+// someone else's phone ("what does yours say at the bottom?").
+const BUILD_ID = '2026.09.04';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -1003,14 +1006,24 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     setCourseName(`${bc.name} · ${tee}`);
     setList(null); setErr(null);
   };
+  const normName = (x) => (x || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
   /* Only surface a built-in once the search box matches it (so nothing is
      pinned by default), and ignore case/punctuation so "rivers bend" finds
      "River's Bend". */
   const matchBuiltIn = (bc) => {
-    const norm = (x) => (x || '').toLowerCase().replace(/[^a-z0-9 ]/g, '');
-    const s = norm(q.trim());
+    const s = normName(q);
     if (!s) return false;
-    return norm(bc.name).includes(s) || norm(`${bc.city} ${bc.state}`).includes(s);
+    return normName(bc.name).includes(s) || normName(`${bc.city} ${bc.state}`).includes(s);
+  };
+
+  /* A hand-verified built-in always beats a database entry for the same course:
+     drop any online result whose name is (or contains) a built-in's name, so a
+     course we ship a correct card for can't be picked with wrong data. */
+  const isBuiltInDup = (c) => {
+    const n = normName(c && (c.name || c.course_name));
+    if (!n) return false;
+    return BUILT_IN_COURSES.some(b => { const bn = normName(b.name); return n === bn || n.includes(bn); });
   };
 
   const run = async (fn) => {
@@ -1066,6 +1079,7 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
   };
 
   const shownBuiltIns = BUILT_IN_COURSES.filter(matchBuiltIn);
+  const visibleList = list ? list.filter(c => !isBuiltInDup(c)) : list;
 
   return (
     <div style={{ marginBottom: 18 }}>
@@ -1144,10 +1158,10 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
         </div>
       )}
 
-      {list && !picked && (
+      {visibleList && !picked && (
         <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 10 }}>
-          {!list.length && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, padding: '10px 0' }}>Nothing came back. Try a shorter name.</div>}
-          {list.map(c => c.tees ? (
+          {!visibleList.length && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, padding: '10px 0' }}>{shownBuiltIns.length ? 'Use your saved course above.' : 'Nothing came back. Try a shorter name.'}</div>}
+          {visibleList.map(c => c.tees ? (
             <div key={c.id} onClick={() => { setPicked(c); setList(null); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5, cursor: 'pointer' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{c.name}</div>
@@ -2838,6 +2852,7 @@ function Home({ onNew, onTrip, onJoin, resume, tripResume, theme, setTheme }) {
           <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 40, letterSpacing: '-0.035em', color: C.chalk, lineHeight: 0.92 }}>{APP_NAME}</div>
           <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 40, letterSpacing: '-0.035em', color: C.ink, lineHeight: 0.92 }}>{APP_SUB}</div>
           <Eyebrow style={{ marginTop: 12 }}>settle it before the parking lot</Eyebrow>
+          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 6 }}>v{BUILD_ID}</div>
         </div>
         <button onClick={() => setTheme(theme === 'day' ? 'night' : 'day')}
           aria-label={theme === 'day' ? 'switch to the night palette' : 'switch to the day palette'}

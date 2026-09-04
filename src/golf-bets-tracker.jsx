@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.04c';
+const BUILD_ID = '2026.09.04d';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -1345,6 +1345,24 @@ function Setup({ onStart, onBack, roster, editRound }) {
 
   const STEPS = E ? ['Games', 'Junk'] : roster ? ['Group', 'Games', 'Junk'] : ['Players', 'Names', 'Games', 'Junk'];
   const okToGo = (!roster || (picked.length >= 2 && avail.length)) && (cur !== 'games' || lineupReady);
+
+  /* Handicap allocation. Lives on the names/handicaps page for a new round (the
+     natural spot, next to where you type the handicaps); for trip rounds and
+     mid-round edits there is no names page, so it rides on the games page. */
+  const hcpBlock = useNet ? (
+    <>
+      <Eyebrow style={{ marginBottom: 8 }}>how the strokes fall</Eyebrow>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <Btn active={hcpMode === 'full'} onClick={() => setHcpMode('full')} style={{ flex: 1, fontSize: 11.5 }}>Full, where they fall</Btn>
+        <Btn active={hcpMode === 'low'} onClick={() => setHcpMode('low')} style={{ flex: 1, fontSize: 11.5 }}>Off the low man</Btn>
+      </div>
+      <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
+        {hcpMode === 'full'
+          ? 'Everybody gets their whole handicap on the holes it lands. A 2 gets 2 shots, a 10 gets 10.'
+          : 'The low handicap plays scratch and everyone else gets the difference. A 2 and a 10 in the same group play as 0 and 8.'}
+      </div>
+    </>
+  ) : null;
   const NAV = (last) => (
     <div style={{ marginTop: 14 }}>
       {cur === 'games' && !lineupReady && (
@@ -1490,6 +1508,8 @@ function Setup({ onStart, onBack, roster, editRound }) {
                 style={{ ...inputStyle, width: 70, flex: '0 0 70px', textAlign: 'center' }} />
             </div>
           ))}
+          <div style={{ height: 10 }} />
+          {hcpBlock}
           {NAV(false)}
         </>
       )}
@@ -1662,20 +1682,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
             <Btn active={useNet} onClick={() => setUseNet(true)} style={{ flex: 1 }}>Net</Btn>
             <Btn active={!useNet} onClick={() => setUseNet(false)} style={{ flex: 1 }}>Gross</Btn>
           </div>
-          {useNet && (
-            <>
-              <Eyebrow style={{ marginBottom: 8 }}>how the strokes fall</Eyebrow>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <Btn active={hcpMode === 'full'} onClick={() => setHcpMode('full')} style={{ flex: 1, fontSize: 11.5 }}>Full, where they fall</Btn>
-                <Btn active={hcpMode === 'low'} onClick={() => setHcpMode('low')} style={{ flex: 1, fontSize: 11.5 }}>Off the low man</Btn>
-              </div>
-              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
-                {hcpMode === 'full'
-                  ? 'Everybody gets their whole handicap on the holes it lands. A 2 gets 2 shots, a 10 gets 10.'
-                  : 'The low handicap plays scratch and everyone else gets the difference. A 2 and a 10 in the same group play as 0 and 8.'}
-              </div>
-            </>
-          )}
+          {(roster || E) && hcpBlock}
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             <Btn active={holes === 18} onClick={() => setHoles(18)} style={{ flex: 1 }}>18 holes</Btn>
             <Btn active={holes === 9} onClick={() => setHoles(9)} style={{ flex: 1 }}>9 holes</Btn>

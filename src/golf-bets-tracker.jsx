@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06f';
+const BUILD_ID = '2026.09.06g';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -136,6 +136,29 @@ const storage = {
     try { localStorage.removeItem(key); } catch {}
   },
 };
+
+/* Saved course library — every course that loads (from the database or set by
+   hand) is banked here so the whole group loads it instantly next time with no
+   database call. Shared when the leaderboard is on, otherwise on the device. */
+const LIBRARY_KEY = 'ugb:library';
+async function loadLibrary() {
+  try { const r = await storage.get(LIBRARY_KEY, SHARING_ON); return r?.value ? JSON.parse(r.value) : []; }
+  catch { return []; }
+}
+async function saveToLibrary(course) {
+  if (!course?.id || !course.tees?.length) return null;
+  let lib; try { lib = await loadLibrary(); } catch { lib = []; }
+  const entry = { id: course.id, name: course.name, city: course.city, state: course.state, tees: course.tees };
+  const i = lib.findIndex(c => c.id === course.id);
+  if (i >= 0) lib[i] = entry; else lib.push(entry);
+  try { await storage.set(LIBRARY_KEY, JSON.stringify(lib), SHARING_ON); } catch {}
+  return lib;
+}
+
+/* Pinned "home" courses — per device, so each person keeps their own at the top. */
+const PINS_KEY = 'ugb:pins';
+const loadPins = () => { try { return JSON.parse(localStorage.getItem(PINS_KEY) || '[]'); } catch { return []; } };
+const savePins = (ids) => { try { localStorage.setItem(PINS_KEY, JSON.stringify(ids)); } catch {} };
 
 /* ==========================================================================
    GAMES
@@ -1027,44 +1050,77 @@ const BUILT_IN_COURSES = [
   },
 ];
 
+/* A built-in course in the same shape as a database/library course, so pinned
+   built-ins and saved courses render and apply through one code path. */
+function builtInAsDb(bc) {
+  const tees = Object.keys(bc.tees).map(name => ({
+    label: name, par: bc.par, hcp: bc.hcp, yards: bc.tees[name],
+    total: bc.tees[name].reduce((a, b) => a + (b || 0), 0),
+  }));
+  return { id: bc.id, name: bc.name, aliases: bc.aliases, city: bc.city, state: bc.state, tees };
+}
+
 function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYards, courseName, setCourseName }) {
   const [q, setQ] = useState('');
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState(0);
-  const [openCourse, setOpenCourse] = useState(BUILT_IN_COURSES.length === 1 ? BUILT_IN_COURSES[0].id : null);
+  const [openCourse, setOpenCourse] = useState(null);
   const [picked, setPicked] = useState(null);   // a searched course whose tees are being chosen
+  const [library, setLibrary] = useState([]);   // courses saved by the group (shared)
+  const [pins, setPins] = useState(loadPins());  // this device's home courses (ids)
+  const [saveName, setSaveName] = useState(''); // name for saving a hand-set card
+
+  useEffect(() => { loadLibrary().then(setLibrary).catch(() => {}); }, []);
+  const togglePin = (id) => setPins(p => { const next = p.includes(id) ? p.filter(x => x !== id) : [...p, id]; savePins(next); return next; });
+
+  /* Save the current hand-entered card to the group's library and pin it, so a
+     course the database doesn't have is set once and then loads for everyone. */
+  const saveManualCourse = async () => {
+    const nm = (saveName || courseName || '').replace(/ · .*$/, '').trim();
+    if (!nm) return;
+    const id = 'lib-' + normName(nm).replace(/ /g, '-');
+    const course = {
+      id, name: nm, city: '', state: '',
+      tees: [{
+        label: 'Card',
+        par: pars.slice(0, 18), hcp: si.slice(0, 18),
+        yards: yards.slice(0, 18).map(y => Number(y) || null),
+        total: yards.slice(0, 18).reduce((a, y) => a + (Number(y) || 0), 0),
+      }],
+    };
+    const lib = await saveToLibrary(course); if (lib) setLibrary(lib);
+    setPins(p => { if (p.includes(id)) return p; const next = [...p, id]; savePins(next); return next; });
+    setCourseName(`${nm} · Card`); setSaveName('');
+  };
 
   /* Drop a built-in course onto the card. Full 18-hole arrays; the round slices
      to however many holes are being played. */
-  const applyBuiltIn = (bc, tee) => {
-    setPars([...bc.par]);
-    setSi([...bc.hcp]);
-    setYards(bc.tees[tee].map(String));
-    setCourseName(`${bc.name} · ${tee}`);
-    setList(null); setErr(null);
-  };
   const normName = (x) => (x || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
-  /* Only surface a built-in once the search box matches it (so nothing is
-     pinned by default), and ignore case/punctuation so "rivers bend" finds
-     "River's Bend". */
+  /* Every course you can pick without the database: the built-in courses plus
+     everything the group has saved to the shared library. Built-ins win over a
+     library entry with the same id. */
+  const savedCourses = [
+    ...BUILT_IN_COURSES.map(builtInAsDb),
+    ...library.filter(l => !BUILT_IN_COURSES.some(b => b.id === l.id)),
+  ];
   const biNames = (b) => [b.name, ...(b.aliases || [])].map(normName).filter(Boolean);
-  const matchBuiltIn = (bc) => {
+  const matchSaved = (c) => {
     const s = normName(q);
     if (!s) return false;
-    return biNames(bc).some(n => n.includes(s)) || normName(`${bc.city} ${bc.state}`).includes(s);
+    return biNames(c).some(n => n.includes(s)) || normName(`${c.city} ${c.state}`).includes(s);
   };
 
-  /* A hand-verified built-in always beats a database entry for the same course,
-     even when the database spells the name differently (e.g. "Tournament
-     Player's Club at River's Bend" vs "TPC River's Bend"). Returns the built-in
-     a search result stands in for, or null. */
-  const builtInFor = (c) => {
+  /* A saved course (built-in or library) always beats a fresh database result
+     for the same course, even when the database spells the name differently
+     ("Tournament Player's Club at River's Bend" vs "TPC River's Bend"). */
+  const savedFor = (c) => {
     const n = normName(c && (c.name || c.course_name));
     if (!n) return null;
-    return BUILT_IN_COURSES.find(b => biNames(b).some(bn =>
+    if (c && c.id && savedCourses.some(s => s.id === c.id)) return savedCourses.find(s => s.id === c.id);
+    return savedCourses.find(s => biNames(s).some(bn =>
       bn.length >= 6 && (n === bn || n.includes(bn) || bn.includes(n)))) || null;
   };
 
@@ -1106,13 +1162,15 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
   /* A course picked from the database list: pull its full scorecard, then show
      the tee picker. This is the second step the search needs. */
   const pickDb = async (c) => {
-    const bi = builtInFor(c);
-    if (bi) { setOpenCourse(bi.id); setList(null); return; } // a built-in stands in — use its card
+    const s = savedFor(c);
+    if (s) { setPicked(s); setList(null); return; } // already saved/built-in — no database call
     setBusy(true); setErr(null);
     try {
       const full = await loadCourseDb(c.id);
-      if (full.tees.length) { setPicked(full); setList(null); }
-      else setErr(`${c.name} has no scorecard on file yet. Set the card by hand below.`);
+      if (full.tees.length) {
+        setPicked(full); setList(null);
+        saveToLibrary(full).then(lib => { if (lib) setLibrary(lib); }).catch(() => {}); // bank it for the group
+      } else setErr(`${c.name} has no scorecard on file yet. Set the card by hand below.`);
     } catch (e) { setErr(courseSearchReason(e)); }
     setBusy(false);
   };
@@ -1134,42 +1192,49 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     run(() => COURSE_DB_ON ? searchCourseDb(q.trim()) : searchCourses({ q: q.trim() }));
   };
 
-  /* Surface a built-in when you type its name AND whenever a search/near-me
-     result stands in for it — so your home course, however the database spells
-     it, always shows up as your verified card instead of a broken online copy. */
-  const shownBuiltIns = (() => {
+  /* The "your courses" list: pinned home courses always, plus anything that
+     matches the search, plus any saved course a database result stands in for.
+     Deduped, pinned first. */
+  const shownSaved = (() => {
     const m = new Map();
-    BUILT_IN_COURSES.filter(matchBuiltIn).forEach(b => m.set(b.id, b));
-    (list || []).forEach(c => { const b = builtInFor(c); if (b) m.set(b.id, b); });
+    savedCourses.filter(c => pins.includes(c.id)).forEach(c => m.set(c.id, c));
+    savedCourses.filter(matchSaved).forEach(c => m.set(c.id, c));
+    (list || []).forEach(c => { const s = savedFor(c); if (s) m.set(s.id, s); });
     return [...m.values()];
   })();
-  const visibleList = list ? list.filter(c => !builtInFor(c)) : list;
+  const visibleList = list ? list.filter(c => !savedFor(c)) : list;
+  const applySaved = (course, tee) => applyDbTee(course, tee);
 
   return (
     <div style={{ marginBottom: 18 }}>
-      {!!shownBuiltIns.length && (
+      {!!shownSaved.length && (
         <div style={{ marginBottom: 12 }}>
           <Eyebrow style={{ color: C.ink, marginBottom: 8 }}>your courses</Eyebrow>
-          {shownBuiltIns.map(bc => {
-            const open = openCourse === bc.id;
-            const par = bc.par.slice(0, holes).reduce((a, b) => a + b, 0);
+          {shownSaved.map(c => {
+            const open = openCourse === c.id;
+            const pinned = pins.includes(c.id);
+            const par = (c.tees[0]?.par || []).slice(0, holes).reduce((a, b) => a + (b || 0), 0);
             return (
-              <div key={bc.id} style={{ background: C.card2, border: `1px solid ${open ? C.ball : 'transparent'}`, borderRadius: 12, padding: '11px 12px', marginBottom: 8 }}>
-                <div onClick={() => setOpenCourse(open ? null : bc.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>{bc.name}</div>
-                    <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>{bc.city}, {bc.state} · par {par}</div>
+              <div key={c.id} style={{ background: C.card2, border: `1px solid ${open ? C.ball : 'transparent'}`, borderRadius: 12, padding: '11px 12px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div onClick={() => setOpenCourse(open ? null : c.id)} style={{ minWidth: 0, flex: 1, cursor: 'pointer' }}>
+                    <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>{c.name}</div>
+                    <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>{[c.city, c.state].filter(Boolean).join(', ')}{par ? ` · par ${par}` : ''}</div>
                   </div>
-                  <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10.5, color: C.ink, whiteSpace: 'nowrap' }}>{open ? 'pick tees' : 'tap to pick'}</span>
+                  <button onClick={() => togglePin(c.id)} aria-label={pinned ? 'remove as home course' : 'set as home course'}
+                    style={{ flex: '0 0 auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '2px 4px', color: pinned ? C.ball : C.muted }}>
+                    {pinned ? '★' : '☆'}
+                  </button>
+                  <span onClick={() => setOpenCourse(open ? null : c.id)} style={{ fontFamily: F_MONO, fontSize: 10.5, color: C.ink, whiteSpace: 'nowrap', cursor: 'pointer' }}>{open ? 'pick tees' : 'tap to pick'}</span>
                 </div>
                 {open && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                    {Object.keys(bc.tees).map(tee => {
-                      const on = courseName === `${bc.name} · ${tee}`;
-                      const yds = bc.tees[tee].slice(0, holes).reduce((a, b) => a + b, 0);
+                    {c.tees.map((tee, i) => {
+                      const on = courseName === `${c.name} · ${tee.label}`;
+                      const yds = (tee.yards || []).slice(0, holes).reduce((a, b) => a + (b || 0), 0) || tee.total || 0;
                       return (
-                        <Btn key={tee} active={on} onClick={() => applyBuiltIn(bc, tee)} style={{ flex: '1 1 62px', fontSize: 12, padding: '9px 4px', lineHeight: 1.25 }}>
-                          {tee}<br /><span style={{ fontFamily: F_MONO, fontSize: 9, color: on ? C.onBall : C.muted }}>{yds} yds</span>
+                        <Btn key={i} active={on} onClick={() => applySaved(c, tee)} style={{ flex: '1 1 62px', fontSize: 12, padding: '9px 4px', lineHeight: 1.25 }}>
+                          {tee.label}<br /><span style={{ fontFamily: F_MONO, fontSize: 9, color: on ? C.onBall : C.muted }}>{yds} yds</span>
                         </Btn>
                       );
                     })}
@@ -1178,7 +1243,7 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
               </div>
             );
           })}
-          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, textAlign: 'center', marginTop: 2 }}>or search for another course below</div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, textAlign: 'center', marginTop: 2 }}>tap ☆ to keep a course at the top · or search below</div>
         </div>
       )}
 
@@ -1203,7 +1268,11 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
               <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>{picked.name}</div>
               <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>{[picked.city, picked.state].filter(Boolean).join(', ')}</div>
             </div>
-            <Btn onClick={() => setPicked(null)} style={{ marginLeft: 'auto', fontSize: 10.5, padding: '6px 9px' }}>Back</Btn>
+            <button onClick={() => togglePin(picked.id)} aria-label={pins.includes(picked.id) ? 'remove as home course' : 'set as home course'}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '2px 6px', color: pins.includes(picked.id) ? C.ball : C.muted }}>
+              {pins.includes(picked.id) ? '★' : '☆'}
+            </button>
+            <Btn onClick={() => setPicked(null)} style={{ fontSize: 10.5, padding: '6px 9px' }}>Back</Btn>
           </div>
           <Eyebrow style={{ color: C.ink, marginBottom: 7 }}>which tees</Eyebrow>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1221,7 +1290,7 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
 
       {visibleList && !picked && (
         <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 10 }}>
-          {!visibleList.length && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, padding: '10px 0' }}>{shownBuiltIns.length ? 'Use your saved course above.' : 'Nothing came back. Try a shorter name.'}</div>}
+          {!visibleList.length && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, padding: '10px 0' }}>{shownSaved.length ? 'Use your saved course above.' : 'Nothing came back. Try a shorter name.'}</div>}
           {visibleList.map(c => c.tees ? (
             <div key={c.id} onClick={() => { setPicked(c); setList(null); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5, cursor: 'pointer' }}>
               <div style={{ minWidth: 0 }}>
@@ -1273,6 +1342,19 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
       <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
         Par {pars.slice(0, holes).reduce((a, b) => a + b, 0)}. Index decides which holes give strokes.<br />
         {COURSE_DB_ON ? 'Course data via GolfCourseAPI.' : 'Course data © OpenStreetMap contributors, ODbL, via OpenGolfAPI.'}
+      </div>
+
+      {/* Save a hand-set card to the shared library so the whole group gets it
+          for good — and pin it as your home course. Fills the gap for courses
+          the online lookup can't find. */}
+      <div style={{ marginTop: 12, padding: 12, background: C.card, borderRadius: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={saveName} onChange={e => setSaveName(e.target.value)}
+          placeholder={courseName ? courseName.replace(/ · .*$/, '') : 'Course name'}
+          style={{ ...inputStyle, flex: 1, minWidth: 140 }} />
+        <Btn onClick={saveManualCourse}>Save &amp; pin ★</Btn>
+      </div>
+      <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 6, lineHeight: 1.6 }}>
+        Saves this card for the whole group and pins it to the top for you. Missing a course online? Set it once here.
       </div>
     </div>
   );

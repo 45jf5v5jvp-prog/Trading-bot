@@ -52,29 +52,15 @@ Deno.serve(async (req: Request) => {
   const q = (url.searchParams.get("search_query") || url.searchParams.get("q") || "").trim();
 
   try {
-    // One course's full scorecard by id (efficient path for newer app builds).
-    if (id) {
-      const r = await timedFetch(`${API}/courses/${encodeURIComponent(id)}`, auth);
-      return new Response(await r.text(), { status: r.status, headers: { ...CORS, "Content-Type": "application/json" } });
-    }
-    if (!q) return json({ courses: [] });
-
-    // Search returns only a summary (tee counts, no holes). Fill in the real
-    // scorecard for the first few matches so the app gets full tees straight
-    // from search. Capped and time-limited so a busy query can't hang.
-    const r = await timedFetch(`${API}/search?search_query=${encodeURIComponent(q)}`, auth);
-    if (!r.ok) return new Response(await r.text(), { status: r.status, headers: { ...CORS, "Content-Type": "application/json" } });
-    const data = await r.json();
-    const list = Array.isArray(data.courses) ? data.courses.slice(0, 6) : [];
-    const settled = await Promise.allSettled(list.map(async (c: any) => {
-      const dr = await timedFetch(`${API}/courses/${encodeURIComponent(c.id)}`, auth, 5000);
-      if (!dr.ok) return c;
-      const dd = await dr.json();
-      const detail = dd.course || dd;
-      return { ...c, tees: detail.tees || c.tees };
-    }));
-    const full = settled.map((s, i) => (s.status === "fulfilled" ? s.value : list[i]));
-    return json({ courses: full });
+    // Two light, fast passthroughs — no bulk enrichment, so nothing can choke:
+    //   ?course_id=<id>  -> that one course's full scorecard (pulled on pick)
+    //   ?search_query=x  -> the list of matching courses (a summary, instant)
+    const target = id
+      ? `${API}/courses/${encodeURIComponent(id)}`
+      : `${API}/search?search_query=${encodeURIComponent(q)}`;
+    if (!id && !q) return json({ courses: [] });
+    const r = await timedFetch(target, auth);
+    return new Response(await r.text(), { status: r.status, headers: { ...CORS, "Content-Type": "application/json" } });
   } catch (e) {
     return json({ error: String(e) }, 502);
   }

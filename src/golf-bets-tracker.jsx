@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06c';
+const BUILD_ID = '2026.09.06d';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -394,6 +394,16 @@ const GOLF_PROXY = (_CFG.GOLF_PROXY || '').trim().replace(/\/+$/, '');
 const GOLF_API_KEY = (_CFG.GOLF_API_KEY || '').trim();
 const COURSE_DB_ON = !!(GOLF_PROXY || GOLF_API_KEY);
 
+/* A readable course name from the database's club + course fields. NCR, for
+   example, is club "NCR Country Club" with courses "South"/"North" — show both
+   so it isn't just "South". */
+function dbCourseName(c) {
+  const club = (c.club_name || '').trim();
+  const course = (c.course_name || '').trim();
+  if (club && course && !club.toLowerCase().includes(course.toLowerCase())) return `${club} – ${course}`;
+  return club || course || 'Course';
+}
+
 /* Flatten a GolfCourseAPI course into { id, name, city, state, tees:[...] },
    each tee { label, total, par[], hcp[], yards[] }. */
 function normalizeDbCourse(c) {
@@ -411,7 +421,7 @@ function normalizeDbCourse(c) {
   });
   addSet(c.tees?.male, ''); addSet(c.tees?.female, 'W');
   return {
-    id: c.id, name: c.course_name || c.club_name || 'Course',
+    id: c.id, name: dbCourseName(c),
     city: c.location?.city, state: c.location?.state, tees,
   };
 }
@@ -432,7 +442,7 @@ async function searchCourseDb(q) {
   const d = await res.json();
   return (d.courses || []).map(c => ({
     id: c.id,
-    name: c.course_name || c.club_name || 'Course',
+    name: dbCourseName(c),
     city: c.location?.city, state: c.location?.state,
     _db: true,
   }));

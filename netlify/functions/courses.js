@@ -68,25 +68,26 @@ function timedFetch(target, opts, ms) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-/* Fetch the golf API, quietly retrying a brief "busy" (429) or a server blip
-   (5xx). Kept well under the function's time budget: 429s come back fast, and a
-   true hang is only retried once. */
+/* Fetch the golf API, retrying only a genuine SERVER BLIP (5xx) or a network
+   hang — never a 429. A 429 means "rate limit"; retrying it just spends more of
+   the (already exhausted) quota and can extend the throttle, so we return it
+   immediately and let the shared cache do the real work. Kept well under the
+   function's time budget. */
 async function fetchWithRetry(target, key) {
   const opts = { headers: { Authorization: 'Key ' + key } };
-  const backoff = [400, 1100]; // ms between attempts
   let last;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await timedFetch(target, opts, 6000);
-      if (r.status === 429 || r.status >= 500) { // retryable
+      if (r.status >= 500) { // server blip — one gentle retry
         last = { status: r.status, body: await r.text() };
-        if (attempt < backoff.length) { await sleep(backoff[attempt]); continue; }
+        if (attempt === 0) { await sleep(800); continue; }
         return last;
       }
-      return { status: r.status, body: await r.text() }; // 200s and 4xx (not 429) are final
-    } catch (e) { // network error / timeout
+      return { status: r.status, body: await r.text() }; // 200s, 429, and other 4xx are final
+    } catch (e) { // network error / timeout — retry a hang once
       last = { status: 502, body: JSON.stringify({ error: String(e) }) };
-      if (attempt === 0) { await sleep(backoff[0]); continue; } // retry a hang once
+      if (attempt === 0) { await sleep(800); continue; }
       return last;
     }
   }

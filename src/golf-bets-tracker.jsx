@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06e';
+const BUILD_ID = '2026.09.06f';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -1182,11 +1182,8 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <Btn onClick={nearMe} style={{ flex: 1, fontSize: 12 }}>Courses near me</Btn>
-        <Btn onClick={searchByName} disabled={!q.trim()} style={{ flex: 1, fontSize: 12 }}>Search by name</Btn>
-      </div>
-      <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchByName()} placeholder="Course name" style={{ ...inputStyle, marginBottom: 8 }} />
+      <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchByName()} placeholder="Type a course name" style={{ ...inputStyle, marginBottom: 8 }} />
+      <Btn onClick={searchByName} disabled={!q.trim()} style={{ width: '100%', fontSize: 13, padding: '12px' }}>Search by name</Btn>
 
       {busy && <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.ink, padding: '6px 0' }}>Looking...</div>}
       {err && <div style={{ fontFamily: F_DISP, fontSize: 12, color: C.down, lineHeight: 1.5, marginBottom: 8 }}>{err}</div>}

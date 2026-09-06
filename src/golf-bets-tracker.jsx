@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06l';
+const BUILD_ID = '2026.09.06m';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -2822,6 +2822,25 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
             <Standings round={round} ledger={ledger} compact />
             {ledger.extra && <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.ink, marginTop: 5 }}>{ledger.extra}</div>}
           </div>
+
+          {/* Once the last hole (or the whole card) is in, point the way to the
+             leaderboard to review the money and lock it in — otherwise a player
+             on 18 has no on-screen cue to finish. */}
+          {!locked && !guest && (missing.length === 0 || (h === round.holes - 1 && complete)) && (
+            <div style={{ marginTop: 18, padding: '14px 15px', background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 14 }}>
+              <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 16, color: C.chalk }}>
+                {missing.length === 0 ? "That's the round." : 'Last hole is in.'}
+              </div>
+              <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 3, lineHeight: 1.5 }}>
+                {missing.length === 0
+                  ? 'All scores are posted. Head to the leaderboard to check the money and lock it in.'
+                  : `Still open: hole${missing.length === 1 ? '' : 's'} ${missing.map(i => i + 1).join(', ')}. You can finish anyway on the leaderboard.`}
+              </div>
+              <Btn kind="solid" onClick={() => { setTab('money'); window.scrollTo(0, 0); }} style={{ width: '100%', padding: 14, fontSize: 15, marginTop: 12 }}>
+                Go to the leaderboard &amp; finish ▸
+              </Btn>
+            </div>
+          )}
         </div>
       )}
 

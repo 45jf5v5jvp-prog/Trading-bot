@@ -28,6 +28,18 @@ const json = (obj: unknown, status = 200) =>
 
 const API = "https://api.golfcourseapi.com/v1";
 
+// fetch with a hard time limit, so one slow upstream call can never hang the
+// whole request (which is what made a busy search time out).
+async function timedFetch(target: string, auth: RequestInit, ms = 6000): Promise<Response> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    return await fetch(target, { ...auth, signal: ctl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
@@ -42,29 +54,26 @@ Deno.serve(async (req: Request) => {
   try {
     // One course's full scorecard by id (efficient path for newer app builds).
     if (id) {
-      const r = await fetch(`${API}/courses/${encodeURIComponent(id)}`, auth);
+      const r = await timedFetch(`${API}/courses/${encodeURIComponent(id)}`, auth);
       return new Response(await r.text(), { status: r.status, headers: { ...CORS, "Content-Type": "application/json" } });
     }
     if (!q) return json({ courses: [] });
 
-    // Search returns only a summary (tee counts, no holes). Fill in each match's
-    // real scorecard so the app gets full tees straight from the search — this is
-    // what makes any course load without a second round trip from older builds.
-    const r = await fetch(`${API}/search?search_query=${encodeURIComponent(q)}`, auth);
+    // Search returns only a summary (tee counts, no holes). Fill in the real
+    // scorecard for the first few matches so the app gets full tees straight
+    // from search. Capped and time-limited so a busy query can't hang.
+    const r = await timedFetch(`${API}/search?search_query=${encodeURIComponent(q)}`, auth);
     if (!r.ok) return new Response(await r.text(), { status: r.status, headers: { ...CORS, "Content-Type": "application/json" } });
     const data = await r.json();
-    const list = Array.isArray(data.courses) ? data.courses.slice(0, 10) : [];
-    const full = await Promise.all(list.map(async (c: any) => {
-      try {
-        const dr = await fetch(`${API}/courses/${encodeURIComponent(c.id)}`, auth);
-        if (!dr.ok) return c;
-        const dd = await dr.json();
-        const detail = dd.course || dd;
-        return { ...c, tees: detail.tees || c.tees };
-      } catch {
-        return c;
-      }
+    const list = Array.isArray(data.courses) ? data.courses.slice(0, 6) : [];
+    const settled = await Promise.allSettled(list.map(async (c: any) => {
+      const dr = await timedFetch(`${API}/courses/${encodeURIComponent(c.id)}`, auth, 5000);
+      if (!dr.ok) return c;
+      const dd = await dr.json();
+      const detail = dd.course || dd;
+      return { ...c, tees: detail.tees || c.tees };
     }));
+    const full = settled.map((s, i) => (s.status === "fulfilled" ? s.value : list[i]));
     return json({ courses: full });
   } catch (e) {
     return json({ error: String(e) }, 502);

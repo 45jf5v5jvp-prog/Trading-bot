@@ -30,16 +30,13 @@
          Setup: see README / the handoff notes.
          ========================================================== -->
     <script>
+      // Baked in so every build works for everyone, no per-deploy setup. These
+      // are public client values by design (they ship to every phone anyway);
+      // the real GolfCourseAPI key stays a server secret in the Supabase relay.
       window.SIDE_ACTION_CONFIG = {
-        SUPABASE_URL: "",
-        SUPABASE_ANON_KEY: "",
-
-        // Search ANY course (optional). After you deploy the "courses" relay in
-        // your Supabase project, paste its URL here — it looks like:
-        //   https://YOURPROJECT.supabase.co/functions/v1/courses
-        // Your GolfCourseAPI key stays a server secret, never in this file.
-        // Leave blank and the app just uses your built-in home course + manual entry.
-        GOLF_PROXY: ""
+        SUPABASE_URL: "https://tsahgjqyoghmprkmxjgb.supabase.co",
+        SUPABASE_ANON_KEY: "sb_publishable_m6C3mI_4F_QsmKWuC_1Nkg_R2o4PrUB",
+        GOLF_PROXY: "https://tsahgjqyoghmprkmxjgb.supabase.co/functions/v1/smart-endpoint"
       };
     </script>
   </head>

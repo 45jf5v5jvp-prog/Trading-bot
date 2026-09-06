@@ -1,0 +1,8 @@
+# Netlify cache rules — the reason a new version now reaches everyone.
+# index.html must be re-checked on every load so phones pick up new deploys.
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+# Vite fingerprints these filenames, so they can cache forever and a new build
+# simply points at a new filename (automatic cache-busting).
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

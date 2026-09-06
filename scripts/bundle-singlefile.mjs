@@ -82,9 +82,9 @@ const html = `<!doctype html>
          ========================================================== -->
     <script>
       window.SIDE_ACTION_CONFIG = {
-        SUPABASE_URL: "",
-        SUPABASE_ANON_KEY: "",
-        GOLF_PROXY: ""
+        SUPABASE_URL: "https://tsahgjqyoghmprkmxjgb.supabase.co",
+        SUPABASE_ANON_KEY: "sb_publishable_m6C3mI_4F_QsmKWuC_1Nkg_R2o4PrUB",
+        GOLF_PROXY: "https://tsahgjqyoghmprkmxjgb.supabase.co/functions/v1/smart-endpoint"
       };
     </script>
   </head>

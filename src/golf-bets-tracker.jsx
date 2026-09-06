@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06j';
+const BUILD_ID = '2026.09.06k';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -2313,12 +2313,63 @@ function PressSheet({ round, setRound, h, onClose }) {
   );
 }
 
+/* A plain-English rundown of the games and side bets in THIS round. Sits at the
+   bottom of the leaderboard so anyone who joins to watch can scroll down and see
+   what's being played and how it works. Every word comes from the game and junk
+   tables above — this only surfaces existing copy, it never touches scoring.
+   Collapsed by default for regulars; defaultOpen for the watcher's view. */
+function GamesGuide({ round, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const n = round.players.length;
+  const junkOn = round.junkOn || [];
+  return (
+    <div style={{ marginTop: 20 }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+        background: C.card2, border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 14px',
+      }}>
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>How the games work</div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, letterSpacing: '0.06em', marginTop: 2 }}>new here? tap to read what we're playing</div>
+        </div>
+        <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 12, color: C.ink }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {round.games.map(k => (
+            <div key={k} style={{ background: C.card, borderRadius: 11, padding: '11px 13px', marginBottom: 7 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 14.5, color: C.chalk }}>{gameName(k, n)}</div>
+                <div style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, color: C.ink, whiteSpace: 'nowrap' }}>{money(round.stakes[k])} {GAMES[k].unit}</div>
+              </div>
+              <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>{GAMES[k].blurb(n)}</div>
+            </div>
+          ))}
+          {!!junkOn.length && (
+            <>
+              <Eyebrow style={{ margin: '12px 0 7px' }}>side bets in play</Eyebrow>
+              {junkOn.map(t => (
+                <div key={t} style={{ background: C.card, borderRadius: 11, padding: '11px 13px', marginBottom: 7 }}>
+                  <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 14, color: JUNK[t].sign < 0 ? C.down : C.chalk }}>{JUNK[t].name}</div>
+                  <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>{JUNK[t].info}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, coverage = [] }) {
   const [h, setH] = useState(() => { for (let i = 0; i < round.holes; i++) if (!holeComplete(round, i)) return i; return round.holes - 1; });
   const [tab, setTab] = useState('play');
   const [info, setInfo] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [pressing, setPressing] = useState(false);
+  const [padFor, setPadFor] = useState(null); // which player's quick score pad is open
+  useEffect(() => { setPadFor(null); }, [h]); // close the pad when the hole changes
 
   const ledger = useMemo(() => fullLedger(round), [round]);
   const n = round.players.length;
@@ -2570,27 +2621,55 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
               : has('wolf') && call === p.id ? 'PARTNER'
               : solo ? 'BLIND DRAW'
               : ti >= 0 ? `TEAM ${ti + 1}` : null;
+            const padOpen = padFor === p.id;
+            const hi = Math.min(12, Math.max(par + 5, 9)); // how high the quick pad goes
             return (
               <div key={p.id} style={{
-                display: 'flex', alignItems: 'center', gap: 7, padding: '9px 11px',
                 background: C.card, borderRadius: 12, marginBottom: 7,
-                border: `1px solid ${badge === 'WOLF' ? C.ball : 'transparent'}`,
+                border: `1px solid ${padOpen || badge === 'WOLF' ? C.ball : 'transparent'}`,
               }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 15, color: C.chalk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {p.name}<Dots n={str} />{ledger.snakeHolder === p.id && <span style={{ fontSize: 12, marginLeft: 4 }}>🐍</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 11px' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 15, color: C.chalk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {p.name}<Dots n={str} />{ledger.snakeHolder === p.id && <span style={{ fontSize: 12, marginLeft: 4 }}>🐍</span>}
+                    </div>
+                    <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: badge ? C.ink : C.muted, letterSpacing: '0.08em' }}>
+                      {badge || (str > 0 ? `gets ${str} here` : 'no stroke here')}
+                    </div>
                   </div>
-                  <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: badge ? C.ink : C.muted, letterSpacing: '0.08em' }}>
-                    {badge || (str > 0 ? `gets ${str} here` : 'no stroke here')}
-                  </div>
+                  {/* − / tap-the-number / + . Tapping the number opens a quick pad
+                     to set (or fix) the exact score in one tap; +/− still nudge. */}
+                  <button onClick={() => setScore(p.id, g == null ? par : Math.max(1, g - 1))} disabled={locked} style={{ ...stepBtn, opacity: locked ? 0.3 : 1 }}>−</button>
+                  <button onClick={() => { if (!locked) setPadFor(padOpen ? null : p.id); }} disabled={locked} style={{
+                    width: 60, height: 50, flex: '0 0 60px', borderRadius: 10,
+                    border: `1px solid ${padOpen ? C.ball : C.line}`,
+                    background: g == null ? 'transparent' : C.card2, color: col,
+                    fontFamily: F_MONO, fontWeight: 700, fontSize: 23, cursor: locked ? 'default' : 'pointer',
+                  }}>{g == null ? <span style={{ opacity: 0.3, fontSize: 15 }}>{par}</span> : g}</button>
+                  <button onClick={() => setScore(p.id, g == null ? par : g + 1)} disabled={locked} style={{ ...stepBtn, opacity: locked ? 0.3 : 1 }}>+</button>
                 </div>
-                <button onClick={() => setScore(p.id, g == null ? par : Math.max(1, g - 1))} disabled={locked} style={{ ...stepBtn, opacity: locked ? 0.3 : 1 }}>−</button>
-                <button onClick={() => setScore(p.id, g == null ? par : null)} disabled={locked} style={{
-                  width: 48, height: 44, flex: '0 0 48px', borderRadius: 10, border: `1px solid ${C.line}`,
-                  background: g == null ? 'transparent' : C.card2, color: col,
-                  fontFamily: F_MONO, fontWeight: 700, fontSize: 20, cursor: locked ? 'default' : 'pointer',
-                }}>{g == null ? <span style={{ opacity: 0.3, fontSize: 14 }}>{par}</span> : g}</button>
-                <button onClick={() => setScore(p.id, g == null ? par : g + 1)} disabled={locked} style={{ ...stepBtn, opacity: locked ? 0.3 : 1 }}>+</button>
+                {padOpen && !locked && (
+                  <div style={{ padding: '2px 10px 11px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 5 }}>
+                      {Array.from({ length: hi }, (_, i) => i + 1).map(v => {
+                        const vr = v - par;
+                        const vc = vr <= -2 ? C.ball : vr === -1 ? C.up : vr <= 1 ? C.chalk : C.down;
+                        return (
+                          <button key={v} onClick={() => { setScore(p.id, v); setPadFor(null); }} style={{
+                            height: 46, borderRadius: 9, cursor: 'pointer',
+                            border: `1px solid ${g === v ? C.ball : C.line}`,
+                            background: g === v ? C.ball : C.card2, color: g === v ? C.onBall : vc,
+                            fontFamily: F_MONO, fontWeight: 700, fontSize: 17,
+                          }}>{v}</button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
+                      <span style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted }}>tap a number to set the score</span>
+                      <Btn onClick={() => { setScore(p.id, null); setPadFor(null); }} style={{ marginLeft: 'auto', fontSize: 11, padding: '7px 12px' }}>Clear</Btn>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -2777,6 +2856,8 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
               Finish the round
             </Btn>
           )}
+
+          <GamesGuide round={round} />
           <div style={{ height: 10 }} />
         </div>
       )}
@@ -3293,6 +3374,7 @@ function Viewer({ code, initial, onLeave }) {
           <Standings round={round} ledger={ledger} />
           <SettleUp round={round} ledger={ledger} />
           <HoleFeed round={round} ledger={ledger} />
+          <GamesGuide round={round} defaultOpen />
           <div style={{ height: 12 }} />
         </div>
       )}

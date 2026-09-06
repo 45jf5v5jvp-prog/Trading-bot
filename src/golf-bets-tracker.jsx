@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06';
+const BUILD_ID = '2026.09.06b';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -980,6 +980,8 @@ const BUILT_IN_COURSES = [
   {
     id: 'tpc-rivers-bend',
     name: "TPC River's Bend",
+    // Other names the course databases use, so tapping any of them loads this card.
+    aliases: ["Tournament Player's Club at River's Bend", 'Tournament Players Club at Rivers Bend', 'TPC Rivers Bend', "TPC at River's Bend"],
     city: 'Maineville', state: 'OH',
     par: [4, 4, 4, 4, 3, 5, 3, 5, 4, 4, 5, 3, 4, 4, 4, 3, 4, 5],
     hcp: [5, 13, 1, 11, 15, 9, 17, 7, 3, 12, 6, 16, 10, 2, 4, 18, 8, 14],
@@ -1016,19 +1018,22 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
   /* Only surface a built-in once the search box matches it (so nothing is
      pinned by default), and ignore case/punctuation so "rivers bend" finds
      "River's Bend". */
+  const biNames = (b) => [b.name, ...(b.aliases || [])].map(normName).filter(Boolean);
   const matchBuiltIn = (bc) => {
     const s = normName(q);
     if (!s) return false;
-    return normName(bc.name).includes(s) || normName(`${bc.city} ${bc.state}`).includes(s);
+    return biNames(bc).some(n => n.includes(s)) || normName(`${bc.city} ${bc.state}`).includes(s);
   };
 
-  /* A hand-verified built-in always beats a database entry for the same course:
-     drop any online result whose name is (or contains) a built-in's name, so a
-     course we ship a correct card for can't be picked with wrong data. */
-  const isBuiltInDup = (c) => {
+  /* A hand-verified built-in always beats a database entry for the same course,
+     even when the database spells the name differently (e.g. "Tournament
+     Player's Club at River's Bend" vs "TPC River's Bend"). Returns the built-in
+     a search result stands in for, or null. */
+  const builtInFor = (c) => {
     const n = normName(c && (c.name || c.course_name));
-    if (!n) return false;
-    return BUILT_IN_COURSES.some(b => { const bn = normName(b.name); return n === bn || n.includes(bn); });
+    if (!n) return null;
+    return BUILT_IN_COURSES.find(b => biNames(b).some(bn =>
+      bn.length >= 6 && (n === bn || n.includes(bn) || bn.includes(n)))) || null;
   };
 
   const run = async (fn) => {
@@ -1083,8 +1088,16 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     run(() => COURSE_DB_ON ? searchCourseDb(q.trim()) : searchCourses({ q: q.trim() }));
   };
 
-  const shownBuiltIns = BUILT_IN_COURSES.filter(matchBuiltIn);
-  const visibleList = list ? list.filter(c => !isBuiltInDup(c)) : list;
+  /* Surface a built-in when you type its name AND whenever a search/near-me
+     result stands in for it — so your home course, however the database spells
+     it, always shows up as your verified card instead of a broken online copy. */
+  const shownBuiltIns = (() => {
+    const m = new Map();
+    BUILT_IN_COURSES.filter(matchBuiltIn).forEach(b => m.set(b.id, b));
+    (list || []).forEach(c => { const b = builtInFor(c); if (b) m.set(b.id, b); });
+    return [...m.values()];
+  })();
+  const visibleList = list ? list.filter(c => !builtInFor(c)) : list;
 
   return (
     <div style={{ marginBottom: 18 }}>

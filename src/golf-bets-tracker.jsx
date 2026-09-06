@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06b';
+const BUILD_ID = '2026.09.06c';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -416,7 +416,10 @@ function normalizeDbCourse(c) {
   };
 }
 
-/* Search the full database (via the relay, or directly if only a key is set). */
+/* Search the full database (via the relay, or directly if only a key is set).
+   The search endpoint returns a SUMMARY (name, location, tee counts) — not the
+   scorecard. So we return the list of matches; the full card (par/handicap/
+   yardage per hole) is pulled when one is picked, via loadCourseDb below. */
 async function searchCourseDb(q) {
   let res;
   if (GOLF_PROXY) {
@@ -427,7 +430,26 @@ async function searchCourseDb(q) {
   }
   if (!res.ok) throw new Error(`db ${res.status}`);
   const d = await res.json();
-  return (d.courses || []).map(normalizeDbCourse).filter(c => c.tees.length);
+  return (d.courses || []).map(c => ({
+    id: c.id,
+    name: c.course_name || c.club_name || 'Course',
+    city: c.location?.city, state: c.location?.state,
+    _db: true,
+  }));
+}
+
+/* Pull one course's full scorecard by id (the second step the search needs). */
+async function loadCourseDb(id) {
+  let res;
+  if (GOLF_PROXY) {
+    res = await fetch(`${GOLF_PROXY}?course_id=${encodeURIComponent(id)}`);
+  } else {
+    res = await fetch(`https://api.golfcourseapi.com/v1/courses/${encodeURIComponent(id)}`,
+      { headers: { Authorization: `Key ${GOLF_API_KEY}` } });
+  }
+  if (!res.ok) throw new Error(`db ${res.status}`);
+  const d = await res.json();
+  return normalizeDbCourse(d.course || d);
 }
 
 /* Turn a thrown fetch error into a short, plain-English reason. A blocked /
@@ -1071,6 +1093,20 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
     setBusy(false);
   };
 
+  /* A course picked from the database list: pull its full scorecard, then show
+     the tee picker. This is the second step the search needs. */
+  const pickDb = async (c) => {
+    const bi = builtInFor(c);
+    if (bi) { setOpenCourse(bi.id); setList(null); return; } // a built-in stands in — use its card
+    setBusy(true); setErr(null);
+    try {
+      const full = await loadCourseDb(c.id);
+      if (full.tees.length) { setPicked(full); setList(null); }
+      else setErr(`${c.name} has no scorecard on file yet. Set the card by hand below.`);
+    } catch (e) { setErr(courseSearchReason(e)); }
+    setBusy(false);
+  };
+
   /* Apply a chosen tee from a searched (database) course. Fill any gaps in the
      data with defaults; only trust the handicap row if it is a full 1-18 set. */
   const fill18 = (arr, def) => Array.from({ length: 18 }, (_, i) => (arr && arr[i] != null) ? arr[i] : def[i]);
@@ -1190,11 +1226,14 @@ function CoursePicker({ holes, pars, setPars, si, setSi, yards, setYards, showYa
               <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, color: C.ink, whiteSpace: 'nowrap' }}>pick tees ▸</span>
             </div>
           ) : (
-            <div key={c.id} onClick={() => pick(c)} style={{ padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5, cursor: 'pointer' }}>
-              <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{c.course_name}</div>
+            <div key={c.id} onClick={() => (c._db ? pickDb(c) : pick(c))} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5, cursor: 'pointer' }}>
+              <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{c.name || c.course_name}</div>
               <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 2 }}>
                 {[c.city, c.state].filter(Boolean).join(', ')}{c.par ? ` · par ${c.par}` : ''}
               </div>
+              </div>
+              {c._db && <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, color: C.ink, whiteSpace: 'nowrap' }}>pick tees ▸</span>}
             </div>
           ))}
         </div>

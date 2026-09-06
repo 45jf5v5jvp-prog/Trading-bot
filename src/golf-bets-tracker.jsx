@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06k';
+const BUILD_ID = '2026.09.06l';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -1371,6 +1371,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
   const [picked, setPicked] = useState(E ? E.players.map(p => p.id) : roster ? roster.slice(0, 4).map(p => p.id) : []);
   const [names, setNames] = useState(() => { const a = Array(16).fill(''); if (E) E.players.forEach((p, i) => { a[i] = p.name; }); return a; });
   const [hcps, setHcps] = useState(() => { const a = Array(16).fill(''); if (E) E.players.forEach((p, i) => { a[i] = p.hcp ? String(p.hcp) : ''; }); return a; });
+  const [venmos, setVenmos] = useState(() => { const a = Array(16).fill(''); if (E) E.players.forEach((p, i) => { a[i] = cleanVenmo(p.venmo || ''); }); return a; });
   const [games, setGames] = useState(E ? [...E.games] : ['skins']);
   const [stakes, setStakes] = useState(E ? { ...E.stakes } : {});
   const [useNet, setUseNet] = useState(E ? !!E.useNet : true);
@@ -1414,7 +1415,10 @@ function Setup({ onStart, onBack, roster, editRound }) {
   }, [count]); // eslint-disable-line
 
   const setAt = (setter) => (i, v) => setter(a => { const c = [...a]; c[i] = v; return c; });
-  const setName = setAt(setNames), setHcp = setAt(setHcps);
+  const setName = setAt(setNames), setHcp = setAt(setHcps), setVenmo = setAt(setVenmos);
+  /* Show the handle the user typed, or fall back to one saved by this name on a
+     past round, so a returning player's Venmo auto-fills. */
+  const venmoShown = (i) => venmos[i] !== '' ? venmos[i] : (venmoDir()[(names[i] || '').trim().toLowerCase()] || '');
   const bigField = count > 4;
   const teamGame = games.some(k => GAMES[k].teams === true);
   const needsTeams = count === 4 && games.some(k => GAMES[k].teams === true || GAMES[k].teams === 'optional');
@@ -1460,7 +1464,12 @@ function Setup({ onStart, onBack, roster, editRound }) {
     }
     const players = roster
       ? roster.filter(p => picked.includes(p.id))
-      : names.slice(0, count).map((n, i) => ({ id: uid(), name: n.trim() || `Player ${i + 1}`, hcp: Number(hcps[i]) || 0 }));
+      : names.slice(0, count).map((n, i) => {
+          const nm = n.trim() || `Player ${i + 1}`;
+          const vh = cleanVenmo(venmoShown(i));
+          if (vh) saveVenmo(nm, vh); // remember by name for next round
+          return { id: uid(), name: nm, hcp: Number(hcps[i]) || 0, venmo: vh };
+        });
     const ids = teamOrder.map(x => players[x].id);
     const groups = chunk(ids, 4);
     let teams = null;
@@ -1641,12 +1650,20 @@ function Setup({ onStart, onBack, roster, editRound }) {
       {cur === 'names' && (
         <>
           <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 21, color: C.chalk, marginBottom: 4 }}>Who is out there?</div>
-          <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, marginBottom: 18 }}>Leave the handicap blank to play everything gross.</div>
+          <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, marginBottom: 18 }}>Handicap blank plays everything gross. Venmo is optional — add it and each guy gets a one-tap Pay button when you settle up.</div>
           {Array.from({ length: count }).map((_, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <input value={names[i]} onChange={e => setName(i, e.target.value)} placeholder={`Player ${i + 1}`} style={inputStyle} />
-              <input value={hcps[i]} onChange={e => setHcp(i, e.target.value)} placeholder="hcp" inputMode="text"
-                style={{ ...inputStyle, width: 70, flex: '0 0 70px', textAlign: 'center' }} />
+            <div key={i} style={{ background: C.card, borderRadius: 12, padding: 10, marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input value={names[i]} onChange={e => setName(i, e.target.value)} placeholder={`Player ${i + 1}`} style={inputStyle} />
+                <input value={hcps[i]} onChange={e => setHcp(i, e.target.value)} placeholder="hcp" inputMode="text"
+                  style={{ ...inputStyle, width: 70, flex: '0 0 70px', textAlign: 'center' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
+                <span style={{ fontFamily: F_MONO, fontSize: 14, color: C.muted, paddingLeft: 2 }}>@</span>
+                <input value={venmoShown(i)} onChange={e => setVenmo(i, cleanVenmo(e.target.value))}
+                  placeholder="venmo username (optional)" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                  style={{ ...inputStyle, flex: 1, padding: '9px 10px', fontSize: 12.5 }} />
+              </div>
             </div>
           ))}
           <div style={{ height: 10 }} />
@@ -2204,11 +2221,11 @@ function SettleUp({ round, ledger, setRound }) {
 
       {setRound && (
         <div style={{ marginTop: 14 }}>
-          <div onClick={() => setEditVenmo(v => !v)} style={{ cursor: 'pointer' }}>
-            <Eyebrow>venmo handles {editVenmo ? '▴' : '▾'}</Eyebrow>
-          </div>
+          <Btn onClick={() => setEditVenmo(v => !v)} style={{ width: '100%', fontSize: 12 }}>
+            {editVenmo ? 'Hide Venmo handles ▴' : 'Set Venmo handles for one-tap Pay ▾'}
+          </Btn>
           {editVenmo && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 10 }}>
               {round.players.map(p => (
                 <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13, color: C.chalk, width: 84, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>

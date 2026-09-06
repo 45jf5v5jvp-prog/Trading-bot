@@ -5,6 +5,11 @@
   command = "npm run build"
   publish = "dist"
 
+# Course lookup runs as a Netlify Function (same site as the app, key in an env
+# var). Reachable at /.netlify/functions/courses.
+[functions]
+  directory = "netlify/functions"
+
 # Cache rules also live in public/_headers so manual folder/zip deploys get them
 # too; these mirror them for git-based builds.
 [[headers]]

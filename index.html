@@ -36,7 +36,9 @@
       window.SIDE_ACTION_CONFIG = {
         SUPABASE_URL: "https://tsahgjqyoghmprkmxjgb.supabase.co",
         SUPABASE_ANON_KEY: "sb_publishable_m6C3mI_4F_QsmKWuC_1Nkg_R2o4PrUB",
-        GOLF_PROXY: "https://tsahgjqyoghmprkmxjgb.supabase.co/functions/v1/smart-endpoint"
+        // Course lookup now runs on this same site (a Netlify Function), so no
+        // Supabase and no CORS. The GolfCourseAPI key lives in a Netlify env var.
+        GOLF_PROXY: "/.netlify/functions/courses"
       };
     </script>
   </head>

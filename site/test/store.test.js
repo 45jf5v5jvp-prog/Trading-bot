@@ -9,7 +9,7 @@ for (const p of [DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"]) {
 }
 process.env.SITE_DB_PATH = DB_PATH;
 
-const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestHunterFeedback, pendingHunterFeedback, requestAskBuy, pendingAskBuyRequests, requestDepositNotice, pendingDepositNotices, getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
+const { getConfig, setConfig, requestClose, pendingCloseIds, requestDiscoveryBuy, pendingDiscoveryBuyRequests, requestAskBuy, pendingAskBuyRequests, requestDepositNotice, pendingDepositNotices, getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer, getReferredVaults, getReferralPaidTotal, recordReferralPayout, getOrCreateReferralCode, resolveReferralCode } = require("../lib/store");
 const { emptyConfig } = require("../lib/schema");
 
 test("getConfig returns the empty default for a vault never written to", () => {
@@ -109,29 +109,6 @@ test("requestDiscoveryBuy is idempotent - clicking twice does not duplicate the 
   requestDiscoveryBuy(vault, 4, Date.now(), 200);
   requestDiscoveryBuy(vault, 4, Date.now(), 200);
   assert.deepEqual(pendingDiscoveryBuyRequests(vault), [{ id: 4, amountPls: 200 }]);
-});
-
-test("pendingHunterFeedback is empty for a vault with no feedback", () => {
-  const vault = "0xa".padEnd(42, "a");
-  assert.deepEqual(pendingHunterFeedback(vault), []);
-});
-
-test("requestHunterFeedback then pendingHunterFeedback round-trips the text, oldest first", () => {
-  const vault = "0xb".padEnd(42, "b");
-  requestHunterFeedback(vault, "Skip anything with under 5M PLS liquidity.", Date.now());
-  requestHunterFeedback(vault, "Weight RSI more than MACD.", Date.now());
-  const rows = pendingHunterFeedback(vault);
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].text, "Skip anything with under 5M PLS liquidity.");
-  assert.equal(rows[1].text, "Weight RSI more than MACD.");
-  assert.ok(Number.isInteger(rows[0].id) && Number.isInteger(rows[1].id));
-});
-
-test("requestHunterFeedback does not dedup - two separate pieces of feedback both persist", () => {
-  const vault = "0xc".padEnd(42, "c");
-  requestHunterFeedback(vault, "same text", Date.now());
-  requestHunterFeedback(vault, "same text", Date.now());
-  assert.equal(pendingHunterFeedback(vault).length, 2);
 });
 
 test("pendingAskBuyRequests is empty for a vault with no requests", () => {

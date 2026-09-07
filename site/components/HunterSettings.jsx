@@ -82,10 +82,9 @@ export default function HunterSettings({ hunter, onChange }) {
         out and frees fresh room on its own, so a slow-closing position can't stall new buys the way
         it can under "As positions close." "No cap" removes the budget ceiling entirely - "Max per
         buy" (still enforced either way) becomes the only real limit on any one trade. "Max per buy"
-        is a ceiling, not a fixed size - with AI approval on, the AI decides how much of that ceiling
-        to actually spend on each buy (less when it's less confident), full authority up to the
-        number you set here, never more. "Max open positions" caps how many separate bets it can be
-        carrying at once regardless of leftover budget - 0 means no cap.
+        is a ceiling, not a fixed size - it spends up to that amount on each qualifying buy, never
+        more. "Max open positions" caps how many separate bets it can be carrying at once regardless
+        of leftover budget - 0 means no cap.
       </p>
       {(hunter.allocatedUnlimited || hunter.allocatedResetDaily) && Number(hunter.maxOpenPositions) === 0 && (
         <p className="hint" style={{ marginTop: -6, marginBottom: 14, color: "var(--bad)" }}>
@@ -166,65 +165,21 @@ export default function HunterSettings({ hunter, onChange }) {
         much of a signal; this makes sure real volume is behind the move before trusting it.
       </p>
 
-      <div className="sub-label">AI judgment gate</div>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
-        <input type="checkbox" checked={hunter.requireAiApproval} onChange={(e) => onChange({ ...hunter, requireAiApproval: e.target.checked })} />
-        Require AI approval before auto-buying
-      </label>
-      <div className="field-inline">
-        <label>Minimum confidence</label>
-        <select
-          value={hunter.minAiConfidence}
-          onChange={(e) => onChange({ ...hunter, minAiConfidence: e.target.value })}
-          style={{ width: 120 }}
-          disabled={!hunter.requireAiApproval}
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-      </div>
-      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        A technical setup and a passed screen are not enough to auto-buy - a Claude API call judges
-        the whole picture first. With no key configured on the keeper this fails safe: it notifies
-        you instead of buying, it never buys blind.
-      </p>
-
       <div className="sub-label">Exits</div>
-
-      <div className="field-inline">
-        <label>Exit mode</label>
-        <select
-          value={hunter.exitMode}
-          onChange={(e) => onChange({ ...hunter, exitMode: e.target.value })}
-          style={{ width: 160 }}
-        >
-          <option value="limited">Auto Limited</option>
-          <option value="full">Auto Full</option>
-        </select>
-      </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        {hunter.exitMode === "full"
-          ? "Auto Full gives the AI ongoing authority to decide when to exit - it re-checks each open position and can ride a winner past what a fixed target would have locked in. The stop loss below still applies no matter what it decides; take profit, trailing stop, and time exit are not used in this mode."
-          : "Auto Limited exits at the fixed targets below, same as every other bot here. Switch to Auto Full to hand the AI ongoing authority over when to exit instead."}
+        Hunter is a mechanical day-trading bot - no AI judgment anywhere, buy or sell. It exits at
+        the fixed targets below, same as every other bot here. Set a real "Time exit" so a position
+        that never hits take profit or stop loss still gets closed within a day or two instead of
+        sitting open indefinitely.
       </p>
 
       <div className="field-inline">
-        {hunter.exitMode === "limited" && (
-          <>
-            <label>Take profit %</label>
-            <NumberField {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
-          </>
-        )}
-        <label>Stop loss %{hunter.exitMode === "full" ? " (mandatory floor)" : ""}</label>
+        <label>Take profit %</label>
+        <NumberField {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
+        <label>Stop loss %</label>
         <NumberField {...num("stopLossPct")} min="0" style={{ width: 80 }} disabled={hunter.useAtrStop} />
-        {hunter.exitMode === "limited" && (
-          <>
-            <label>Time exit (min)</label>
-            <NumberField {...num("timeExitMin")} min="0" style={{ width: 80 }} />
-          </>
-        )}
+        <label>Time exit (min)</label>
+        <NumberField {...num("timeExitMin")} min="0" style={{ width: 80 }} />
       </div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
@@ -242,12 +197,10 @@ export default function HunterSettings({ hunter, onChange }) {
         stop loss % above if ATR wasn't available yet when the trade opened.
       </p>
 
-      {hunter.exitMode === "limited" && (
-        <div className="field-inline">
-          <label>Trailing stop %</label>
-          <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
-        </div>
-      )}
+      <div className="field-inline">
+        <label>Trailing stop %</label>
+        <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+      </div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
         <input
@@ -264,7 +217,7 @@ export default function HunterSettings({ hunter, onChange }) {
         <span className="hint" style={{ margin: 0 }}>hours</span>
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        When the bot takes profit or exits on its own AI judgment - never on a stop-loss, and never
+        When the bot takes profit or hits its trailing stop - never on a stop-loss, and never
         after you manually close a position - it queues a resting rebuy some percent below where it
         sold, so a real pullback becomes a better entry instead of walking away for good. Sized the
         same as the position that just closed, still subject to your allocation and holding cap.

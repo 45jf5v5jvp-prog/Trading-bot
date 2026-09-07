@@ -85,16 +85,6 @@ function buildDepositNoticeMessage(vaultAddress, token, timestampMs) {
   return `Icaria: track a deposited token ${token.toLowerCase()} for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
 }
 
-/** Same shape, for a Talk to Your Hunter chat message. Binds a hash of the
- * text rather than the text itself - the signed message a wallet shows the
- * owner stays a fixed, readable length regardless of how long their message
- * is, while still making a signature for one message unusable to authorize
- * any other. The server recomputes the same hash from the text in the
- * request body and only accepts a match. */
-function buildHunterChatMessage(vaultAddress, textHash, timestampMs) {
-  return `Icaria: talk to Hunter Bot (${textHash}) for vault ${vaultAddress.toLowerCase()} at ${timestampMs}`;
-}
-
 function checkFresh(timestampMs) {
   if (!Number.isFinite(timestampMs)) throw new Error("timestamp missing or invalid");
   const age = Date.now() - timestampMs;
@@ -174,12 +164,6 @@ async function authorizeReferral({ vaultAddress, code, timestampMs, signature, r
   return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
 }
 
-async function authorizeHunterChat({ vaultAddress, textHash, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
-  checkFresh(timestampMs);
-  const expectedMessage = buildHunterChatMessage(vaultAddress, textHash, timestampMs);
-  return authorizeVaultAction({ vaultAddress, message: expectedMessage, signature, rpcUrl, readOwner });
-}
-
 async function authorizeDepositNotice({ vaultAddress, token, timestampMs, signature, rpcUrl, readOwner = defaultReadOwner }) {
   checkFresh(timestampMs);
   const expectedMessage = buildDepositNoticeMessage(vaultAddress, token, timestampMs);
@@ -187,7 +171,7 @@ async function authorizeDepositNotice({ vaultAddress, token, timestampMs, signat
 }
 
 module.exports = {
-  authorizeConfigWrite, authorizeClose, authorizeCloseAll, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeHunterChat, authorizeDepositNotice, authorizeVaultAction,
-  buildMessage, buildCloseMessage, buildCloseAllMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildHunterChatMessage, buildDepositNoticeMessage, MESSAGE_MAX_AGE_MS,
+  authorizeConfigWrite, authorizeClose, authorizeCloseAll, authorizeBuyOpportunity, authorizeAskBuy, authorizeReferral, authorizeDepositNotice, authorizeVaultAction,
+  buildMessage, buildCloseMessage, buildCloseAllMessage, buildBuyOpportunityMessage, buildAskBuyMessage, buildReferralMessage, buildDepositNoticeMessage, MESSAGE_MAX_AGE_MS,
   defaultReadOwner,
 };

@@ -4,9 +4,7 @@ import { useVault } from "../lib/useVault";
 import { loadConfig, saveConfig } from "../lib/saveConfig";
 import { loadHistory } from "../lib/loadHistory";
 import { loadPortfolio } from "../lib/loadPortfolio";
-import { loadHunterIQ } from "../lib/loadHunterIQ";
 import { closePosition, closeAllPositions } from "../lib/closePosition";
-import { loadHunterChat, sendHunterChatMessage } from "../lib/talkToHunter";
 import { setReferral, loadReferral, loadReferralCode, loadReferralEarnings } from "../lib/setReferral";
 import { APP_VERSION } from "../lib/version";
 import { numberFieldProps } from "../lib/numberField";
@@ -23,7 +21,6 @@ import HunterSettings from "../components/HunterSettings";
 import BotCard from "../components/BotCard";
 import InfoButton from "../components/InfoButton";
 import { TradingBotsIcon, LaunchIcon, SniperIcon, HunterIcon, LimitOrderIcon } from "../components/BotIcons";
-import HunterIQPanel from "../components/HunterIQPanel";
 import HistoryPanel from "../components/HistoryPanel";
 import PnlSnapshot from "../components/PnlSnapshot";
 import Sun from "../components/Sun";
@@ -127,8 +124,6 @@ export default function Dashboard() {
   const [history, setHistory] = useState(null);
   const [historyError, setHistoryError] = useState(false);
   const [portfolio, setPortfolio] = useState(null);
-  const [hunterIQ, setHunterIQ] = useState(null);
-  const [chatMessages, setChatMessages] = useState([]);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState("");
@@ -270,30 +265,6 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [vaultAddress]);
 
-  // Same polling idea for Hunter IQ - the trade-rationale feed and lessons
-  // list refresh on their own so a self-written lesson from a just-closed
-  // position shows up without a manual refresh.
-  useEffect(() => {
-    if (!vaultAddress) return;
-    let cancelled = false;
-    const refresh = () => loadHunterIQ(vaultAddress).then((h) => { if (!cancelled) setHunterIQ(h); }).catch(() => {});
-    refresh();
-    const id = setInterval(refresh, 20_000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [vaultAddress]);
-
-  // Same polling idea for the Talk to Your Hunter thread - so a reply that
-  // came in async (or a lesson the bot wrote to itself) shows up without a
-  // manual refresh, same as Hunter IQ's trade/lessons feed above.
-  useEffect(() => {
-    if (!vaultAddress) return;
-    let cancelled = false;
-    const refresh = () => loadHunterChat(vaultAddress).then((c) => { if (!cancelled) setChatMessages(c.messages); }).catch(() => {});
-    refresh();
-    const id = setInterval(refresh, 20_000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [vaultAddress]);
-
   // Same idea for the vault's balance/paused state - previously this only
   // updated right after a deposit/withdraw/pause, so the balance would sit
   // stale until the user did something. Silent failures here (e.g. the
@@ -312,12 +283,11 @@ export default function Dashboard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const [, h, p, hiq] = await Promise.all([
-        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress), loadHunterIQ(vaultAddress),
+      const [, h, p] = await Promise.all([
+        refreshVaultInfo(vaultAddress), loadHistory(vaultAddress), loadPortfolio(vaultAddress),
       ]);
       setHistory(h);
       setPortfolio(p.portfolio);
-      setHunterIQ(hiq);
     } catch (e) {
       setStatus(`Refresh failed: ${e.message}`);
     } finally {
@@ -546,20 +516,6 @@ export default function Dashboard() {
     } catch {
       setStatus(`Copy this link manually: ${link}`);
     }
-  }
-
-  /** Signs and sends one chat message to this vault's Hunter Bot, appends the
-   * owner's own message immediately (no round-trip needed to show it), then
-   * the live reply once it comes back. The same message is also queued as
-   * Hunter IQ feedback server-side (see hunter-chat.js), so it still becomes
-   * a lesson even though the reply itself is generated synchronously here. */
-  async function handleSendChat(text) {
-    setChatMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: "owner", text }]);
-    const { reply } = await sendHunterChatMessage(getProvider, vaultAddress, text);
-    loadHunterChat(vaultAddress).then((c) => setChatMessages(c.messages)).catch(() => {
-      if (reply) setChatMessages((prev) => [...prev, { id: `local-reply-${Date.now()}`, role: "hunter", text: reply }]);
-    });
-    loadHunterIQ(vaultAddress).then(setHunterIQ).catch(() => {});
   }
 
   return (
@@ -918,8 +874,9 @@ export default function Dashboard() {
                     <>
                       Watches tokens already trading for technical dips - RSI oversold, a bullish MACD
                       cross, or price riding the lower Bollinger band. A setup still has to clear the
-                      same honeypot/tax/LP-lock screen Launch Bot uses, and can optionally require an
-                      AI sanity check before it's allowed to auto-buy.
+                      same honeypot/tax/LP-lock screen Launch Bot uses. Purely mechanical - no AI
+                      judgment on the buy or the exit - and built to day-trade: positions close within
+                      hours to a couple of days, not sit open indefinitely.
                     </>
                   }
                 >
@@ -949,10 +906,6 @@ export default function Dashboard() {
                     onChange={(limitOrders) => updateConfig({ ...config, limitOrders })}
                   />
                 </BotCard>
-
-                <div className="panel">
-                  <HunterIQPanel hunterIQ={hunterIQ} chatMessages={chatMessages} onSendChat={handleSendChat} />
-                </div>
 
                 <div className="panel">
                   <div className="section-label">Safety</div>

@@ -179,8 +179,8 @@ test("returns positions and fires for a vault that has real trading history", ()
   assert.equal(open[0].bot, "hunter");
   assert.equal(open[1].bot, "trading");
   // The Hunter position's source_tx_hash resolves through fires ->
-  // discovery_actions -> opportunities, same join getHunterTrades already
-  // used for closed trades - now available on an open one too.
+  // discovery_actions -> opportunities, same join getPositions uses for
+  // every position, open or closed.
   assert.equal(open[0].narrative, "RSI oversold");
   // The Rules position never went through opportunities/discovery_actions,
   // so it has nothing to resolve - null, not a crash.

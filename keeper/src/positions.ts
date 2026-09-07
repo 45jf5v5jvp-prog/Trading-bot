@@ -14,12 +14,11 @@ export interface OpenArgs {
   spentPls: number; tokensOut: bigint;
   tpPct: number; slPct: number; timeExitMin: number;
   trailPct?: number;
-  /** Hunter Bot only - "limited" (fixed tp/sl/trailing/time, the default
-   * everywhere else) or "full" (AI periodically re-judges whether to hold
-   * or sell, on top of the same mandatory stop-loss - see hunter.ts's
-   * reviewFullModePositions). Set once at open time so a later settings
-   * change never retroactively changes how an already-open position is
-   * managed. Undefined/null for every non-Hunter position. */
+  /** Legacy: Hunter Bot used to support an AI-driven "full" exit mode
+   * alongside the normal fixed tp/sl/trailing/time "limited" mode. That AI
+   * exit judgment has been removed entirely (Hunter is mechanical-only now,
+   * same as every other bot) so no caller sets this anymore - kept only so
+   * old rows in the positions table still read back correctly. */
   exitMode?: "limited" | "full" | null;
   /** The transaction that actually bought these tokens, when known - see
    * db.ts's source_tx_hash migration comment. Optional and purely for

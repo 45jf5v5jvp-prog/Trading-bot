@@ -63,20 +63,6 @@ function getDb() {
       referrer   TEXT NOT NULL,
       locked_at  INTEGER NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS hunter_feedback_requests (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      vault        TEXT NOT NULL,
-      text         TEXT NOT NULL,
-      requested_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS hunter_chat_messages (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      vault      TEXT NOT NULL,
-      role       TEXT NOT NULL,
-      text       TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS hunter_chat_messages_vault_id ON hunter_chat_messages(vault, id);
   `);
 
   // Additive migration: databases created before "Buy Now" let someone type
@@ -168,56 +154,6 @@ function pendingDiscoveryBuyRequests(vault) {
     .all(vault.toLowerCase())
     .map((r) => ({ id: r.opportunity_id, amountPls: r.amount_pls }));
 }
-/**
- * Records Hunter IQ feedback the owner typed on the dashboard - same
- * "site writes an intent, keeper picks it up" split as everything else here.
- * The keeper (hunter.ts's ingestOwnerFeedback) polls this per vault and
- * copies each new row into its own hunter_lessons table, which is what
- * future personalized AI reviews actually read from - this table is only
- * ever the pending inbox, not the bot's long-term memory. No dedup on
- * insert - leaving two pieces of feedback in a row is a normal thing to do,
- * not a duplicate click.
- */
-function requestHunterFeedback(vault, text, nowMs) {
-  const info = getDb()
-    .prepare(`INSERT INTO hunter_feedback_requests (vault, text, requested_at) VALUES (?, ?, ?)`)
-    .run(vault.toLowerCase(), text, nowMs);
-  return Number(info.lastInsertRowid);
-}
-
-/** Every piece of feedback this vault owner has ever left, oldest first -
- * the keeper is responsible for only ingesting ones it hasn't seen yet
- * (tracked on its own side, via hunter_lessons.owner_request_id). */
-function pendingHunterFeedback(vault) {
-  return getDb()
-    .prepare(`SELECT id, text FROM hunter_feedback_requests WHERE vault = ? ORDER BY id ASC`)
-    .all(vault.toLowerCase());
-}
-
-/**
- * Talk to Your Hunter - the message thread itself, separate from
- * hunter_feedback_requests above (which the keeper drains into real lessons;
- * this is purely display history so a returning owner sees the conversation
- * they already had, not a blank chat every visit). Every owner message here
- * is ALSO recorded via requestHunterFeedback - see pages/api/vaults/
- * [address]/hunter-chat.js - so a chat message shapes the bot exactly like
- * one typed into a plain feedback box would, on top of getting a live reply.
- */
-function addHunterChatMessage(vault, role, text, nowMs) {
-  getDb()
-    .prepare(`INSERT INTO hunter_chat_messages (vault, role, text, created_at) VALUES (?, ?, ?, ?)`)
-    .run(vault.toLowerCase(), role, text, nowMs);
-}
-
-/** Full thread for a vault, oldest first - capped so one very long-lived
- * vault's history can't make every page load slower forever. */
-function getHunterChatMessages(vault, limit = 200) {
-  const rows = getDb()
-    .prepare(`SELECT id, role, text, created_at FROM hunter_chat_messages WHERE vault = ? ORDER BY id DESC LIMIT ?`)
-    .all(vault.toLowerCase(), limit);
-  return rows.reverse();
-}
-
 /**
  * Records an Ask Icaria "buy it" request - unlike the Discovery/Hunter buy
  * requests above, there's no pre-existing opportunity catalog entry to
@@ -424,8 +360,6 @@ function resetForTests() {
 module.exports = {
   getConfig, setConfig, requestClose, pendingCloseIds,
   requestDiscoveryBuy, pendingDiscoveryBuyRequests,
-  requestHunterFeedback, pendingHunterFeedback,
-  addHunterChatMessage, getHunterChatMessages,
   requestAskBuy, pendingAskBuyRequests,
   requestDepositNotice, pendingDepositNotices,
   getReferrer, setReferrer, getWalletReferrer, lockWalletReferrer,

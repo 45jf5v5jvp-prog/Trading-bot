@@ -51,35 +51,14 @@ test("rejects a negative discovery threshold", () => {
   assert.throws(() => normalizeConfig({ discovery: { minPriceMovePct: -5 } }), /minPriceMovePct/);
 });
 
-test("hunter settings default to off with AI approval required", () => {
+test("hunter settings default to off, mechanical-only, with a 48h day-trading time exit", () => {
   const c = emptyConfig();
   assert.equal(c.hunter.enabled, false);
   assert.equal(c.hunter.mode, "notify");
-  assert.equal(c.hunter.requireAiApproval, true);
-  assert.equal(c.hunter.minAiConfidence, "medium");
-  assert.equal(c.hunter.exitMode, "limited");
-});
-
-test("rejects a hunter exitMode that is not limited or full", () => {
-  assert.throws(() => normalizeConfig({ hunter: { exitMode: "yolo" } }), /exitMode/);
-});
-
-test("accepts exitMode full with a positive stopLossPct", () => {
-  const out = normalizeConfig({ hunter: { exitMode: "full", stopLossPct: 30 } });
-  assert.equal(out.hunter.exitMode, "full");
-  assert.equal(out.hunter.stopLossPct, 30);
-});
-
-test("rejects exitMode full with stopLossPct left at 0 - Auto Full still needs a mandatory floor", () => {
-  assert.throws(
-    () => normalizeConfig({ hunter: { exitMode: "full", stopLossPct: 0 } }),
-    /stopLossPct/,
-  );
-});
-
-test("allows exitMode limited with stopLossPct 0 (a limited-mode owner may legitimately disable it)", () => {
-  const out = normalizeConfig({ hunter: { exitMode: "limited", stopLossPct: 0 } });
-  assert.equal(out.hunter.stopLossPct, 0);
+  assert.equal(c.hunter.timeExitMin, 2880);
+  assert.equal(c.hunter.exitMode, undefined);
+  assert.equal(c.hunter.requireAiApproval, undefined);
+  assert.equal(c.hunter.minAiConfidence, undefined);
 });
 
 test("hunter settings fill in defaults for missing fields, and validate the rest", () => {
@@ -94,10 +73,6 @@ test("hunter settings fill in defaults for missing fields, and validate the rest
 
 test("rejects a hunter mode that is not notify or autoBuy", () => {
   assert.throws(() => normalizeConfig({ hunter: { mode: "yolo" } }), /mode/);
-});
-
-test("rejects a hunter minAiConfidence outside low/medium/high", () => {
-  assert.throws(() => normalizeConfig({ hunter: { minAiConfidence: "extreme" } }), /minAiConfidence/);
 });
 
 test("rejects a negative hunter threshold", () => {

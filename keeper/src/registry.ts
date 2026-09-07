@@ -82,29 +82,16 @@ export interface DiscoveryConfig {
  * which looks exactly like an oversold dip to pure price/RSI math. That
  * check is not configurable - it always runs.
  *
- * `requireAiApproval` adds one more layer on top of the mechanical checks:
- * a Claude API call (see ai.ts) that judges the whole picture together
- * before an autoBuy fires. It never substitutes for the mechanical checks
- * above, and with no ANTHROPIC_API_KEY configured it fails safe - no
- * verdict means no auto-buy, never a silent bypass.
+ * `maxPerTradePls` is a ceiling, not a fixed size - the bot spends up to
+ * that amount, not "always spend exactly this."
  *
- * `maxPerTradePls` is a ceiling, not a fixed size - full authority up to
- * that amount, not "always spend exactly this." When requireAiApproval is
- * on, the AI's own verdict decides how much of the ceiling to actually use
- * (see ai.ts's assess()), spending less when its confidence is lower. With
- * requireAiApproval off there is no sizing judgment to defer to, so the
- * bot simply spends the full ceiling every time.
- *
- * `exitMode` chooses how a position this bot opens gets managed:
- *   - "limited": takeProfitPct/stopLossPct/trailingStopPct/timeExitMin all
- *     apply exactly as configured - the same fixed-target exit every other
- *     bot in this codebase uses.
- *   - "full": the AI periodically re-judges the open position (see ai.ts's
- *     assessExit, hunter.ts's reviewFullModePositions) and decides when to
- *     exit - it can ride a winner past what a fixed take-profit would have
- *     locked in. takeProfitPct/trailingStopPct/timeExitMin are not applied
- *     in this mode; stopLossPct still is, unconditionally, as a floor the
- *     AI's judgment cannot override or remove.
+ * Every position this bot opens is managed the same fixed-target way every
+ * other bot in this codebase uses: takeProfitPct/stopLossPct/
+ * trailingStopPct/timeExitMin all apply exactly as configured. There is no
+ * AI judgment anywhere in Hunter Bot - buy decisions are purely mechanical
+ * (technical trigger + screen), and so are exits. timeExitMin defaults to a
+ * day-trading window so a position doesn't sit open for days waiting on a
+ * target that never comes.
  */
 export interface HunterConfig {
   enabled: boolean;
@@ -127,7 +114,6 @@ export interface HunterConfig {
   allocatedResetDaily: boolean;
   maxPerTradePls: number;
   maxPerDay: number;
-  exitMode: "limited" | "full";
 
   // At least one enabled trigger must fire for a candidate to qualify.
   requireRsi: boolean;
@@ -143,22 +129,22 @@ export interface HunterConfig {
   requireLpLock: boolean;
   requireOwnerRenounced: boolean;
 
-  requireAiApproval: boolean;
-  minAiConfidence: "low" | "medium" | "high";
-
   takeProfitPct: number;
   // When useAtrStop is on, the position's actual stop distance is computed
   // from the token's own ATR(14) at buy time (ATR as a % of price, times
   // atrStopMultiplier) instead of this flat stopLossPct - a volatile token
   // gets a wider stop, a calm one a tighter one, rather than every token
   // getting the same fixed percentage regardless of how much it normally
-  // moves. stopLossPct still applies as-is when useAtrStop is off, and Auto
-  // Full's mandatory-stop floor (see hunter.ts's MANDATORY_MIN_STOP_LOSS_PCT)
-  // applies to whichever number this resolves to either way.
+  // moves. stopLossPct still applies as-is when useAtrStop is off.
   stopLossPct: number;
   useAtrStop: boolean;
   atrStopMultiplier: number;
   trailingStopPct: number;
+  // Force a close after this many minutes regardless of tp/sl/trailing, so a
+  // position that never hits either target still gets resolved instead of
+  // sitting open indefinitely - this is a day-trading bot, not a buy-and-hold
+  // one. Defaults to 2880 (48h) per the owner's "done within 24-48 hours"
+  // instruction. 0 disables the time exit entirely.
   timeExitMin: number;
 
   // Require the recent candle volume to be running meaningfully hotter than
@@ -192,9 +178,9 @@ export interface HunterConfig {
   // no extra RPC cost). 0 disables the check.
   minUniqueTraders24h: number;
 
-  // Auto-rebuy: when a Hunter position closes on a bearish/profit-taking
-  // read (an AI exit, a take-profit, or a trailing stop - never a stop-loss
-  // or a manual close, see hunter.ts's considerAutoRebuys), place a resting
+  // Auto-rebuy: when a Hunter position closes on a profit-taking read (a
+  // take-profit or a trailing stop - never a stop-loss or a manual close,
+  // see hunter.ts's considerAutoRebuys), place a resting
   // rebuy for the same token some percent below the exit price, so a real
   // pullback gets captured as a better entry instead of just walking away.
   // Lives entirely on the keeper's own side (see db.ts's pendingRebuys) -
@@ -320,14 +306,15 @@ const DEFAULT_DISCOVERY: DiscoveryConfig = {
 
 const DEFAULT_HUNTER: HunterConfig = {
   enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false, maxPerTradePls: 0, maxPerDay: 3,
-  exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
   minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
-  requireAiApproval: true, minAiConfidence: "medium",
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
-  trailingStopPct: 0, timeExitMin: 0,
+  // 2880 (48h): this bot is meant to day-trade, not hold for days - a
+  // position that never hits take-profit/stop-loss/trailing still gets
+  // force-closed inside the owner's "done within 24-48 hours" window.
+  trailingStopPct: 0, timeExitMin: 2880,
   // requireVolumeConfirmation used to default to false - "no default this
   // deployment hasn't earned yet." Turned on after the same 2026-08-24
   // review as minTrades24h just below: an oversold/overbought reading on a

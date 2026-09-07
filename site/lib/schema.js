@@ -56,14 +56,15 @@ const QUICK_SETUP_SIZE_KEYS = ["small", "medium", "large"];
 const DEFAULT_HUNTER = {
   enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false,
   maxPerTradePls: 0, maxPerDay: 3,
-  exitMode: "limited",
   requireRsi: true, rsiOversold: 30, requireMacdCross: true,
   requireBollinger: true, bollingerPercentBMax: 0.15,
   minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
-  requireAiApproval: true, minAiConfidence: "medium",
   takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
-  trailingStopPct: 0, timeExitMin: 0,
+  // 2880 (48h) - Hunter is a day-trading bot; a position that never hits
+  // take-profit/stop-loss/trailing still gets force-closed inside a
+  // 24-48 hour window instead of sitting open indefinitely.
+  trailingStopPct: 0, timeExitMin: 2880,
   // requireVolumeConfirmation was false by default - turned on for the same
   // 2026-08-24 reason as minTrades24h just below (see its comment): an
   // oversold/overbought reading on a token nobody is actually trading isn't
@@ -228,10 +229,6 @@ function normalizeHunter(h) {
   const merged = { ...DEFAULT_HUNTER, ...(h ?? {}) };
   if (merged.mode !== "notify" && merged.mode !== "autoBuy")
     throw new Error(`hunter.mode must be "notify" or "autoBuy"`);
-  if (merged.exitMode !== "limited" && merged.exitMode !== "full")
-    throw new Error(`hunter.exitMode must be "limited" or "full"`);
-  if (merged.minAiConfidence !== "low" && merged.minAiConfidence !== "medium" && merged.minAiConfidence !== "high")
-    throw new Error(`hunter.minAiConfidence must be "low", "medium", or "high"`);
   for (const field of [
     "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
     "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
@@ -247,14 +244,6 @@ function normalizeHunter(h) {
     throw new Error("hunter.allocatedUnlimited and hunter.allocatedResetDaily cannot both be true - pick one");
   if (!merged.allocatedUnlimited && merged.maxPerTradePls > merged.allocatedPls && merged.allocatedPls > 0)
     throw new Error("hunter.maxPerTradePls cannot exceed hunter.allocatedPls");
-  // Auto Full hands the AI ongoing exit authority - the stop-loss is the one
-  // thing that authority can never remove, so it must be a real number here,
-  // not left at the "disabled" 0 a limited-mode owner might reasonably use.
-  // useAtrStop still needs a real flat stopLossPct too - it's the fallback
-  // whenever ATR wasn't available at buy time (see keeper/src/hunter.ts's
-  // computeStopLossPct), so Auto Full can't be left with nothing either way.
-  if (merged.exitMode === "full" && merged.stopLossPct <= 0)
-    throw new Error("hunter.stopLossPct must be greater than 0 when exitMode is \"full\" - Auto Full still needs a mandatory stop-loss");
   if (merged.useAtrStop && merged.atrStopMultiplier <= 0)
     throw new Error("hunter.atrStopMultiplier must be greater than 0 when useAtrStop is on");
   if (merged.autoRebuyDipPct >= 100)
@@ -267,7 +256,6 @@ function normalizeHunter(h) {
     allocatedResetDaily: Boolean(merged.allocatedResetDaily),
     maxPerTradePls: merged.maxPerTradePls,
     maxPerDay: merged.maxPerDay,
-    exitMode: merged.exitMode,
     requireRsi: Boolean(merged.requireRsi),
     rsiOversold: merged.rsiOversold,
     requireMacdCross: Boolean(merged.requireMacdCross),
@@ -278,8 +266,6 @@ function normalizeHunter(h) {
     maxSellTaxBps: merged.maxSellTaxBps,
     requireLpLock: Boolean(merged.requireLpLock),
     requireOwnerRenounced: Boolean(merged.requireOwnerRenounced),
-    requireAiApproval: Boolean(merged.requireAiApproval),
-    minAiConfidence: merged.minAiConfidence,
     takeProfitPct: merged.takeProfitPct,
     stopLossPct: merged.stopLossPct,
     useAtrStop: Boolean(merged.useAtrStop),

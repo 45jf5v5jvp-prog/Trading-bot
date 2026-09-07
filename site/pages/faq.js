@@ -135,13 +135,15 @@ export default function Faq() {
           </Q>
 
           <Q q="What is Hunter Bot?">
-            Hunts oversold setups using real technical analysis - RSI, MACD crossovers, Bollinger
-            Bands - instead of reacting to a launch or a price breakout. Trades a dedicated slice of
-            your vault you choose, not the whole balance, so it can't accidentally consume funds
-            you'd earmarked for something else. Purely mechanical, buy and sell - no AI judgment
-            anywhere - and built to day-trade: a take-profit, stop-loss, trailing stop, and a time
-            exit all apply exactly as configured, so a position closes within hours to a couple of
-            days rather than sitting open indefinitely.
+            Hunts real order-flow strength across every watched token - buy pressure outweighing
+            sell pressure, liquidity actually growing, new buyer wallets actually showing up, price
+            actually breaking out to a new local high - instead of RSI/MACD/Bollinger, which only
+            ever read price and don't diversify against each other the way they look like they do.
+            Trades a dedicated slice of your vault you choose, not the whole balance, so it can't
+            accidentally consume funds you'd earmarked for something else. Purely mechanical, buy
+            and sell - no AI judgment anywhere - and built to day-trade: a stop-loss, a tiered
+            trailing stop, and a time exit all apply exactly as configured, so a position closes
+            within hours rather than sitting open indefinitely.
           </Q>
 
           <Q q="What's the difference between the Hunter Bot and Discovery Bot?">
@@ -161,19 +163,19 @@ export default function Faq() {
                     <td>What it looks for</td>
                     <td>Price and liquidity both climbing together over the last hour - the
                       signature of real buying pressure, not a wash-traded pump</td>
-                    <td>Oversold setups from real technical indicators: RSI, MACD crossovers,
-                      Bollinger Bands</td>
+                    <td>Real buy pressure, liquidity growth, new-buyer growth, and a breakout above
+                      its own recent high, all at once</td>
                   </tr>
                   <tr>
                     <td>The idea</td>
                     <td>This is breaking out right now, real money is behind it</td>
-                    <td>This has been beaten down and is statistically due for a bounce</td>
+                    <td>This is showing confirmed strength right now, on data a price chart alone
+                      can't fake</td>
                   </tr>
                   <tr>
                     <td>History needed before it can act</td>
                     <td>About 1 hour of price history per token</td>
-                    <td>About 9 hours of price history per token - RSI/MACD/Bollinger need a real
-                      time series to mean anything</td>
+                    <td>About 4 hours of price history per token</td>
                   </tr>
                   <tr>
                     <td>Sizing</td>

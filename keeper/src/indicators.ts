@@ -234,3 +234,65 @@ export function snapshot(candles: Candle[]): IndicatorSnapshot | null {
     volRatio: vol?.ratio ?? null,
   };
 }
+
+/**
+ * Order-flow pressure: what fraction of recent trades were buys, not sells.
+ * Unlike RSI/MACD/Bollinger (all derived from price alone, so "2 of 3
+ * agreeing" is mostly the same fact restated three ways), this reads real
+ * on-chain trade direction (see prices.ts's scanSwapVolume) - it answers
+ * "are real wallets choosing to buy right now," which a price chart alone
+ * cannot show. buyRatio is null (not 0 or 1) when there's no trade data at
+ * all in the window, so a quiet token reads as "no signal," never as "all
+ * selling" or "all buying."
+ */
+export interface OrderFlow { buyTrades: number; sellTrades: number; totalTrades: number; buyRatio: number | null }
+
+export function orderFlow(candles: Candle[], recentCount: number): OrderFlow | null {
+  if (candles.length === 0) return null;
+  const recent = candles.slice(Math.max(0, candles.length - recentCount));
+  let buyTrades = 0, sellTrades = 0;
+  for (const c of recent) { buyTrades += c.buyTrades; sellTrades += c.sellTrades; }
+  const totalTrades = buyTrades + sellTrades;
+  return { buyTrades, sellTrades, totalTrades, buyRatio: totalTrades > 0 ? buyTrades / totalTrades : null };
+}
+
+/**
+ * Is liquidity growing, flat, or shrinking over the trailing window - real
+ * capital committing (or leaving), not just price wobbling on liquidity
+ * that was already there. Compares the latest candle's liq against the
+ * candle `lookbackCount` back, as a % change. Positive means liquidity
+ * grew; a token whose price bounced but whose liquidity kept draining
+ * reads negative here even though liquidityDropIsSuspicious's stricter
+ * rug-specific check (a much bigger, price-relative drop) might not have
+ * tripped yet - this is a softer, continuous read for the entry decision,
+ * not a replacement for that hard gate.
+ */
+export function liquidityTrend(candles: Candle[], lookbackCount: number): number | null {
+  if (candles.length <= lookbackCount) return null;
+  const before = candles[candles.length - 1 - lookbackCount]!.liq;
+  const now = candles[candles.length - 1]!.liq;
+  if (before <= 0) return null;
+  return ((now - before) / before) * 100;
+}
+
+/**
+ * Donchian-style breakout: has price just pushed to a new high over the
+ * trailing `lookbackCount` candles (excluding the current one)? This is the
+ * trend-CONTINUATION read Hunter Bot now uses instead of RSI/Bollinger's
+ * oversold-BOUNCE read - on thin, often-manipulated PulseChain microcaps, a
+ * big drop is more often the start of a rug or a slow bleed than a
+ * statistical bounce waiting to happen (mean-reversion indicators assume
+ * mature, liquid markets Hunter doesn't actually trade in). Buying confirmed
+ * strength instead of a guessed bottom means missing the first leg of a
+ * move in exchange for not catching a falling token on the way down.
+ */
+export interface Breakout { brokeOut: boolean; recentHigh: number; pctAboveHigh: number }
+
+export function donchianBreakout(candles: Candle[], lookbackCount: number): Breakout | null {
+  if (candles.length <= lookbackCount) return null;
+  const window = candles.slice(candles.length - 1 - lookbackCount, candles.length - 1);
+  const recentHigh = Math.max(...window.map((c) => c.high));
+  const close = candles[candles.length - 1]!.close;
+  if (recentHigh <= 0) return null;
+  return { brokeOut: close > recentHigh, recentHigh, pctAboveHigh: ((close - recentHigh) / recentHigh) * 100 };
+}

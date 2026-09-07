@@ -871,11 +871,12 @@ export default function Dashboard() {
                   perfDetail={botPerfDetail(history, "hunter", config.hunter)}
                   info={
                     <>
-                      Watches tokens already trading for technical dips - RSI oversold, a bullish MACD
-                      cross, or price riding the lower Bollinger band. A setup still has to clear the
-                      same honeypot/tax/LP-lock screen Launch Bot uses. Purely mechanical - no AI
-                      judgment on the buy or the exit - and built to day-trade: positions close within
-                      hours to a couple of days, not sit open indefinitely.
+                      Watches tokens already trading for real order-flow strength - buy pressure,
+                      liquidity growth, new-buyer growth, a breakout above the token's own recent
+                      high - not RSI/MACD/Bollinger, which only ever read price. A setup still has to
+                      clear the same honeypot/tax/LP-lock screen Launch Bot uses. Purely mechanical -
+                      no AI judgment on the buy or the exit - and built to day-trade: positions close
+                      within hours, not sit open indefinitely.
                     </>
                   }
                 >

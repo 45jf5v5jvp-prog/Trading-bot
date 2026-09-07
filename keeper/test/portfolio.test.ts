@@ -25,19 +25,19 @@ test("blend averages entry price across buys", () => {
 });
 
 test("take profit fires past target", () => {
-  const pos = { tpPct: 15, slPct: 20, trailPct: null, timeExitMin: null, openedAt: 0, highWater: 1.20 };
+  const pos = { tpPct: 15, slPct: 20, trailPct: null, timeExitMin: null, openedAt: 0, highWater: 1.20, tightTrailPct: null, trailWidenAtPct: null };
   assert.match(sellSignal(pos, 1.20, 1000) ?? "", /take profit/); // up 20% >= 15% target
   assert.equal(sellSignal(pos, 1.10, 1000), null);                // up 10%, hold
 });
 
 test("stop loss fires past loss", () => {
-  const pos = { tpPct: 50, slPct: 20, trailPct: null, timeExitMin: null, openedAt: 0, highWater: 1 };
+  const pos = { tpPct: 50, slPct: 20, trailPct: null, timeExitMin: null, openedAt: 0, highWater: 1, tightTrailPct: null, trailWidenAtPct: null };
   assert.match(sellSignal(pos, 0.75, 1000) ?? "", /stop loss/);   // down 25% <= -20%
   assert.equal(sellSignal(pos, 0.85, 1000), null);                // down 15%, hold
 });
 
 test("trailing stop only arms after the position has been in profit", () => {
-  const pos = { tpPct: null, slPct: null, trailPct: 10, timeExitMin: null, openedAt: 0, highWater: 1.30 };
+  const pos = { tpPct: null, slPct: null, trailPct: 10, timeExitMin: null, openedAt: 0, highWater: 1.30, tightTrailPct: null, trailWidenAtPct: null };
   // Peaked +30%, now down to +17% -> more than 10% off the peak (1.30*0.9=1.17) -> sell.
   assert.match(sellSignal(pos, 1.16, 1000) ?? "", /trailing stop/);
   assert.equal(sellSignal(pos, 1.20, 1000), null);      // only 8% off peak, hold
@@ -48,14 +48,43 @@ test("trailing stop only arms after the position has been in profit", () => {
 });
 
 test("time exit fires after the window", () => {
-  const pos = { tpPct: null, slPct: null, trailPct: null, timeExitMin: 30, openedAt: 0, highWater: 1 };
+  const pos = { tpPct: null, slPct: null, trailPct: null, timeExitMin: 30, openedAt: 0, highWater: 1, tightTrailPct: null, trailWidenAtPct: null };
   assert.equal(sellSignal(pos, 1.0, 29 * 60), null);
   assert.match(sellSignal(pos, 1.0, 30 * 60) ?? "", /time exit/);
 });
 
 test("no exit when nothing is hit", () => {
-  const pos = { tpPct: 50, slPct: 30, trailPct: 15, timeExitMin: 240, openedAt: 0, highWater: 1.1 };
+  const pos = { tpPct: 50, slPct: 30, trailPct: 15, timeExitMin: 240, openedAt: 0, highWater: 1.1, tightTrailPct: null, trailWidenAtPct: null };
   assert.equal(sellSignal(pos, 1.05, 60), null);
+});
+
+test("tiered trail: below the widen threshold, the TIGHT trail applies - a stalled quick pump exits close to its peak", () => {
+  const pos = {
+    tpPct: 0, slPct: 25, trailPct: 6, timeExitMin: null, openedAt: 0,
+    highWater: 1.05, tightTrailPct: 2.5, trailWidenAtPct: 6,
+  };
+  // Peaked +5% (under the 6% widen threshold) -> tight 2.5% trail applies.
+  // 1.05 * (1 - 0.025) = 1.02375 -> anything at/below that sells.
+  assert.match(sellSignal(pos, 1.02, 1000) ?? "", /trailing stop/);
+  assert.equal(sellSignal(pos, 1.03, 1000), null); // still inside the tight trail, hold
+});
+
+test("tiered trail: once the peak passes the widen threshold, the WIDE trail takes over and gives a real move room to run", () => {
+  const pos = {
+    tpPct: 0, slPct: 25, trailPct: 6, timeExitMin: null, openedAt: 0,
+    highWater: 1.15, tightTrailPct: 2.5, trailWidenAtPct: 6,
+  };
+  // Peaked +15% (past the 6% widen threshold) -> wide 6% trail applies now,
+  // not the tight one - a pullback that would have stopped out the tight
+  // trail long ago is tolerated here.
+  assert.equal(sellSignal(pos, 1.10, 1000), null); // ~4.3% off peak, still within the 6% wide trail
+  assert.match(sellSignal(pos, 1.08, 1000) ?? "", /trailing stop/); // >6% off peak (1.15*0.94=1.081) -> sell
+});
+
+test("tiered trail falls back to plain trailPct behavior when tightTrailPct is unset (every non-Hunter bot)", () => {
+  const pos = { tpPct: null, slPct: null, trailPct: 10, timeExitMin: null, openedAt: 0, highWater: 1.30, tightTrailPct: null, trailWidenAtPct: null };
+  assert.match(sellSignal(pos, 1.16, 1000) ?? "", /trailing stop/);
+  assert.equal(sellSignal(pos, 1.20, 1000), null);
 });
 
 test("holding cap math", () => {

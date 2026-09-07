@@ -66,32 +66,44 @@ export interface DiscoveryConfig {
 }
 
 /**
- * Hunter Bot: hunts technical dip-buying setups (RSI oversold, a bullish
- * MACD cross, a Bollinger lower-band touch) across every watched token,
- * trading a dedicated slice of the vault's WPLS rather than the whole
- * balance - `allocatedPls` caps how much of the vault this bot can ever have
- * deployed at once (freed back as positions close, not a lifetime spend
- * cap), so a bad run stays contained to the amount the owner chose to risk
- * on it, same spirit as "give it $100 and see what it does."
+ * Hunter Bot: hunts real order-flow/liquidity-flow setups across every
+ * watched token, trading a dedicated slice of the vault's WPLS rather than
+ * the whole balance - `allocatedPls` caps how much of the vault this bot can
+ * ever have deployed at once (freed back as positions close, not a lifetime
+ * spend cap), so a bad run stays contained to the amount the owner chose to
+ * risk on it, same spirit as "give it $100 and see what it does."
  *
- * A technical setup is not a safety check. Before anything executes, a
- * candidate still runs the same honeypot/tax/LP-lock/renounce screen every
- * other bot runs, AND a liquidity-coherence check (see indicators.ts's
+ * Used to detect off RSI/MACD/Bollinger, which are all derived from the same
+ * price series - "2 of 3 agree" wasn't real diversification, and all three
+ * are mean-reversion reads (bet on a bounce) that assume a mature, liquid
+ * market this bot doesn't trade in. Replaced with four independent reads:
+ * `requireBuyPressure` (real buy/sell trade direction, not price),
+ * `requireLiquidityGrowth` (real capital committing, not price),
+ * `requireBuyerGrowth` (real new participants, not price), and
+ * `requireBreakout` (price confirming strength above its own recent high,
+ * not a guessed bottom) - see indicators.ts's orderFlow/liquidityTrend/
+ * donchianBreakout and hunter.ts's checkSignals. Every ENABLED one of these
+ * must pass - not a vote among them, since unlike RSI/MACD/Bollinger they
+ * each measure something genuinely different.
+ *
+ * None of this is a safety check. Before anything executes, a candidate
+ * still runs the same honeypot/tax/LP-lock/renounce screen every other bot
+ * runs, AND a liquidity-coherence check (see indicators.ts's
  * liquidityDropIsSuspicious) that catches the specific trap that motivated
  * this bot: a token whose price cratered because its liquidity was pulled,
- * which looks exactly like an oversold dip to pure price/RSI math. That
- * check is not configurable - it always runs.
+ * which can look exactly like real momentum to price math alone. That check
+ * is not configurable - it always runs.
  *
  * `maxPerTradePls` is a ceiling, not a fixed size - the bot spends up to
  * that amount, not "always spend exactly this."
  *
- * Every position this bot opens is managed the same fixed-target way every
- * other bot in this codebase uses: takeProfitPct/stopLossPct/
- * trailingStopPct/timeExitMin all apply exactly as configured. There is no
- * AI judgment anywhere in Hunter Bot - buy decisions are purely mechanical
- * (technical trigger + screen), and so are exits. timeExitMin defaults to a
- * day-trading window so a position doesn't sit open for days waiting on a
- * target that never comes.
+ * Exits: stopLossPct/timeExitMin apply exactly as configured, same as every
+ * other bot. Take-profit and trailing are different here - see
+ * `tightTrailPct`/`trailWidenAtPct` below for the tiered trail this bot uses
+ * instead of a flat one, meant to capture a quick small win without giving
+ * up a bigger move that's still running. There is no AI judgment anywhere
+ * in Hunter Bot - buy decisions are purely mechanical (order-flow/liquidity/
+ * breakout signals + screen), and so are exits.
  */
 export interface HunterConfig {
   enabled: boolean;
@@ -115,12 +127,33 @@ export interface HunterConfig {
   maxPerTradePls: number;
   maxPerDay: number;
 
-  // At least one enabled trigger must fire for a candidate to qualify.
-  requireRsi: boolean;
-  rsiOversold: number;         // RSI(14) at or below this = oversold
-  requireMacdCross: boolean;   // a bullish MACD crossover just occurred
-  requireBollinger: boolean;
-  bollingerPercentBMax: number; // at or below this %B = riding the lower band
+  // Every ENABLED one of these four must pass - see hunter.ts's
+  // checkSignals. Each reads different on-chain data, not just a different
+  // formula over the same price series.
+  requireBuyPressure: boolean;
+  // Fraction (0-1) of trades in the trailing window that must be buys, not
+  // sells - see indicators.ts's orderFlow. 0.6 means 60% of recent trades
+  // were buys.
+  minBuyPressureRatio: number;
+
+  requireLiquidityGrowth: boolean;
+  // % change in liquidity over the trailing window that must be cleared -
+  // see indicators.ts's liquidityTrend. 0 means "not shrinking"; a positive
+  // number requires real growth, not just flatness.
+  minLiquidityGrowthPct: number;
+
+  requireBuyerGrowth: boolean;
+  // How many DISTINCT wallets must have bought (not just traded) in the
+  // last hour - see hunter.ts's BUYER_WINDOW_MIN and db.ts's tokenTraders'
+  // side-filtered count(). Different from minUniqueTraders24h below: that's
+  // a 24h liveness floor covering both sides of the trade; this is a
+  // recent, buy-only participation signal.
+  minNewBuyers: number;
+
+  // Price breaking out to a new local high over its own recent lookback
+  // window (a Donchian channel) - see indicators.ts's donchianBreakout. No
+  // extra threshold to configure; it's a clean yes/no.
+  requireBreakout: boolean;
 
   minLiquidityPls: number;
 
@@ -129,6 +162,9 @@ export interface HunterConfig {
   requireLpLock: boolean;
   requireOwnerRenounced: boolean;
 
+  // Defaults to 0 (disabled) - the tiered trail below does the exit work
+  // instead, letting a winner run rather than hard-selling at one fixed
+  // number. Set a real value here to override the trail with a hard ceiling.
   takeProfitPct: number;
   // When useAtrStop is on, the position's actual stop distance is computed
   // from the token's own ATR(14) at buy time (ATR as a % of price, times
@@ -139,21 +175,36 @@ export interface HunterConfig {
   stopLossPct: number;
   useAtrStop: boolean;
   atrStopMultiplier: number;
+  // Wide trail - the distance used once a position's peak gain has passed
+  // trailWidenAtPct. See portfolio.ts's sellSignal for the full tiered
+  // mechanism: below that threshold, tightTrailPct applies instead (a
+  // stalled quick pump locks in most of its gain fast); past it, this wider
+  // distance takes over so a real move gets room to keep running toward a
+  // bigger exit instead of getting stopped out on every wiggle. 0 disables
+  // trailing above the widen threshold - the position just rides on
+  // tightTrailPct alone if that's set, or not at all if neither is.
   trailingStopPct: number;
+  // Tight trail - the distance used while a position's peak gain is still
+  // under trailWidenAtPct. Small on purpose: this is what actually delivers
+  // "if it makes a quick 4% and stalls, take it" - a small pullback from an
+  // early peak exits close to that peak rather than giving most of it back
+  // waiting for a bigger target. 0 disables the tiered trail entirely
+  // (falls back to plain trailingStopPct behavior, same as every other bot).
+  tightTrailPct: number;
+  // Peak-gain % (not current PnL - the highest this position has ever been)
+  // at which tightTrailPct hands off to the wider trailingStopPct. See
+  // portfolio.ts's sellSignal.
+  trailWidenAtPct: number;
   // Force a close after this many minutes regardless of tp/sl/trailing, so a
   // position that never hits either target still gets resolved instead of
   // sitting open indefinitely - this is a day-trading bot, not a buy-and-hold
-  // one. Defaults to 2880 (48h) per the owner's "done within 24-48 hours"
-  // instruction. 0 disables the time exit entirely.
+  // one. 0 disables the time exit entirely.
   timeExitMin: number;
 
   // Require the recent candle volume to be running meaningfully hotter than
-  // the token's own baseline before trusting an RSI/MACD/Bollinger trigger -
-  // an oversold reading on a token nobody is actually trading is noise, not
-  // signal. See indicators.ts's volumeConfirmation(). Off by default: the
-  // keeper only just started tracking real Swap volume, so a freshly watched
-  // token has none yet and this would silently block every trigger until it
-  // does.
+  // the token's own baseline before trusting the order-flow/liquidity/
+  // breakout signals above - real activity on a token nobody is actually
+  // trading is noise, not signal. See indicators.ts's volumeConfirmation().
   requireVolumeConfirmation: boolean;
   minVolumeRatio: number;
 
@@ -305,43 +356,56 @@ const DEFAULT_DISCOVERY: DiscoveryConfig = {
 };
 
 const DEFAULT_HUNTER: HunterConfig = {
-  enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false, maxPerTradePls: 0, maxPerDay: 3,
-  requireRsi: true, rsiOversold: 30, requireMacdCross: true,
-  requireBollinger: true, bollingerPercentBMax: 0.15,
-  minLiquidityPls: 2_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false,
+  // Raised from 3 - a bot meant to find several trades a day needs real
+  // daily headroom, not a cap that stops it after its first 2-3 buys.
+  maxPerTradePls: 0, maxPerDay: 20,
+  // 0.6: 60% of recent trades being buys is a real, clear majority without
+  // requiring an almost-uncontested tape (which barely trades at all).
+  requireBuyPressure: true, minBuyPressureRatio: 0.6,
+  // 0: liquidity must not be shrinking over the window - real growth is
+  // welcome but not required by default, since plenty of genuine setups
+  // hold liquidity flat rather than visibly growing it minute to minute.
+  requireLiquidityGrowth: true, minLiquidityGrowthPct: 0,
+  // 3: a low bar on purpose, same reasoning as minUniqueTraders24h below -
+  // real interest clears this easily, a quiet/wash-traded token usually
+  // can't.
+  requireBuyerGrowth: true, minNewBuyers: 3,
+  requireBreakout: true,
+  // Raised from 2,000,000 - the owner's own read that thinner tokens are
+  // where the noise lives, and a higher liquidity floor is a direct way to
+  // favor tokens with real, harder-to-fake trading activity behind them.
+  minLiquidityPls: 5_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
-  takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
-  // 2880 (48h): this bot is meant to day-trade, not hold for days - a
-  // position that never hits take-profit/stop-loss/trailing still gets
-  // force-closed inside the owner's "done within 24-48 hours" window.
-  trailingStopPct: 0, timeExitMin: 2880,
-  // requireVolumeConfirmation used to default to false - "no default this
-  // deployment hasn't earned yet." Turned on after the same 2026-08-24
-  // review as minTrades24h just below: an oversold/overbought reading on a
-  // token nobody is actually trading isn't much of a signal, and that's
-  // exactly the shape behind a run of live losing "AI exit: RSI deeply
-  // overbought" closes. This and minTrades24h test different things (a
-  // volume SURGE vs. baseline here, a raw trade COUNT there) and are meant
-  // to work together, not duplicate each other.
+  // 0: no hard take-profit ceiling - the tiered trail below (tightTrailPct/
+  // trailWidenAtPct/trailingStopPct) does the exit work instead, letting a
+  // real move run rather than force-selling at one fixed number the moment
+  // it's crossed.
+  takeProfitPct: 0,
+  // Tightened from 25 - a bot meant to cycle through several trades a day
+  // needs a real, prompt invalidation, not a stop so wide it barely differs
+  // from "never sell."
+  stopLossPct: 15, useAtrStop: false, atrStopMultiplier: 3,
+  // The tiered trail this bot is built around - see portfolio.ts's
+  // sellSignal and registry.ts's own field comments above. Below a 6% peak,
+  // a tight 2.5% trail locks in most of a quick pump that stalls early
+  // ("if it makes a quick 4%, great, exit it" - the owner's own words);
+  // past 6%, the wider 6% trail takes over so a real move gets room to run
+  // toward a bigger exit instead of getting stopped out on every wiggle.
+  trailingStopPct: 6, tightTrailPct: 2.5, trailWidenAtPct: 6,
+  // Shortened from 2880 (48h) - this bot is meant to cycle through several
+  // trades a day, not hold for two days waiting on a target. A position
+  // that's still flat after 6 hours gets resolved so the capital frees up
+  // for the next setup, rather than sitting on one stale bet.
+  timeExitMin: 360,
   requireVolumeConfirmation: true, minVolumeRatio: 1.5,
-  // Used to default to 0 (off) - same "hasn't earned it yet" reasoning as
-  // requireVolumeConfirmation used to have, until live results (2026-08-24)
-  // showed a vault left at 0 kept buying tokens that then sat with no
-  // further trades for up to 16 hours, and that same thin trading is what
-  // produces the noisy, easily-swung RSI/MACD/Bollinger readings behind
-  // those same losing closes (see MIN_AGREEING_SIGNALS' comment above). 30
-  // is a real floor a fresh vault gets automatically, not a strict one - an
-  // owner who wants tighter or looser can still change it.
   minTrades24h: 30,
-  // New (2026-08-24), alongside the trade-count/volume-ratio checks above -
-  // catches what neither of those can: one wallet trading with itself
-  // repeatedly to fake real activity. 5 is a low bar on purpose - a
-  // genuinely real, actively-traded token clears this easily; a wash-traded
-  // one usually can't clear it at all, since it means finding 5 actually
-  // different wallets, not just 5 trades or a volume surge.
   minUniqueTraders24h: 5,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
-  maxOpenPositions: 0,
+  // Raised from 0 (uncapped) - a real ceiling matching what the owner
+  // actually wants to be watching at once, rather than letting exposure
+  // grow unbounded as long as the PLS budget allows it.
+  maxOpenPositions: 15,
 };
 
 const cache = new Map<string, VaultRecord>();

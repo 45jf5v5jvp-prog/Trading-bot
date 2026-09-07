@@ -6,7 +6,7 @@ import { registry, type VaultRecord, type HunterConfig } from "./registry.js";
 import { watched, opportunities, discoveryActions, pendingRebuys, prices, tokenTraders, db } from "./db.js";
 import { screenOpportunity, fetchBuyRequests, type DiscoveryScreen } from "./discovery.js";
 import { candlesForToken } from "./candles.js";
-import { snapshot, liquidityDropIsSuspicious, looksLikeStablecoin } from "./indicators.js";
+import { snapshot, liquidityDropIsSuspicious, looksLikeStablecoin, orderFlow, liquidityTrend, donchianBreakout } from "./indicators.js";
 import { plsUsd } from "./plsPrice.js";
 import { executeSwap } from "./executor.js";
 import { openPosition, positionsValuePls } from "./positions.js";
@@ -15,10 +15,22 @@ import { mapLimit } from "./concurrency.js";
 import { log } from "./log.js";
 
 /**
- * Hunter Bot: hunts technical dip-buying setups (RSI oversold, a bullish
- * MACD cross, a Bollinger lower-band touch) across every watched token,
- * trading a dedicated slice of the vault the owner chose to risk on it -
- * see registry.ts's HunterConfig for the full reasoning.
+ * Hunter Bot: hunts real order-flow/liquidity-flow setups across every
+ * watched token, trading a dedicated slice of the vault the owner chose to
+ * risk on it - see registry.ts's HunterConfig for the full reasoning.
+ *
+ * Used to detect off RSI/MACD/Bollinger alone - all three are derived from
+ * the same price series, so "2 of 3 agree" was mostly the same fact
+ * restated three ways, not real diversification. They're also all
+ * mean-reversion reads (bet on a bounce), which assumes a mature, liquid
+ * market this bot doesn't actually trade in - on a thin, often-manipulated
+ * PulseChain microcap, a big drop is more often the start of a rug or a
+ * slow bleed than a statistical bounce waiting to happen. Replaced with four
+ * genuinely different reads: buy/sell trade-pressure ratio and new-buyer
+ * growth (real on-chain order flow, not price), liquidity trend (real
+ * capital committing, not price), and a breakout above the token's own
+ * recent high (confirmed strength, not a guessed bottom). See
+ * indicators.ts's orderFlow/liquidityTrend/donchianBreakout.
  *
  * Shares its findings feed with discovery.ts (the `opportunities` table,
  * tagged source='hunter') so the site's Opportunities panel and manual
@@ -28,13 +40,25 @@ import { log } from "./log.js";
  */
 
 const CANDLE_MINUTES = 15;
-const LOOKBACK_HOURS = 48;
-// Longer than discovery's dedup window - an RSI/Bollinger setup that's still
-// oversold four hours later is the same setup continuing, not a new one.
-const DEDUP_HOURS = 4;
-// Roughly the slow MACD(26) + signal(9) warm-up - fewer candles than this
-// and macd()/bollinger() come back null anyway, so there's nothing to check.
-const MIN_CANDLES = 36;
+// Shorter than the old 48h RSI/MACD warm-up window needed - none of the new
+// signals need anywhere near that much history (the longest lookback below
+// is the 2h breakout channel), and a shorter window means a freshly-watched
+// token becomes eligible to trade sooner, plus a more RECENT liquidity-pull
+// comparison in liquidityDropIsSuspicious below rather than one diluted
+// across two days.
+const LOOKBACK_HOURS = 12;
+// Shorter than the old 4h - a fresh breakout-with-real-order-flow an hour
+// later is a genuinely new confirmation, not "the same setup still going."
+// Shorter dedup also means more distinct opportunities can surface across
+// the watched-token universe over a given stretch, which is the point: the
+// owner wants Hunter finding and closing several trades, not one setup
+// slow-cooking for hours before it's allowed to fire again.
+const DEDUP_HOURS = 1;
+// Matches volumeConfirmation's own floor (needs recentCount*2 = 16 candles
+// to compare a recent window against a baseline) - the binding constraint
+// now, since none of the order-flow/liquidity/breakout signals below need
+// nearly this much history on their own.
+const MIN_CANDLES = 16;
 // Bounds on an ATR-derived stop distance, regardless of atrStopMultiplier -
 // a stop tighter than this on a low-cap PulseX token is almost certainly
 // noise-triggered, not a real invalidation of the setup; a stop looser than
@@ -42,34 +66,26 @@ const MIN_CANDLES = 36;
 const ATR_STOP_MIN_PCT = 5;
 const ATR_STOP_MAX_PCT = 80;
 
-// How many of {RSI oversold, bullish MACD cross, Bollinger lower band} have
-// to agree before this counts as a real setup at all. Raised from 1 to 2
-// after live results (2026-08-24) showed a clear pattern: exits reasoning
-// "RSI deeply overbought" landing at a realized LOSS, again and again, on
-// thin-liquidity microcaps. A single indicator on a token that trades a
-// handful of times an hour is easily swung by one large trade - that's not
-// real data behind the decision, it's noise from a candle with almost
-// nothing in it. Two independent signals agreeing is a much weaker claim
-// for a wash-traded wick to satisfy by accident. See evaluateWatchedToken
-// and technicalConfidence() below - "high" confidence already meant 2+
-// agreeing; this just makes that the buy bar too, not only a confidence
-// label.
-const MIN_AGREEING_SIGNALS = 2;
-
-/** Confidence grounded in something a person can verify - how many
- * independent technical signals actually agree - rather than only the AI's
- * own self-reported word for it. Never called below MIN_AGREEING_SIGNALS,
- * which is now 2 itself, so the single-signal "confident" case can no
- * longer actually happen - left in rather than deleted, since it's still
- * correct and MIN_AGREEING_SIGNALS could reasonably move again later. */
-function technicalConfidence(signalCount: number): "confident" | "high" {
-  return signalCount >= 2 ? "high" : "confident";
-}
+// Trailing window for buy/sell trade-pressure ratio - 4 candles * 15min.
+const ORDER_FLOW_LOOKBACK_CANDLES = 4;
+// Floor on total trades in that window before trusting the ratio it
+// produces - one lucky trade reading 100% buys isn't a signal, it's noise
+// from a nearly-empty sample.
+const MIN_ORDER_FLOW_TRADES = 3;
+// Compares liquidity now against liquidity this many candles back - same
+// 60-minute window as order flow, for the same "is something real
+// happening right now" framing.
+const LIQUIDITY_TREND_LOOKBACK_CANDLES = 4;
+// How far back "distinct new buyers" looks - see db.ts's tokenTraders.
+const BUYER_WINDOW_MIN = 60;
+// Donchian channel width for the breakout confirmation - 8 candles * 15min.
+const BREAKOUT_LOOKBACK_CANDLES = 8;
 
 interface Strictest {
-  requireRsi: boolean; rsiOversold: number;
-  requireMacdCross: boolean;
-  requireBollinger: boolean; bollingerPercentBMax: number;
+  requireBuyPressure: boolean; minBuyPressureRatio: number;
+  requireLiquidityGrowth: boolean; minLiquidityGrowthPct: number;
+  requireBuyerGrowth: boolean; minNewBuyers: number;
+  requireBreakout: boolean;
   requireVolumeConfirmation: boolean; minVolumeRatio: number;
   minLiquidityPls: number;
   minTrades24h: number;
@@ -144,38 +160,67 @@ function openPositionCount(vault: string): number {
 }
 
 // Both Strictest (the shared, loosest-across-subscribers detection config)
-// and HunterConfig (a single vault's real settings) carry these same five
-// fields, so checkTriggers can be called once with strictest for detection
+// and HunterConfig (a single vault's real settings) carry these same eight
+// fields, so checkSignals can be called once with strictest for detection
 // and again per-vault with each vault's own H for buy-time re-verification -
 // see dispatch() below.
 interface TriggerConfig {
-  requireRsi: boolean; rsiOversold: number;
-  requireMacdCross: boolean;
-  requireBollinger: boolean; bollingerPercentBMax: number;
+  requireBuyPressure: boolean; minBuyPressureRatio: number;
+  requireLiquidityGrowth: boolean; minLiquidityGrowthPct: number;
+  requireBuyerGrowth: boolean; minNewBuyers: number;
+  requireBreakout: boolean;
 }
 
-function checkTriggers(
-  snap: NonNullable<ReturnType<typeof snapshot>>, strictest: TriggerConfig,
-): string[] {
+interface SignalReadout {
+  buyRatio: number | null;
+  orderFlowTrades: number;
+  liqTrendPct: number | null;
+  newBuyers: number;
+  brokeOut: boolean;
+  pctAboveHigh: number | null;
+}
+
+/**
+ * Every ENABLED requirement must pass - unlike the old RSI/MACD/Bollinger
+ * "2 of 3 agree" voting (needed because all three were derived from the
+ * same price series, so agreement between them was mostly the same fact
+ * restated, not real independent confirmation), these four signals measure
+ * genuinely different things: order flow, capital flow, participation, and
+ * price structure. Requiring all of them isn't the same collinear-noise
+ * problem - it's just several independent necessary conditions, the same
+ * shape every other screen in this codebase already uses (tax caps, LP
+ * lock, liquidity floor - always ANDed, never voted on). Returns the
+ * reasons that DID fire, for the narrative; null means some enabled
+ * requirement failed.
+ */
+function checkSignals(r: SignalReadout, cfg: TriggerConfig): string[] | null {
   const hits: string[] = [];
-  if (strictest.requireRsi && snap.rsi !== null && snap.rsi <= strictest.rsiOversold)
-    hits.push(`RSI ${snap.rsi.toFixed(0)} is oversold (<= ${strictest.rsiOversold})`);
-  if (strictest.requireMacdCross && snap.macd?.bullishCross)
-    hits.push("MACD just crossed bullish");
-  if (strictest.requireBollinger && snap.bollinger !== null && snap.bollinger.percentB <= strictest.bollingerPercentBMax)
-    hits.push(`Bollinger %B ${snap.bollinger.percentB.toFixed(2)} is riding the lower band`);
+  if (cfg.requireBuyPressure) {
+    if (r.buyRatio === null || r.orderFlowTrades < MIN_ORDER_FLOW_TRADES || r.buyRatio < cfg.minBuyPressureRatio) return null;
+    hits.push(`${(r.buyRatio * 100).toFixed(0)}% of the last ${r.orderFlowTrades} trades were buys`);
+  }
+  if (cfg.requireLiquidityGrowth) {
+    if (r.liqTrendPct === null || r.liqTrendPct < cfg.minLiquidityGrowthPct) return null;
+    hits.push(`liquidity ${r.liqTrendPct >= 0 ? "up" : "down"} ${r.liqTrendPct.toFixed(1)}% over the last hour`);
+  }
+  if (cfg.requireBuyerGrowth) {
+    if (r.newBuyers < cfg.minNewBuyers) return null;
+    hits.push(`${r.newBuyers} distinct new buyers in the last hour`);
+  }
+  if (cfg.requireBreakout) {
+    if (!r.brokeOut) return null;
+    hits.push(`price broke out to a new local high${r.pctAboveHigh !== null ? ` (+${r.pctAboveHigh.toFixed(1)}%)` : ""}`);
+  }
   return hits;
 }
 
-function buildNarrative(symbol: string, triggers: string[], s: DiscoveryScreen, volRatio: number | null): string {
+function buildNarrative(symbol: string, hits: string[], s: DiscoveryScreen, volRatio: number | null): string {
   const volNote = volRatio !== null && Number.isFinite(volRatio)
     ? ` Recent volume is running ${volRatio.toFixed(1)}x its baseline.`
     : "";
-  const conf = technicalConfidence(triggers.length);
-  const confidenceNote = conf === "high"
-    ? ` ${triggers.length} technical signals agree - high confidence.`
-    : " One technical signal.";
-  const base = `${symbol} looks oversold: ${triggers.join("; ")}.${confidenceNote}${volNote}`;
+  const base = hits.length
+    ? `${symbol} shows real strength: ${hits.join("; ")}.${volNote}`
+    : `${symbol} passed every enabled requirement (none configured require confirming data).${volNote}`;
   if (s.verdict !== "pass") return `${base} Screen failed: ${s.reason}.`;
   return `${base} Passed the same honeypot, tax, LP-lock and renounce screen the Launch Bot runs.`;
 }
@@ -226,10 +271,9 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
       tpPct: H.takeProfitPct,
       slPct,
       trailPct: H.trailingStopPct,
+      tightTrailPct: H.tightTrailPct,
+      trailWidenAtPct: H.trailWidenAtPct,
       timeExitMin: H.timeExitMin,
-      // Needed to find this trade's own buy narrative later - see
-      // reflectOnClosedLosses below, which has nothing to reflect on
-      // without it.
       sourceTxHash: res.txHash,
     });
     discoveryActions.record(v.address, id, "bought", res.txHash);
@@ -240,9 +284,9 @@ async function executeHunterBuy(v: VaultRecord, id: number, token: string, amoun
 }
 
 async function dispatch(
-  id: number, token: string, s: DiscoveryScreen, atrPct: number | null, candidates: VaultRecord[],
-  liqPls: number, trades24hEquivalent: number, uniqueTraders24h: number,
-  snap: NonNullable<ReturnType<typeof snapshot>>,
+  id: number, token: string, s: DiscoveryScreen, atrPct: number | null, volRatio: number | null,
+  candidates: VaultRecord[], liqPls: number, trades24hEquivalent: number, uniqueTraders24h: number,
+  readout: SignalReadout,
 ): Promise<void> {
   await mapLimit(candidates, CFG.keeperConcurrency, async (v) => {
     const H = v.hunter;
@@ -264,17 +308,16 @@ async function dispatch(
     // minUniqueTraders24h comment for what this actually catches that
     // trades24hEquivalent alone can't (one wallet trading with itself).
     if (uniqueTraders24h < H.minUniqueTraders24h) return;
-    // Same bug, same fix, for the RSI/MACD/Bollinger trigger thresholds and
-    // volume-ratio confirmation: the shared detection stage above only ever
+    // Same bug, same fix, for the order-flow/liquidity-trend/buyer-growth/
+    // breakout requirements: the shared detection stage above only ever
     // checked the loosest-across-subscribers strictest values, never each
-    // vault's own H.rsiOversold/H.bollingerPercentBMax/etc, so a vault with
-    // a strict RSI or Bollinger requirement (or one requiring an indicator
-    // a looser subscriber didn't) could get bought into on a signal that
-    // only cleared some OTHER vault's bar. Re-derive this vault's own
-    // triggers from the same real snap data and require them to clear this
-    // vault's own MIN_AGREEING_SIGNALS bar before buying.
-    if (checkTriggers(snap, H).length < MIN_AGREEING_SIGNALS) return;
-    if (H.requireVolumeConfirmation && (snap.volRatio === null || snap.volRatio < H.minVolumeRatio)) return;
+    // vault's own thresholds, so a vault with a strict requirement (or one
+    // requiring a signal a looser subscriber didn't) could get bought into
+    // on a signal that only cleared some OTHER vault's bar. Re-derive this
+    // vault's own signals from the same real readout and require them to
+    // clear this vault's own thresholds before buying.
+    if (checkSignals(readout, H) === null) return;
+    if (H.requireVolumeConfirmation && (volRatio === null || volRatio < H.minVolumeRatio)) return;
     if (discoveryActions.has(v.address, id)) return;
     if (actionsToday(v.address) >= H.maxPerDay) return;
 
@@ -298,44 +341,54 @@ async function evaluateWatchedToken(
   if (candles.length < MIN_CANDLES) return;
 
   // Hard gate, not configurable - see indicators.ts's looksLikeStablecoin
-  // for the full reasoning. Checked before any of the real indicator math
-  // below, since a USD-pegged token's RSI/MACD/Bollinger readings aren't
+  // for the full reasoning. Checked before any of the real signal math
+  // below, since a USD-pegged token's price/liquidity readings aren't
   // measuring anything real about the token at all.
   const usdPerPls = await plsUsd().catch(() => null);
   if (usdPerPls !== null && looksLikeStablecoin(candles.map((c) => c.close), usdPerPls)) return;
 
+  // Still uses snapshot() for its atrPct (stop-loss sizing) and volRatio
+  // (the volume-confirmation gate below) - its rsi/macd/bollinger fields
+  // are simply not read anymore.
   const snap = snapshot(candles);
   if (!snap) return;
 
-  const triggers = checkTriggers(snap, strictest);
-  // A single indicator alone (RSI oversold on its own, say) is too easy to
-  // hit on noise - real conviction is when independent signals agree.
-  // Below this, it's not treated as a setup worth screening at all, let
-  // alone buying.
-  if (triggers.length < MIN_AGREEING_SIGNALS) return;
+  const of = orderFlow(candles, ORDER_FLOW_LOOKBACK_CANDLES);
+  const liqTrendPct = liquidityTrend(candles, LIQUIDITY_TREND_LOOKBACK_CANDLES);
+  const dayAgoForBuyers = Math.floor(Date.now() / 1000) - BUYER_WINDOW_MIN * 60;
+  const newBuyers = tokenTraders.count(w.token, dayAgoForBuyers, "buy");
+  const breakout = donchianBreakout(candles, BREAKOUT_LOOKBACK_CANDLES);
+  const readout: SignalReadout = {
+    buyRatio: of?.buyRatio ?? null, orderFlowTrades: of?.totalTrades ?? 0,
+    liqTrendPct, newBuyers,
+    brokeOut: breakout?.brokeOut ?? false, pctAboveHigh: breakout?.pctAboveHigh ?? null,
+  };
+
+  const hits = checkSignals(readout, strictest);
+  // Any enabled requirement failing means this isn't a setup worth
+  // screening at all, let alone buying.
+  if (hits === null) return;
 
   const first = candles[0]!;
   const last = candles[candles.length - 1]!;
   if (last.liq < strictest.minLiquidityPls) return;
 
-  // Confirmation gate, not an alternative trigger: an RSI/MACD/Bollinger
-  // reading on a token nobody is actually trading isn't trustworthy on its
-  // own. Skipped entirely (not recorded) rather than shown as a rejected
+  // Confirmation gate, not an alternative trigger: real trading volume
+  // behind the move, on top of the order-flow/liquidity/breakout signals
+  // above. Skipped entirely (not recorded) rather than shown as a rejected
   // opportunity - unlike the liquidity-pull check below, "not enough volume
   // yet" isn't itself an interesting finding, it just means try again later.
   if (strictest.requireVolumeConfirmation && (snap.volRatio === null || snap.volRatio < strictest.minVolumeRatio)) return;
 
   // Liveness gate: is this token actually being traded, at all, right now -
-  // as opposed to sitting still with one stale trade from days ago that
-  // happens to leave the price looking "oversold" with nothing behind it.
-  // A token this young can't have a full 24h of coverage yet, so this
-  // extrapolates from whatever's actually available in the last day rather
-  // than requiring a complete window - MIN_CANDLES above already guarantees
-  // at least 9 hours of real data by this point, enough for a reasonable
-  // estimate without making every freshly-watched token wait a full day.
-  // Computed regardless of whether the shared strictest.minTrades24h is 0 -
-  // dispatch() below needs the real number to re-check each vault's own
-  // floor individually, not just the shared loosest one.
+  // as opposed to sitting still with one stale trade from days ago. A token
+  // this young can't have a full 24h of coverage yet, so this extrapolates
+  // from whatever's actually available in the last day rather than
+  // requiring a complete window - MIN_CANDLES above already guarantees at
+  // least 4 hours of real data by this point. Computed regardless of
+  // whether the shared strictest.minTrades24h is 0 - dispatch() below needs
+  // the real number to re-check each vault's own floor individually, not
+  // just the shared loosest one.
   const dayAgo = Math.floor(Date.now() / 1000) - 24 * 3600;
   const recentCandles = candles.filter((c) => c.ts >= dayAgo);
   const tradesRecent = recentCandles.reduce((sum, c) => sum + c.trades, 0);
@@ -353,7 +406,7 @@ async function evaluateWatchedToken(
 
   // Hard gate, not configurable - the exact trap this bot exists to avoid.
   // Recorded and shown rather than silently dropped, same as a failed
-  // screen: seeing "this looked oversold but liquidity looks pulled" is
+  // screen: seeing "this looked strong but liquidity looks pulled" is
   // itself useful, not noise.
   if (liquidityDropIsSuspicious(first.close, last.close, first.liq, last.liq)) {
     const id = opportunities.insert({
@@ -361,30 +414,30 @@ async function evaluateWatchedToken(
       liqGrowthPct: ((last.liq - first.liq) / first.liq) * 100, liqPls: last.liq,
       buyTaxBps: null, sellTaxBps: null, lpLockedPct: null, ownerRenounced: null, sellable: false,
       verdict: "fail", reason: "liquidity fell far more than the price move explains - looks like LP was pulled, not organic selling",
-      narrative: `${w.symbol} looks oversold (${triggers.join("; ")}) but its liquidity dropped more than the price move alone would explain - this looks like a liquidity pull, not a real dip. Skipped.`,
-      source: "hunter", rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
-      signalCount: triggers.length,
+      narrative: `${w.symbol} showed real strength (${hits.join("; ") || "passed every enabled requirement"}) but its liquidity dropped more than the price move alone would explain - this looks like a liquidity pull, not real momentum. Skipped.`,
+      source: "hunter", signalCount: hits.length,
+      buyRatio: readout.buyRatio, liqTrendPct: readout.liqTrendPct, newBuyers: readout.newBuyers, brokeOut: readout.brokeOut,
     });
-    log("warn", "hunter", `Opportunity #${id}: ${w.symbol} rejected - liquidity pull signature, not a real dip`);
+    log("warn", "hunter", `Opportunity #${id}: ${w.symbol} rejected - liquidity pull signature, not real momentum`);
     return;
   }
 
   const s = await screenOpportunity(w.token, w.pair, strictest);
 
-  const narrative = buildNarrative(w.symbol, triggers, s, snap.volRatio);
+  const narrative = buildNarrative(w.symbol, hits, s, snap.volRatio);
   const id = opportunities.insert({
     token: w.token, priceMovePct: ((last.close - first.close) / first.close) * 100,
     liqGrowthPct: ((last.liq - first.liq) / first.liq) * 100, liqPls: last.liq,
     buyTaxBps: s.buyTaxBps, sellTaxBps: s.sellTaxBps, lpLockedPct: s.lpLockedPct,
     ownerRenounced: s.ownerRenounced, sellable: s.sellable, verdict: s.verdict, reason: s.reason, narrative,
-    source: "hunter", rsi: snap.rsi, macdHistogram: snap.macd?.histogram ?? null, bollingerPercentB: snap.bollinger?.percentB ?? null,
-    aiRecommend: null, aiConfidence: null, aiReasoning: null, aiSuggestedAmountPls: null,
-    atrPct: snap.atrPct, volRatio: snap.volRatio, signalCount: triggers.length,
+    source: "hunter",
+    atrPct: snap.atrPct, volRatio: snap.volRatio, signalCount: hits.length,
+    buyRatio: readout.buyRatio, liqTrendPct: readout.liqTrendPct, newBuyers: readout.newBuyers, brokeOut: readout.brokeOut,
   });
   log("info", "hunter", `Opportunity #${id}: ${narrative}`);
 
   if (s.verdict !== "pass") return;
-  await dispatch(id, w.token, s, snap.atrPct, candidates, last.liq, trades24hEquivalent, uniqueTraders24h, snap);
+  await dispatch(id, w.token, s, snap.atrPct, snap.volRatio, candidates, last.liq, trades24hEquivalent, uniqueTraders24h, readout);
 }
 
 const AUTO_REBUY_BATCH_LIMIT = 5;
@@ -459,7 +512,7 @@ async function considerAutoRebuys(): Promise<void> {
  * original position closed. Mirrors executeHunterBuy's allocation/holding-
  * cap checks and how it opens the resulting position, since this is still
  * an ordinary Hunter buy in every way that matters - it just wasn't found
- * through the normal RSI/MACD/Bollinger detection pass.
+ * through the normal order-flow/liquidity/breakout detection pass.
  */
 async function checkPendingRebuys(): Promise<void> {
   const pending = pendingRebuys.all();
@@ -518,6 +571,8 @@ async function checkPendingRebuys(): Promise<void> {
         tpPct: H.takeProfitPct,
         slPct,
         trailPct: H.trailingStopPct,
+        tightTrailPct: H.tightTrailPct,
+        trailWidenAtPct: H.trailWidenAtPct,
         timeExitMin: H.timeExitMin,
         sourceTxHash: res.txHash,
       });
@@ -552,7 +607,7 @@ async function processHunterBuyRequests(candidates: VaultRecord[]): Promise<void
 }
 
 export async function tick(): Promise<void> {
-  // Runs regardless of whether Hunter is enabled anywhere right now
+  // Runs regardless of whether Hunter is enabled anywhere right now - same
   // reasoning as the reflection passes above - an already-queued rebuy (or
   // one from a position that just closed) shouldn't stall just because
   // detection is skipped this tick.
@@ -563,20 +618,26 @@ export async function tick(): Promise<void> {
   if (candidates.length === 0) return;
 
   // Same "screen once with the loosest bar any subscriber uses" shape
-  // discovery.ts and launch.ts use for their own per-token checks.
-  const rsiSubs = candidates.filter((c) => c.hunter.requireRsi);
-  const bollSubs = candidates.filter((c) => c.hunter.requireBollinger);
+  // discovery.ts and launch.ts use for their own per-token checks. All four
+  // new requirement fields are ">= threshold" checks, so the loosest shared
+  // bar for each is the SMALLEST threshold among subscribers who require it
+  // at all (unlike the old rsiOversold/bollingerPercentBMax, which were
+  // "<= threshold" checks and needed the loosest bar to be the LARGEST).
+  const buyPressureSubs = candidates.filter((c) => c.hunter.requireBuyPressure);
+  const liqGrowthSubs = candidates.filter((c) => c.hunter.requireLiquidityGrowth);
+  const buyerGrowthSubs = candidates.filter((c) => c.hunter.requireBuyerGrowth);
   const volSubs = candidates.filter((c) => c.hunter.requireVolumeConfirmation);
   const strictest: Strictest = {
-    requireRsi: rsiSubs.length > 0,
-    rsiOversold: rsiSubs.length ? Math.max(...rsiSubs.map((c) => c.hunter.rsiOversold)) : 0,
-    requireMacdCross: candidates.some((c) => c.hunter.requireMacdCross),
-    requireBollinger: bollSubs.length > 0,
-    bollingerPercentBMax: bollSubs.length ? Math.max(...bollSubs.map((c) => c.hunter.bollingerPercentBMax)) : 0,
+    requireBuyPressure: buyPressureSubs.length > 0,
+    minBuyPressureRatio: buyPressureSubs.length ? Math.min(...buyPressureSubs.map((c) => c.hunter.minBuyPressureRatio)) : 0,
+    requireLiquidityGrowth: liqGrowthSubs.length > 0,
+    minLiquidityGrowthPct: liqGrowthSubs.length ? Math.min(...liqGrowthSubs.map((c) => c.hunter.minLiquidityGrowthPct)) : 0,
+    requireBuyerGrowth: buyerGrowthSubs.length > 0,
+    minNewBuyers: buyerGrowthSubs.length ? Math.min(...buyerGrowthSubs.map((c) => c.hunter.minNewBuyers)) : 0,
+    requireBreakout: candidates.some((c) => c.hunter.requireBreakout),
     requireVolumeConfirmation: volSubs.length > 0,
     // Lower = easier to pass, so the loosest shared bar is the SMALLEST
-    // minVolumeRatio among subscribers - the opposite direction from
-    // bollingerPercentBMax above, where a bigger number is the looser one.
+    // minVolumeRatio among subscribers.
     minVolumeRatio: volSubs.length ? Math.min(...volSubs.map((c) => c.hunter.minVolumeRatio)) : 0,
     minLiquidityPls: Math.min(...candidates.map((c) => c.hunter.minLiquidityPls)),
     minTrades24h: Math.min(...candidates.map((c) => c.hunter.minTrades24h)),

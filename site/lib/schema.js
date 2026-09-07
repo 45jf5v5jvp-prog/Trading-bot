@@ -47,46 +47,48 @@ const QUICK_SETUP_STYLE_KEYS = ["frequent", "balanced", "patient"];
 const QUICK_SETUP_RISK_KEYS = ["tight", "moderate", "loose"];
 const QUICK_SETUP_SIZE_KEYS = ["small", "medium", "large"];
 
-// Hunter Bot: hunts RSI/MACD/Bollinger dip-buying setups across every
+// Hunter Bot: hunts real order-flow/liquidity-flow setups across every
 // watched token, trading a dedicated slice of the vault (allocatedPls)
 // rather than the whole balance - see keeper/src/registry.ts's
 // HunterConfig comment for the full reasoning, including the
 // liquidity-coherence check (always on, not a setting here) that catches a
-// price crash caused by a liquidity pull before it's mistaken for a dip.
+// price crash caused by a liquidity pull before it's mistaken for real
+// momentum. Detects off buy/sell trade pressure, liquidity growth, new-buyer
+// growth, and a breakout above its own recent high - not RSI/MACD/Bollinger,
+// which are all derived from price alone and don't diversify against each
+// other the way they look like they do.
 const DEFAULT_HUNTER = {
   enabled: false, mode: "notify", allocatedPls: 0, allocatedUnlimited: false, allocatedResetDaily: false,
-  maxPerTradePls: 0, maxPerDay: 3,
-  requireRsi: true, rsiOversold: 30, requireMacdCross: true,
-  requireBollinger: true, bollingerPercentBMax: 0.15,
-  minLiquidityPls: CHAIN.minLiquidityDefault, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
+  maxPerTradePls: 0, maxPerDay: 20,
+  requireBuyPressure: true, minBuyPressureRatio: 0.6,
+  requireLiquidityGrowth: true, minLiquidityGrowthPct: 0,
+  requireBuyerGrowth: true, minNewBuyers: 3,
+  requireBreakout: true,
+  // Higher than Launch/Discovery's shared CHAIN.minLiquidityDefault floor,
+  // deliberately not that constant - Hunter favors higher-volume tokens on
+  // purpose (thinner tokens are where noisy, easily-faked signals live),
+  // without raising the bar for the other two bots that don't need it.
+  minLiquidityPls: 5_000_000, maxBuyTaxBps: 1000, maxSellTaxBps: 1000,
   requireLpLock: true, requireOwnerRenounced: false,
-  takeProfitPct: 40, stopLossPct: 25, useAtrStop: false, atrStopMultiplier: 3,
-  // 2880 (48h) - Hunter is a day-trading bot; a position that never hits
-  // take-profit/stop-loss/trailing still gets force-closed inside a
-  // 24-48 hour window instead of sitting open indefinitely.
-  trailingStopPct: 0, timeExitMin: 2880,
-  // requireVolumeConfirmation was false by default - turned on for the same
-  // 2026-08-24 reason as minTrades24h just below (see its comment): an
-  // oversold/overbought reading on a token nobody is actually trading isn't
-  // much of a signal. This checks a volume SURGE vs. the token's own
-  // baseline; minTrades24h checks a raw trade COUNT - different things,
-  // meant to work together.
+  // 0 - no hard take-profit ceiling; the tiered trail below does the exit
+  // work instead, letting a real move run rather than force-selling the
+  // moment one fixed number is crossed.
+  takeProfitPct: 0,
+  stopLossPct: 15, useAtrStop: false, atrStopMultiplier: 3,
+  // The tiered trail this bot is built around - see keeper/src/portfolio.ts's
+  // sellSignal. Below a 6% peak, a tight 2.5% trail locks in most of a quick
+  // pump that stalls early; past 6%, the wider 6% trail takes over so a real
+  // move gets room to run toward a bigger exit.
+  trailingStopPct: 6, tightTrailPct: 2.5, trailWidenAtPct: 6,
+  // 360 (6h) - this bot is meant to cycle through several trades a day, not
+  // hold for days; a position still flat after 6 hours gets resolved so the
+  // capital frees up for the next setup.
+  timeExitMin: 360,
   requireVolumeConfirmation: true, minVolumeRatio: 1.5,
-  // Was 0 (off) - raised after live results (2026-08-24) showed a vault
-  // left at the old default kept buying tokens that then sat for up to 16
-  // hours with no further trades, the same thin trading behind a run of
-  // losing "AI exit: RSI deeply overbought" closes - see keeper/src/
-  // hunter.ts's DEFAULT_HUNTER/MIN_AGREEING_SIGNALS comments. A real floor
-  // by default, not a strict one - still fully owner-changeable.
   minTrades24h: 30,
-  // New (2026-08-24) - catches what neither trade count nor volume ratio
-  // can: one wallet trading with itself repeatedly to fake real activity.
-  // Counts DISTINCT wallets, not trades - see keeper/src/registry.ts's
-  // minUniqueTraders24h comment. 5 is a low bar; a genuinely traded token
-  // clears it easily, a wash-traded one usually can't clear it at all.
   minUniqueTraders24h: 5,
   autoRebuyOnExit: false, autoRebuyDipPct: 15, autoRebuyExpireHours: 48,
-  maxOpenPositions: 0,
+  maxOpenPositions: 15,
 };
 
 function isFiniteNumber(v) {
@@ -230,16 +232,22 @@ function normalizeHunter(h) {
   if (merged.mode !== "notify" && merged.mode !== "autoBuy")
     throw new Error(`hunter.mode must be "notify" or "autoBuy"`);
   for (const field of [
-    "allocatedPls", "maxPerTradePls", "maxPerDay", "rsiOversold", "minLiquidityPls",
-    "takeProfitPct", "stopLossPct", "trailingStopPct", "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
-    "atrStopMultiplier", "minVolumeRatio", "minTrades24h", "minUniqueTraders24h",
+    "allocatedPls", "maxPerTradePls", "maxPerDay", "minLiquidityPls",
+    "takeProfitPct", "stopLossPct", "trailingStopPct", "tightTrailPct", "trailWidenAtPct",
+    "timeExitMin", "maxBuyTaxBps", "maxSellTaxBps",
+    "atrStopMultiplier", "minVolumeRatio", "minTrades24h", "minUniqueTraders24h", "minNewBuyers",
     "autoRebuyDipPct", "autoRebuyExpireHours", "maxOpenPositions",
   ]) {
     if (!isFiniteNumber(merged[field]) || merged[field] < 0)
       throw new Error(`hunter.${field} must be a non-negative number`);
   }
-  if (!isFiniteNumber(merged.bollingerPercentBMax) || merged.bollingerPercentBMax < 0 || merged.bollingerPercentBMax > 1)
-    throw new Error("hunter.bollingerPercentBMax must be between 0 and 1");
+  if (!isFiniteNumber(merged.minBuyPressureRatio) || merged.minBuyPressureRatio < 0 || merged.minBuyPressureRatio > 1)
+    throw new Error("hunter.minBuyPressureRatio must be between 0 and 1");
+  // Deliberately not restricted to non-negative like the fields above - a
+  // small tolerated shrink (e.g. -3) is a legitimate looser setting, not
+  // just "growth or nothing."
+  if (!isFiniteNumber(merged.minLiquidityGrowthPct))
+    throw new Error("hunter.minLiquidityGrowthPct must be a number");
   if (merged.allocatedUnlimited && merged.allocatedResetDaily)
     throw new Error("hunter.allocatedUnlimited and hunter.allocatedResetDaily cannot both be true - pick one");
   if (!merged.allocatedUnlimited && merged.maxPerTradePls > merged.allocatedPls && merged.allocatedPls > 0)
@@ -256,11 +264,13 @@ function normalizeHunter(h) {
     allocatedResetDaily: Boolean(merged.allocatedResetDaily),
     maxPerTradePls: merged.maxPerTradePls,
     maxPerDay: merged.maxPerDay,
-    requireRsi: Boolean(merged.requireRsi),
-    rsiOversold: merged.rsiOversold,
-    requireMacdCross: Boolean(merged.requireMacdCross),
-    requireBollinger: Boolean(merged.requireBollinger),
-    bollingerPercentBMax: merged.bollingerPercentBMax,
+    requireBuyPressure: Boolean(merged.requireBuyPressure),
+    minBuyPressureRatio: merged.minBuyPressureRatio,
+    requireLiquidityGrowth: Boolean(merged.requireLiquidityGrowth),
+    minLiquidityGrowthPct: merged.minLiquidityGrowthPct,
+    requireBuyerGrowth: Boolean(merged.requireBuyerGrowth),
+    minNewBuyers: merged.minNewBuyers,
+    requireBreakout: Boolean(merged.requireBreakout),
     minLiquidityPls: merged.minLiquidityPls,
     maxBuyTaxBps: merged.maxBuyTaxBps,
     maxSellTaxBps: merged.maxSellTaxBps,
@@ -271,6 +281,8 @@ function normalizeHunter(h) {
     useAtrStop: Boolean(merged.useAtrStop),
     atrStopMultiplier: merged.atrStopMultiplier,
     trailingStopPct: merged.trailingStopPct,
+    tightTrailPct: merged.tightTrailPct,
+    trailWidenAtPct: merged.trailWidenAtPct,
     timeExitMin: merged.timeExitMin,
     requireVolumeConfirmation: Boolean(merged.requireVolumeConfirmation),
     minVolumeRatio: merged.minVolumeRatio,

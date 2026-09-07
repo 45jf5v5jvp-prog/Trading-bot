@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { toCandles } from "../src/candles.js";
-import { rsi, macd, bollinger, atr, volumeConfirmation, snapshot, liquidityDropIsSuspicious, looksLikeStablecoin } from "../src/indicators.js";
+import { rsi, macd, bollinger, atr, volumeConfirmation, snapshot, liquidityDropIsSuspicious, looksLikeStablecoin, orderFlow, liquidityTrend, donchianBreakout } from "../src/indicators.js";
+
+/** A minimal Candle fixture - only the fields orderFlow/liquidityTrend/
+ * donchianBreakout actually read need real values; the rest are filler. */
+function candle(over: Partial<{ ts: number; high: number; low: number; close: number; liq: number; buyTrades: number; sellTrades: number }>) {
+  return {
+    ts: 0, open: 1, high: 1, low: 1, close: 1, liq: 1000, vol: 0, trades: 0,
+    buyVol: 0, sellVol: 0, buyTrades: 0, sellTrades: 0,
+    ...over,
+  };
+}
 
 test("toCandles buckets ticks by interval and tracks high/low/open/close", () => {
   const rows = [
@@ -231,4 +241,95 @@ test("looksLikeStablecoin treats unusable inputs as false, never a guessed posit
   assert.equal(looksLikeStablecoin([], PLS_USD), false);
   assert.equal(looksLikeStablecoin([ONE_DOLLAR_PLS], 0), false);
   assert.equal(looksLikeStablecoin([0, ONE_DOLLAR_PLS], PLS_USD), false);
+});
+
+test("orderFlow is null for an empty candle set", () => {
+  assert.equal(orderFlow([], 4), null);
+});
+
+test("orderFlow's buyRatio is null when there's no trade data in the window, never a guessed 0 or 1", () => {
+  const candles = [candle({}), candle({}), candle({})];
+  const of = orderFlow(candles, 4);
+  assert.ok(of);
+  assert.equal(of!.buyRatio, null);
+  assert.equal(of!.totalTrades, 0);
+});
+
+test("orderFlow sums buy/sell trades across the trailing window and computes the ratio", () => {
+  const candles = [
+    candle({ buyTrades: 100, sellTrades: 100 }), // outside the 2-candle window below
+    candle({ buyTrades: 6, sellTrades: 2 }),
+    candle({ buyTrades: 3, sellTrades: 1 }),
+  ];
+  const of = orderFlow(candles, 2);
+  assert.ok(of);
+  assert.equal(of!.buyTrades, 9);
+  assert.equal(of!.sellTrades, 3);
+  assert.equal(of!.totalTrades, 12);
+  assert.equal(of!.buyRatio, 0.75);
+});
+
+test("orderFlow clamps the window to however many candles actually exist", () => {
+  const candles = [candle({ buyTrades: 4, sellTrades: 1 })];
+  const of = orderFlow(candles, 10);
+  assert.ok(of);
+  assert.equal(of!.totalTrades, 5);
+});
+
+test("liquidityTrend is null without enough candles to compare against", () => {
+  const candles = [candle({}), candle({}), candle({})];
+  assert.equal(liquidityTrend(candles, 4), null);
+});
+
+test("liquidityTrend reports positive growth when liquidity rose over the window", () => {
+  const candles = [candle({ liq: 1_000_000 }), candle({}), candle({}), candle({}), candle({ liq: 1_200_000 })];
+  const pct = liquidityTrend(candles, 4);
+  assert.ok(pct !== null);
+  assert.ok(Math.abs(pct! - 20) < 0.001);
+});
+
+test("liquidityTrend reports negative growth when liquidity fell over the window", () => {
+  const candles = [candle({ liq: 1_000_000 }), candle({}), candle({}), candle({}), candle({ liq: 800_000 })];
+  const pct = liquidityTrend(candles, 4);
+  assert.ok(pct !== null);
+  assert.ok(Math.abs(pct! - -20) < 0.001);
+});
+
+test("liquidityTrend is null rather than dividing by zero when the earlier candle had no liquidity", () => {
+  const candles = [candle({ liq: 0 }), candle({}), candle({}), candle({}), candle({ liq: 500 })];
+  assert.equal(liquidityTrend(candles, 4), null);
+});
+
+test("donchianBreakout is null without enough candles to form a channel", () => {
+  const candles = [candle({}), candle({})];
+  assert.equal(donchianBreakout(candles, 8), null);
+});
+
+test("donchianBreakout is true when the latest close is above the trailing window's high", () => {
+  const window = Array.from({ length: 8 }, () => candle({ high: 10, close: 9 }));
+  const candles = [...window, candle({ close: 11 })]; // new high above the 10 ceiling
+  const b = donchianBreakout(candles, 8);
+  assert.ok(b);
+  assert.equal(b!.brokeOut, true);
+  assert.equal(b!.recentHigh, 10);
+  assert.ok(Math.abs(b!.pctAboveHigh - 10) < 0.001); // 11 is 10% above 10
+});
+
+test("donchianBreakout is false when the latest close hasn't cleared the trailing window's high", () => {
+  const window = Array.from({ length: 8 }, () => candle({ high: 10, close: 9 }));
+  const candles = [...window, candle({ close: 9.5 })]; // still under the 10 ceiling
+  const b = donchianBreakout(candles, 8);
+  assert.ok(b);
+  assert.equal(b!.brokeOut, false);
+});
+
+test("donchianBreakout excludes the current candle from its own high - a token can't 'break out' against itself", () => {
+  // If the current candle's own high were included in the window, this
+  // would never register as a breakout no matter how strong the close.
+  const window = Array.from({ length: 8 }, () => candle({ high: 10, close: 9 }));
+  const candles = [...window, candle({ high: 50, close: 11 })];
+  const b = donchianBreakout(candles, 8);
+  assert.ok(b);
+  assert.equal(b!.brokeOut, true);
+  assert.equal(b!.recentHigh, 10);
 });

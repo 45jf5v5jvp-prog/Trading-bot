@@ -305,11 +305,14 @@ async function evaluateWatchedToken(
 // price check below.
 const STALE_TTL_MIN = 120;
 // How far price can move away from where it was AT DETECTION before the
-// original signal no longer describes reality. Direction depends on the
-// strategy: Discovery chases a breakout already in progress, so a pullback
-// means the move it reacted to has failed. Hunter buys an oversold dip, so
-// the equivalent "already passed" signal is the opposite direction - price
-// has already bounced back up, so it is no longer oversold.
+// original signal no longer describes reality. Both bots now chase
+// confirmed momentum already in progress - Discovery on price+liquidity
+// climbing together, Hunter on buy pressure/liquidity growth/a breakout -
+// so the same direction applies to both: a pullback since detection means
+// the move either bot reacted to has stalled or reversed. (Hunter used to
+// buy oversold dips, where the equivalent staleness was the opposite
+// direction - price bouncing back up meant the dip was gone. That's no
+// longer how Hunter trades.)
 const STALE_PRICE_MOVE_PCT = 15;
 
 /**
@@ -340,9 +343,7 @@ async function refreshStaleness(): Promise<void> {
     if (!latest || latest.price <= 0) continue;
 
     const movePctSinceDetection = ((latest.price - c.priceAtDetection) / c.priceAtDetection) * 100;
-    if (c.source === "hunter" && movePctSinceDetection >= STALE_PRICE_MOVE_PCT) {
-      opportunities.markStale(c.id, `Price is already up ${movePctSinceDetection.toFixed(0)}% since this was flagged as oversold - it's no longer the same dip.`);
-    } else if (c.source !== "hunter" && movePctSinceDetection <= -STALE_PRICE_MOVE_PCT) {
+    if (movePctSinceDetection <= -STALE_PRICE_MOVE_PCT) {
       opportunities.markStale(c.id, `Price has pulled back ${Math.abs(movePctSinceDetection).toFixed(0)}% since this was flagged - the move it reacted to has since reversed.`);
     }
   }

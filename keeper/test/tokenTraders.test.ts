@@ -24,42 +24,52 @@ test("count is 0 for a token with no recorded trades at all", () => {
 });
 
 test("count reflects DISTINCT wallets, not raw rows - the same wallet trading many times still counts once", () => {
-  tokenTraders.record(TOKEN, WALLET_1, NOW - 100);
-  tokenTraders.record(TOKEN, WALLET_1, NOW - 90);
-  tokenTraders.record(TOKEN, WALLET_1, NOW - 80);
+  tokenTraders.record(TOKEN, WALLET_1, NOW - 100, "buy");
+  tokenTraders.record(TOKEN, WALLET_1, NOW - 90, "buy");
+  tokenTraders.record(TOKEN, WALLET_1, NOW - 80, "buy");
   // 3 rows, same wallet - a raw trade count would see 3, this must see 1.
   assert.equal(tokenTraders.count(TOKEN, DAY_AGO), 1);
 });
 
 test("count grows as genuinely different wallets trade", () => {
-  tokenTraders.record(TOKEN, WALLET_2, NOW - 70);
-  tokenTraders.record(TOKEN, WALLET_3, NOW - 60);
+  tokenTraders.record(TOKEN, WALLET_2, NOW - 70, "buy");
+  tokenTraders.record(TOKEN, WALLET_3, NOW - 60, "buy");
   assert.equal(tokenTraders.count(TOKEN, DAY_AGO), 3);
 });
 
 test("record is case-insensitive on both token and address, same convention as every other token/address lookup here", () => {
   assert.equal(tokenTraders.count(TOKEN.toUpperCase(), DAY_AGO), 3);
-  tokenTraders.record(TOKEN, WALLET_1.toUpperCase(), NOW - 50);
+  tokenTraders.record(TOKEN, WALLET_1.toUpperCase(), NOW - 50, "buy");
   // Same wallet, different case - still just the 3 distinct wallets.
   assert.equal(tokenTraders.count(TOKEN, DAY_AGO), 3);
 });
 
 test("count is scoped to the token asked about - another token's traders don't leak in", () => {
-  tokenTraders.record(OTHER_TOKEN, WALLET_1, NOW - 40);
+  tokenTraders.record(OTHER_TOKEN, WALLET_1, NOW - 40, "buy");
   assert.equal(tokenTraders.count(OTHER_TOKEN, DAY_AGO), 1);
   assert.equal(tokenTraders.count(TOKEN, DAY_AGO), 3);
 });
 
 test("count excludes rows older than the requested window", () => {
   const oldToken = "0x" + "c".repeat(40);
-  tokenTraders.record(oldToken, WALLET_1, NOW - 2 * 86400); // 2 days ago
+  tokenTraders.record(oldToken, WALLET_1, NOW - 2 * 86400, "buy"); // 2 days ago
   assert.equal(tokenTraders.count(oldToken, DAY_AGO), 0);
 });
 
 test("prune removes rows before the cutoff, leaving newer ones intact", () => {
   const pruneToken = "0x" + "d".repeat(40);
-  tokenTraders.record(pruneToken, WALLET_1, NOW - 3 * 86400); // old, should be pruned
-  tokenTraders.record(pruneToken, WALLET_2, NOW - 100); // recent, should survive
+  tokenTraders.record(pruneToken, WALLET_1, NOW - 3 * 86400, "buy"); // old, should be pruned
+  tokenTraders.record(pruneToken, WALLET_2, NOW - 100, "buy"); // recent, should survive
   tokenTraders.prune(NOW - 2 * 86400);
   assert.equal(tokenTraders.count(pruneToken, NOW - 30 * 86400), 1);
+});
+
+test("count(side) narrows to only that side's distinct wallets", () => {
+  const t = "0x" + "e".repeat(40);
+  tokenTraders.record(t, WALLET_1, NOW - 100, "buy");
+  tokenTraders.record(t, WALLET_2, NOW - 90, "sell");
+  tokenTraders.record(t, WALLET_3, NOW - 80, "sell");
+  assert.equal(tokenTraders.count(t, DAY_AGO, "buy"), 1);
+  assert.equal(tokenTraders.count(t, DAY_AGO, "sell"), 2);
+  assert.equal(tokenTraders.count(t, DAY_AGO), 3); // unfiltered still sees all
 });

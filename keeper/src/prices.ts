@@ -121,11 +121,19 @@ export async function scanSwapVolume(): Promise<void> {
         try { parsed = SWAP_IFACE.parseLog(l); } catch { continue; }
         if (!parsed) continue;
         const { amount0In, amount1In, amount0Out, amount1Out, to } = parsed.args;
-        const wplsAmount: bigint = hit.plsFirst
-          ? (amount0In as bigint) + (amount0Out as bigint)
-          : (amount1In as bigint) + (amount1Out as bigint);
+        // WPLS IN to the pair means someone paid WPLS for the token - a buy.
+        // WPLS OUT means someone sold the token for WPLS. A real swap only
+        // ever has one side non-zero (the pair enforces one direction per
+        // call), so this in/out split is a clean buy/sell classification,
+        // not a guess - see Hunter Bot's order-flow signals (indicators.ts's
+        // orderFlow), which need to know which side a trade was on, not
+        // just that a trade happened.
+        const wplsIn: bigint = hit.plsFirst ? (amount0In as bigint) : (amount1In as bigint);
+        const wplsOut: bigint = hit.plsFirst ? (amount0Out as bigint) : (amount1Out as bigint);
+        const wplsAmount = wplsIn + wplsOut;
         if (wplsAmount <= 0n) continue;
-        volumeAccum.add(hit.token, Number(formatEther(wplsAmount)));
+        const side: "buy" | "sell" = wplsIn > 0n ? "buy" : "sell";
+        volumeAccum.add(hit.token, Number(formatEther(wplsAmount)), side);
         // "to" is the swap's real output recipient - the router forwards
         // each hop's output to the actual next address, and these are
         // single-pair token/WPLS swaps (not multi-hop), so it's the real
@@ -137,7 +145,7 @@ export async function scanSwapVolume(): Promise<void> {
         // cycle (see pollAll's own single `ts`), not the swap's real block
         // time - consistent with the rest of this file, and avoids an
         // extra per-log RPC call just for a timestamp.
-        tokenTraders.record(hit.token, to as string, Math.floor(Date.now() / 1000));
+        tokenTraders.record(hit.token, to as string, Math.floor(Date.now() / 1000), side);
         totalMatched++;
       }
       meta.set("last_swap_block", String(chunkEnd));
@@ -161,7 +169,10 @@ export async function pollAll(): Promise<void> {
     const r = await readPair(w.pair, w.decimals, plsFirst);
     if (!r) continue;
     const drained = volumeAccum.drain(w.token);
-    prices.insert.run(w.token, ts, r.price, r.liq, drained.vol, drained.trades);
+    prices.insert.run(
+      w.token, ts, r.price, r.liq, drained.vol, drained.trades,
+      drained.buyVol, drained.sellVol, drained.buyTrades, drained.sellTrades,
+    );
     ok++;
   }
   log("debug", "prices", `Sampled ${ok}/${list.length} tokens`);

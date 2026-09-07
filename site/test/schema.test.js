@@ -51,14 +51,18 @@ test("rejects a negative discovery threshold", () => {
   assert.throws(() => normalizeConfig({ discovery: { minPriceMovePct: -5 } }), /minPriceMovePct/);
 });
 
-test("hunter settings default to off, mechanical-only, with a 48h day-trading time exit", () => {
+test("hunter settings default to off, mechanical-only, with a 6h day-trading time exit", () => {
   const c = emptyConfig();
   assert.equal(c.hunter.enabled, false);
   assert.equal(c.hunter.mode, "notify");
-  assert.equal(c.hunter.timeExitMin, 2880);
+  assert.equal(c.hunter.timeExitMin, 360);
   assert.equal(c.hunter.exitMode, undefined);
   assert.equal(c.hunter.requireAiApproval, undefined);
   assert.equal(c.hunter.minAiConfidence, undefined);
+  assert.equal(c.hunter.requireBuyPressure, true);
+  assert.equal(c.hunter.requireLiquidityGrowth, true);
+  assert.equal(c.hunter.requireBuyerGrowth, true);
+  assert.equal(c.hunter.requireBreakout, true);
 });
 
 test("hunter settings fill in defaults for missing fields, and validate the rest", () => {
@@ -67,7 +71,7 @@ test("hunter settings fill in defaults for missing fields, and validate the rest
   assert.equal(out.hunter.mode, "autoBuy");
   assert.equal(out.hunter.allocatedPls, 50000);
   assert.equal(out.hunter.maxPerTradePls, 5000);
-  assert.equal(out.hunter.rsiOversold, 30); // default filled in
+  assert.equal(out.hunter.minBuyPressureRatio, 0.6); // default filled in
   assert.equal(out.hunter.requireLpLock, true); // default filled in
 });
 
@@ -76,12 +80,21 @@ test("rejects a hunter mode that is not notify or autoBuy", () => {
 });
 
 test("rejects a negative hunter threshold", () => {
-  assert.throws(() => normalizeConfig({ hunter: { rsiOversold: -5 } }), /rsiOversold/);
+  assert.throws(() => normalizeConfig({ hunter: { minNewBuyers: -5 } }), /minNewBuyers/);
 });
 
-test("rejects a hunter bollingerPercentBMax outside 0-1", () => {
-  assert.throws(() => normalizeConfig({ hunter: { bollingerPercentBMax: 1.5 } }), /bollingerPercentBMax/);
-  assert.throws(() => normalizeConfig({ hunter: { bollingerPercentBMax: -0.1 } }), /bollingerPercentBMax/);
+test("rejects a hunter minBuyPressureRatio outside 0-1", () => {
+  assert.throws(() => normalizeConfig({ hunter: { minBuyPressureRatio: 1.5 } }), /minBuyPressureRatio/);
+  assert.throws(() => normalizeConfig({ hunter: { minBuyPressureRatio: -0.1 } }), /minBuyPressureRatio/);
+});
+
+test("hunter minLiquidityGrowthPct may be negative - a tolerated small shrink is a legitimate looser setting", () => {
+  const out = normalizeConfig({ hunter: { minLiquidityGrowthPct: -3 } });
+  assert.equal(out.hunter.minLiquidityGrowthPct, -3);
+});
+
+test("rejects a non-numeric hunter minLiquidityGrowthPct", () => {
+  assert.throws(() => normalizeConfig({ hunter: { minLiquidityGrowthPct: "a lot" } }), /minLiquidityGrowthPct/);
 });
 
 test("rejects a hunter maxPerTradePls larger than its own allocatedPls", () => {

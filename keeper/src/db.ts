@@ -22,10 +22,20 @@ CREATE INDEX IF NOT EXISTS prices_token_ts ON prices(token, ts DESC);
 -- trade while otherwise dead, or modest volume while genuinely trading
 -- often: trade count, not $ volume, is what answers "is this actually being
 -- traded" without needing a per-token-scale dollar guess.
+-- buy_vol/sell_vol/buy_trades/sell_trades split the same totals by which
+-- side of the swap WPLS was on (WPLS in = a buy, WPLS out = a sell) - see
+-- prices.ts's scanSwapVolume. Added for Hunter Bot's order-flow signals
+-- (buy/sell pressure, new-buyer growth), which need to know which direction
+-- a trade went, not just that a trade happened - vol/trades above stay
+-- undirected sums for everything that only ever needed total activity.
 CREATE TABLE IF NOT EXISTS token_volume_accum (
-  token  TEXT PRIMARY KEY,
-  vol    REAL NOT NULL DEFAULT 0,
-  trades INTEGER NOT NULL DEFAULT 0
+  token       TEXT PRIMARY KEY,
+  vol         REAL NOT NULL DEFAULT 0,
+  trades      INTEGER NOT NULL DEFAULT 0,
+  buy_vol     REAL NOT NULL DEFAULT 0,
+  sell_vol    REAL NOT NULL DEFAULT 0,
+  buy_trades  INTEGER NOT NULL DEFAULT 0,
+  sell_trades INTEGER NOT NULL DEFAULT 0
 );
 
 -- One row per matched Swap event's real trader wallet (the swap's "to"
@@ -42,10 +52,16 @@ CREATE TABLE IF NOT EXISTS token_volume_accum (
 -- window (see prune below) - unlike prices (45 days, real indicator
 -- lookback), nothing here needs history older than the 24h/48h windows
 -- that actually read it.
+-- side ('buy'|'sell'), added alongside token_volume_accum's split above -
+-- lets count() answer "how many DIFFERENT wallets BOUGHT" separately from
+-- "how many traded at all", which is what a new-buyer-growth signal needs.
+-- NULL on any row recorded before this column existed - those still count
+-- toward an undirected count() call, just never toward a side-filtered one.
 CREATE TABLE IF NOT EXISTS token_traders (
   token   TEXT NOT NULL,
   address TEXT NOT NULL,
-  ts      INTEGER NOT NULL
+  ts      INTEGER NOT NULL,
+  side    TEXT
 );
 CREATE INDEX IF NOT EXISTS token_traders_token_ts ON token_traders(token, ts DESC);
 
@@ -279,6 +295,18 @@ CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY 
   if (!cols.some((c) => c.name === "last_retry_at")) {
     db.exec("ALTER TABLE positions ADD COLUMN last_retry_at INTEGER");
   }
+  // Tiered trailing stop (see portfolio.ts's sellSignal) - Hunter Bot only,
+  // NULL for every other bot. tight_trail_pct is the trail distance used
+  // while the peak gain is still under trail_widen_at_pct (locks in a quick
+  // win fast if momentum stalls early); trail_pct becomes the effective
+  // trail once the peak passes that threshold (gives a real move room to
+  // keep running toward a bigger exit).
+  if (!cols.some((c) => c.name === "tight_trail_pct")) {
+    db.exec("ALTER TABLE positions ADD COLUMN tight_trail_pct REAL");
+  }
+  if (!cols.some((c) => c.name === "trail_widen_at_pct")) {
+    db.exec("ALTER TABLE positions ADD COLUMN trail_widen_at_pct REAL");
+  }
 }
 
 // Additive migration: Hunter Bot reuses the opportunities feed/UI/buy-request
@@ -307,16 +335,23 @@ CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY 
   // before these existed.
   add("atr_pct", "atr_pct REAL");
   add("vol_ratio", "vol_ratio REAL");
-  // How many of Hunter Bot's technical triggers (RSI oversold, bullish MACD
-  // cross, Bollinger lower band) actually fired together - a single
-  // indicator alone isn't treated as a real setup (see hunter.ts's
-  // checkTriggers/evaluateWatchedToken), so this is always >= 2 for a
-  // hunter-sourced row and null for discovery.ts's, which has no technical
-  // triggers at all. The site derives its confidence label from this count
-  // directly rather than trusting the AI's own self-reported confidence
-  // alone, since agreement between independent signals is something a user
-  // can actually verify.
+  // How many of Hunter Bot's requirements actually fired together - see
+  // hunter.ts's checkSignals/evaluateWatchedToken. Null for discovery.ts's
+  // rows, which has no signal set of its own.
   add("signal_count", "signal_count INTEGER");
+  // Hunter Bot's order-flow/liquidity-flow/participation/structure signals -
+  // see indicators.ts's orderFlow/liquidityTrend/donchianBreakout and
+  // hunter.ts's checkSignals. Replaced rsi/macd_histogram/bollinger_percent_b
+  // above as Hunter's detection basis (those three still exist and are still
+  // written null-safe for any old row, but no longer populated - RSI/MACD/
+  // Bollinger are all derived from price alone, so requiring several of them
+  // to agree wasn't real diversification; these four measure genuinely
+  // different things - real trade direction, real capital committing, real
+  // new participants, real price structure - not just price restated).
+  add("buy_ratio", "buy_ratio REAL");
+  add("liq_trend_pct", "liq_trend_pct REAL");
+  add("new_buyers", "new_buyers INTEGER");
+  add("broke_out", "broke_out INTEGER");
 }
 
 // Additive migration: databases created before volume tracking existed have
@@ -330,14 +365,43 @@ CREATE TABLE IF NOT EXISTS hunter_rebuy_considered (position_id INTEGER PRIMARY 
   if (!cols.some((c) => c.name === "trades")) {
     db.exec("ALTER TABLE prices ADD COLUMN trades INTEGER NOT NULL DEFAULT 0");
   }
+  // Directional split for Hunter Bot's order-flow signals - see
+  // token_volume_accum's own comment. Old rows read back as 0 on both
+  // sides, same convention as vol/trades above; a signal reading history
+  // that predates this migration just sees no buy/sell data there; it
+  // never sees a false ratio, since 0/0 is treated as "no data" (see
+  // indicators.ts's orderFlow), not as a real 0% buy ratio.
+  for (const col of ["buy_vol", "sell_vol"]) {
+    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE prices ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`);
+  }
+  for (const col of ["buy_trades", "sell_trades"]) {
+    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE prices ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
+  }
 }
 
-// Additive migration: same reasoning, for token_volume_accum's trades
-// column - added alongside the minTrades24h liveness check.
+// Additive migration: same reasoning, for token_volume_accum's trades and
+// buy/sell split columns - trades added alongside the minTrades24h liveness
+// check, buy/sell added alongside Hunter Bot's order-flow signals.
 {
   const cols = db.prepare("PRAGMA table_info(token_volume_accum)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "trades")) {
     db.exec("ALTER TABLE token_volume_accum ADD COLUMN trades INTEGER NOT NULL DEFAULT 0");
+  }
+  for (const col of ["buy_vol", "sell_vol"]) {
+    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE token_volume_accum ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`);
+  }
+  for (const col of ["buy_trades", "sell_trades"]) {
+    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE token_volume_accum ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
+// Additive migration: token_traders rows from before the buy/sell split
+// existed have no side - self-heals the same way as everywhere else here,
+// nothing backfills it.
+{
+  const cols = db.prepare("PRAGMA table_info(token_traders)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "side")) {
+    db.exec("ALTER TABLE token_traders ADD COLUMN side TEXT");
   }
 }
 
@@ -386,18 +450,26 @@ export const wplsPairs = {
   },
 };
 
-export interface PricePoint { ts: number; price: number; liq: number; vol: number; trades: number }
+export interface PricePoint {
+  ts: number; price: number; liq: number; vol: number; trades: number;
+  buyVol: number; sellVol: number; buyTrades: number; sellTrades: number;
+}
 
 export const prices = {
-  insert: db.prepare("INSERT OR REPLACE INTO prices(token,ts,price,liq,vol,trades) VALUES(?,?,?,?,?,?)"),
+  insert: db.prepare(`INSERT OR REPLACE INTO prices
+    (token,ts,price,liq,vol,trades,buy_vol,sell_vol,buy_trades,sell_trades) VALUES(?,?,?,?,?,?,?,?,?,?)`),
 
   since(token: string, fromTs: number): PricePoint[] {
-    return db.prepare("SELECT ts,price,liq,vol,trades FROM prices WHERE token=? AND ts>=? ORDER BY ts ASC")
-      .all(token.toLowerCase(), fromTs) as PricePoint[];
+    return (db.prepare(`SELECT ts,price,liq,vol,trades,
+        buy_vol AS buyVol, sell_vol AS sellVol, buy_trades AS buyTrades, sell_trades AS sellTrades
+      FROM prices WHERE token=? AND ts>=? ORDER BY ts ASC`)
+      .all(token.toLowerCase(), fromTs)) as PricePoint[];
   },
   latest(token: string): PricePoint | undefined {
-    return db.prepare("SELECT ts,price,liq,vol,trades FROM prices WHERE token=? ORDER BY ts DESC LIMIT 1")
-      .get(token.toLowerCase()) as PricePoint | undefined;
+    return (db.prepare(`SELECT ts,price,liq,vol,trades,
+        buy_vol AS buyVol, sell_vol AS sellVol, buy_trades AS buyTrades, sell_trades AS sellTrades
+      FROM prices WHERE token=? ORDER BY ts DESC LIMIT 1`)
+      .get(token.toLowerCase())) as PricePoint | undefined;
   },
   /** How many hours of history exist. Decides whether a rule can arm. */
   coverageHours(token: string): number {
@@ -421,22 +493,35 @@ export const prices = {
  * the other without losing or double-counting volume, since a swap always
  * lands in exactly one drain no matter when it's scanned relative to the
  * poll tick.
+ *
+ * buy/sell split added for Hunter Bot's order-flow signals - a swap moving
+ * WPLS INTO the pair is someone buying the token; WPLS OUT is someone
+ * selling it (see prices.ts's scanSwapVolume, which now classifies each
+ * swap by direction before calling add()).
  */
 export const volumeAccum = {
-  add(token: string, wplsAmount: number): void {
-    db.prepare(`INSERT INTO token_volume_accum(token,vol,trades) VALUES(?,?,1)
-                ON CONFLICT(token) DO UPDATE SET vol = vol + excluded.vol, trades = trades + 1`)
-      .run(token.toLowerCase(), wplsAmount);
+  add(token: string, wplsAmount: number, side: "buy" | "sell"): void {
+    const buyVol = side === "buy" ? wplsAmount : 0;
+    const sellVol = side === "sell" ? wplsAmount : 0;
+    const buyTrades = side === "buy" ? 1 : 0;
+    const sellTrades = side === "sell" ? 1 : 0;
+    db.prepare(`INSERT INTO token_volume_accum(token,vol,trades,buy_vol,sell_vol,buy_trades,sell_trades)
+                VALUES(?,?,1,?,?,?,?)
+                ON CONFLICT(token) DO UPDATE SET
+                  vol = vol + excluded.vol, trades = trades + 1,
+                  buy_vol = buy_vol + excluded.buy_vol, sell_vol = sell_vol + excluded.sell_vol,
+                  buy_trades = buy_trades + excluded.buy_trades, sell_trades = sell_trades + excluded.sell_trades`)
+      .run(token.toLowerCase(), wplsAmount, buyVol, sellVol, buyTrades, sellTrades);
   },
   /** Reads the current totals and resets them to 0 in the same call -
    * callers must persist the returned values themselves (see pollAll()),
    * since once drained they're gone from the accumulator either way. */
-  drain(token: string): { vol: number; trades: number } {
+  drain(token: string): { vol: number; trades: number; buyVol: number; sellVol: number; buyTrades: number; sellTrades: number } {
     const t = token.toLowerCase();
-    const r = db.prepare("SELECT vol, trades FROM token_volume_accum WHERE token=?")
-      .get(t) as { vol: number; trades: number } | undefined;
-    if (r) db.prepare("UPDATE token_volume_accum SET vol=0, trades=0 WHERE token=?").run(t);
-    return { vol: r?.vol ?? 0, trades: r?.trades ?? 0 };
+    const r = db.prepare("SELECT vol, trades, buy_vol AS buyVol, sell_vol AS sellVol, buy_trades AS buyTrades, sell_trades AS sellTrades FROM token_volume_accum WHERE token=?")
+      .get(t) as { vol: number; trades: number; buyVol: number; sellVol: number; buyTrades: number; sellTrades: number } | undefined;
+    if (r) db.prepare("UPDATE token_volume_accum SET vol=0, trades=0, buy_vol=0, sell_vol=0, buy_trades=0, sell_trades=0 WHERE token=?").run(t);
+    return { vol: r?.vol ?? 0, trades: r?.trades ?? 0, buyVol: r?.buyVol ?? 0, sellVol: r?.sellVol ?? 0, buyTrades: r?.buyTrades ?? 0, sellTrades: r?.sellTrades ?? 0 };
   },
 };
 
@@ -446,17 +531,21 @@ export const volumeAccum = {
  * it. record() is called once per matched Swap event's real trader wallet
  * (prices.ts's scanSwapVolume); count() answers "how many DIFFERENT
  * wallets traded this token in the last N hours" (hunter.ts's
- * minUniqueTraders24h); prune() bounds the table to a short rolling window
- * since nothing here reads further back than a day or two.
+ * minUniqueTraders24h), optionally narrowed to one side of the trade for
+ * Hunter's new-buyer-growth signal; prune() bounds the table to a short
+ * rolling window since nothing here reads further back than a day or two.
  */
 export const tokenTraders = {
-  record(token: string, address: string, ts: number): void {
-    db.prepare("INSERT INTO token_traders(token,address,ts) VALUES(?,?,?)")
-      .run(token.toLowerCase(), address.toLowerCase(), ts);
+  record(token: string, address: string, ts: number, side: "buy" | "sell"): void {
+    db.prepare("INSERT INTO token_traders(token,address,ts,side) VALUES(?,?,?,?)")
+      .run(token.toLowerCase(), address.toLowerCase(), ts, side);
   },
-  count(token: string, sinceTs: number): number {
-    const r = db.prepare("SELECT COUNT(DISTINCT address) n FROM token_traders WHERE token=? AND ts>=?")
-      .get(token.toLowerCase(), sinceTs) as { n: number };
+  count(token: string, sinceTs: number, side?: "buy" | "sell"): number {
+    const r = side
+      ? db.prepare("SELECT COUNT(DISTINCT address) n FROM token_traders WHERE token=? AND ts>=? AND side=?")
+          .get(token.toLowerCase(), sinceTs, side) as { n: number }
+      : db.prepare("SELECT COUNT(DISTINCT address) n FROM token_traders WHERE token=? AND ts>=?")
+          .get(token.toLowerCase(), sinceTs) as { n: number };
     return r.n;
   },
   prune(beforeTs: number): void {
@@ -573,10 +662,17 @@ export interface NewOpportunity {
    * predating these fields. */
   atrPct?: number | null;
   volRatio?: number | null;
-  /** How many of Hunter Bot's technical triggers fired together (see
-   * hunter.ts's checkTriggers) - null for discovery.ts's rows, which have no
-   * technical triggers at all. */
+  /** How many of Hunter Bot's requirements fired together (see hunter.ts's
+   * checkSignals) - null for discovery.ts's rows, which have no signal set
+   * of its own. */
   signalCount?: number | null;
+  /** Hunter Bot's order-flow/liquidity-flow/participation/structure signal
+   * readout at detection time - see indicators.ts's orderFlow/
+   * liquidityTrend/donchianBreakout. All null for discovery.ts's rows. */
+  buyRatio?: number | null;
+  liqTrendPct?: number | null;
+  newBuyers?: number | null;
+  brokeOut?: boolean | null;
 }
 export interface OpportunityRow extends NewOpportunity {
   id: number; ts: number; source: "discovery" | "hunter";
@@ -592,8 +688,8 @@ export interface OpportunityRow extends NewOpportunity {
 export const opportunities = {
   insert(o: NewOpportunity): number {
     const info = db.prepare(`INSERT INTO opportunities
-      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection,atr_pct,vol_ratio,signal_count)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (token,ts,price_move_pct,liq_growth_pct,liq_pls,buy_tax_bps,sell_tax_bps,lp_locked_pct,owner_renounced,sellable,verdict,reason,narrative,source,rsi,macd_histogram,bollinger_percent_b,ai_recommend,ai_confidence,ai_reasoning,ai_suggested_amount_pls,price_at_detection,atr_pct,vol_ratio,signal_count,buy_ratio,liq_trend_pct,new_buyers,broke_out)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       o.token.toLowerCase(), Math.floor(Date.now() / 1000), o.priceMovePct, o.liqGrowthPct, o.liqPls,
       o.buyTaxBps, o.sellTaxBps, o.lpLockedPct, o.ownerRenounced === null ? null : (o.ownerRenounced ? 1 : 0),
       o.sellable ? 1 : 0, o.verdict, o.reason, o.narrative, o.source ?? "discovery",
@@ -601,6 +697,8 @@ export const opportunities = {
       o.aiRecommend === undefined || o.aiRecommend === null ? null : (o.aiRecommend ? 1 : 0),
       o.aiConfidence ?? null, o.aiReasoning ?? null, o.aiSuggestedAmountPls ?? null,
       o.priceAtDetection ?? null, o.atrPct ?? null, o.volRatio ?? null, o.signalCount ?? null,
+      o.buyRatio ?? null, o.liqTrendPct ?? null, o.newBuyers ?? null,
+      o.brokeOut === undefined || o.brokeOut === null ? null : (o.brokeOut ? 1 : 0),
     );
     return Number(info.lastInsertRowid);
   },
@@ -622,7 +720,8 @@ export const opportunities = {
              ai_recommend AS aiRecommend, ai_confidence AS aiConfidence, ai_reasoning AS aiReasoning,
              ai_suggested_amount_pls AS aiSuggestedAmountPls,
              price_at_detection AS priceAtDetection, stale, stale_reason AS staleReason,
-             atr_pct AS atrPct, vol_ratio AS volRatio, signal_count AS signalCount
+             atr_pct AS atrPct, vol_ratio AS volRatio, signal_count AS signalCount,
+             buy_ratio AS buyRatio, liq_trend_pct AS liqTrendPct, new_buyers AS newBuyers, broke_out AS brokeOut
       FROM opportunities WHERE id=?
     `).get(id) as any;
     if (!r) return undefined;
@@ -631,6 +730,7 @@ export const opportunities = {
       ownerRenounced: r.ownerRenounced === null ? null : Boolean(r.ownerRenounced),
       sellable: Boolean(r.sellable),
       aiRecommend: r.aiRecommend === null ? null : Boolean(r.aiRecommend),
+      brokeOut: r.brokeOut === null ? null : Boolean(r.brokeOut),
       stale: Boolean(r.stale),
     } as OpportunityRow;
   },

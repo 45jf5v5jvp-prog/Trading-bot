@@ -3,12 +3,14 @@ import NumberField from "./NumberField";
 import { CHAIN } from "../lib/contracts";
 
 /**
- * Editor for Hunter Bot settings. Hunts RSI/MACD/Bollinger dip-buying setups
- * across every watched token, trading a dedicated slice of the vault
- * (allocated PLS) rather than the whole balance. A liquidity-coherence check
- * (always on, not a setting here) rejects a dip whose liquidity fell more
- * than the price move alone explains - the "price cratered because LP got
- * pulled, looks like a buyable dip" trap this bot exists to avoid.
+ * Editor for Hunter Bot settings. Hunts real order-flow/liquidity-flow
+ * setups - buy pressure, liquidity growth, new-buyer growth, a breakout
+ * above the token's own recent high - across every watched token, trading a
+ * dedicated slice of the vault (allocated PLS) rather than the whole
+ * balance. A liquidity-coherence check (always on, not a setting here)
+ * rejects a move whose liquidity fell more than the price move alone
+ * explains - the "price cratered because LP got pulled, looks like real
+ * momentum" trap this bot exists to avoid.
  */
 export default function HunterSettings({ hunter, onChange }) {
   const num = (field) => numberFieldProps(hunter[field] ?? 0, (v) => onChange({ ...hunter, [field]: v }));
@@ -95,27 +97,41 @@ export default function HunterSettings({ hunter, onChange }) {
         </p>
       )}
 
-      <div className="sub-label">Technical setup (at least one enabled trigger must fire)</div>
+      <div className="sub-label">Order-flow setup (every enabled requirement must pass)</div>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
+        Not RSI/MACD/Bollinger - those are all read off price alone, so requiring several to agree
+        wasn't real diversification. These four read real on-chain data instead: which way trades
+        are actually going, whether capital is actually committing, whether new wallets are actually
+        showing up, and whether price is actually confirming strength rather than guessing a bottom.
+      </p>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
-        <input type="checkbox" checked={hunter.requireRsi} onChange={(e) => onChange({ ...hunter, requireRsi: e.target.checked })} />
-        RSI oversold, at or below
-        <NumberField {...num("rsiOversold")} min="0" max="100" style={{ width: 70 }} disabled={!hunter.requireRsi} />
-      </label>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
-        <input type="checkbox" checked={hunter.requireMacdCross} onChange={(e) => onChange({ ...hunter, requireMacdCross: e.target.checked })} />
-        A bullish MACD crossover just occurred
-      </label>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
-        <input type="checkbox" checked={hunter.requireBollinger} onChange={(e) => onChange({ ...hunter, requireBollinger: e.target.checked })} />
-        Bollinger %B at or below
+        <input type="checkbox" checked={hunter.requireBuyPressure} onChange={(e) => onChange({ ...hunter, requireBuyPressure: e.target.checked })} />
+        At least
         <input
-          {...numberFieldProps(hunter.bollingerPercentBMax ?? 0, (v) => onChange({ ...hunter, bollingerPercentBMax: v }))}
-          min="0" max="1" step="0.01" style={{ width: 70 }} disabled={!hunter.requireBollinger}
+          {...numberFieldProps(hunter.minBuyPressureRatio ?? 0, (v) => onChange({ ...hunter, minBuyPressureRatio: v }))}
+          min="0" max="1" step="0.05" style={{ width: 70 }} disabled={!hunter.requireBuyPressure}
         />
-        <span className="hint" style={{ margin: 0 }}>(0 = lower band, 1 = upper band)</span>
+        of recent trades were buys, not sells
+      </label>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
+        <input type="checkbox" checked={hunter.requireLiquidityGrowth} onChange={(e) => onChange({ ...hunter, requireLiquidityGrowth: e.target.checked })} />
+        Liquidity grew at least
+        <NumberField {...num("minLiquidityGrowthPct")} step="1" style={{ width: 70 }} disabled={!hunter.requireLiquidityGrowth} />
+        <span className="hint" style={{ margin: 0 }}>% over the last hour (0 = just not shrinking)</span>
+      </label>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
+        <input type="checkbox" checked={hunter.requireBuyerGrowth} onChange={(e) => onChange({ ...hunter, requireBuyerGrowth: e.target.checked })} />
+        At least
+        <NumberField {...num("minNewBuyers")} min="0" style={{ width: 60 }} disabled={!hunter.requireBuyerGrowth} />
+        distinct new buyers in the last hour
+      </label>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0" }}>
+        <input type="checkbox" checked={hunter.requireBreakout} onChange={(e) => onChange({ ...hunter, requireBreakout: e.target.checked })} />
+        Price just broke out to a new local high
       </label>
 
       <div className="field-inline">
@@ -130,10 +146,9 @@ export default function HunterSettings({ hunter, onChange }) {
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         How many separate trades this token needs recently for the bot to trust it's actually being
-        traded, not just sitting still with one stale sale from days ago that happens to look
-        oversold. Counted by number of trades, not dollar volume - a token like HEX or INC trades
-        very differently than a small cap day to day, so a real trade count is a fairer bar than
-        a fixed PLS amount.
+        traded, not just sitting still with one stale sale from days ago. Counted by number of
+        trades, not dollar volume - a token like HEX or INC trades very differently than a small cap
+        day to day, so a real trade count is a fairer bar than a fixed PLS amount.
       </p>
 
       <div className="field-inline">
@@ -160,21 +175,20 @@ export default function HunterSettings({ hunter, onChange }) {
         <span className="hint" style={{ margin: 0 }}>x this token's own baseline</span>
       </div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        Unlike the triggers above, this isn't an alternative way to qualify - it's an extra
-        requirement on top of them. An oversold reading on a token nobody is actually trading isn't
-        much of a signal; this makes sure real volume is behind the move before trusting it.
+        An extra requirement on top of the ones above, not an alternative way to qualify. A reading
+        on a token nobody is actually trading isn't much of a signal; this makes sure real volume is
+        behind the move before trusting it.
       </p>
 
       <div className="sub-label">Exits</div>
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        Hunter is a mechanical day-trading bot - no AI judgment anywhere, buy or sell. It exits at
-        the fixed targets below, same as every other bot here. Set a real "Time exit" so a position
-        that never hits take profit or stop loss still gets closed within a day or two instead of
-        sitting open indefinitely.
+        Hunter is a mechanical day-trading bot - no AI judgment anywhere, buy or sell. Set a real
+        "Time exit" so a position that never hits its stop or trail still gets closed within hours
+        instead of sitting open indefinitely.
       </p>
 
       <div className="field-inline">
-        <label>Take profit %</label>
+        <label>Take profit % (0 = let the trail decide)</label>
         <NumberField {...num("takeProfitPct")} min="0" style={{ width: 80 }} />
         <label>Stop loss %</label>
         <NumberField {...num("stopLossPct")} min="0" style={{ width: 80 }} disabled={hunter.useAtrStop} />
@@ -198,9 +212,22 @@ export default function HunterSettings({ hunter, onChange }) {
       </p>
 
       <div className="field-inline">
-        <label>Trailing stop %</label>
-        <NumberField {...num("trailingStopPct")} min="0" style={{ width: 80 }} />
+        <label>Tight trail %</label>
+        <NumberField {...num("tightTrailPct")} min="0" style={{ width: 70 }} />
+        <label>until peak gain reaches</label>
+        <NumberField {...num("trailWidenAtPct")} min="0" style={{ width: 70 }} />
+        <span className="hint" style={{ margin: 0 }}>%, then</span>
+        <label>wide trail %</label>
+        <NumberField {...num("trailingStopPct")} min="0" style={{ width: 70 }} />
       </div>
+      <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        A tiered trailing stop, not one fixed distance - this is what delivers "a quick 4% win is
+        fine, exit it, but let a real move run toward 10-15%+." Below the peak-gain threshold, the
+        tight trail applies: a small pullback from an early peak sells close to that peak, capturing
+        most of a fast pump that stalls out. Once the position's peak gain passes that threshold, the
+        wider trail takes over instead, giving a real move room to keep running rather than getting
+        stopped out on every wiggle. Set either trail % to 0 to disable that tier.
+      </p>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "10px 0 6px" }}>
         <input

@@ -35,6 +35,19 @@ export interface ExitInputs {
   timeExitMin: number | null;
   openedAt: number;   // unix seconds
   highWater: number;  // peak value/cost ratio ever seen (1.0 == break even)
+  // Tiered trailing stop, optional - null on every bot except Hunter, which
+  // is the only one that wants "take a quick small win eagerly, but let a
+  // real move run further" rather than one fixed trail distance. Below
+  // trailWidenAtPct of peak gain, tightTrailPct applies (tight, so a pump
+  // that stalls early gets sold close to its peak, capturing most of a
+  // quick win). Once the peak passes trailWidenAtPct, the wider trailPct
+  // takes over instead (looser, so a real trend gets room to keep running
+  // toward a bigger exit rather than getting stopped out on every wiggle).
+  // Both are still just trailPct's own mechanism under the hood - only
+  // which distance applies changes, not the arm condition (highWater > 1)
+  // or how a hit is measured.
+  tightTrailPct: number | null;
+  trailWidenAtPct: number | null;
 }
 
 /**
@@ -51,8 +64,14 @@ export function sellSignal(pos: ExitInputs, ratio: number, nowSec: number): stri
   const pnl = (ratio - 1) * 100;
   if (pos.tpPct != null && pos.tpPct > 0 && pnl >= pos.tpPct) return `take profit ${pnl.toFixed(1)}%`;
   if (pos.slPct != null && pos.slPct > 0 && pnl <= -pos.slPct) return `stop loss ${pnl.toFixed(1)}%`;
-  if (pos.trailPct != null && pos.trailPct > 0 && pos.highWater > 1 && ratio <= pos.highWater * (1 - pos.trailPct / 100))
-    return `trailing stop ${pnl.toFixed(1)}% (peaked +${((pos.highWater - 1) * 100).toFixed(1)}%)`;
+  const peakPnl = (pos.highWater - 1) * 100;
+  let effectiveTrail = pos.trailPct;
+  if (pos.tightTrailPct != null && pos.tightTrailPct > 0) {
+    const widenAt = pos.trailWidenAtPct ?? Infinity;
+    effectiveTrail = peakPnl < widenAt ? pos.tightTrailPct : (pos.trailPct ?? pos.tightTrailPct);
+  }
+  if (effectiveTrail != null && effectiveTrail > 0 && pos.highWater > 1 && ratio <= pos.highWater * (1 - effectiveTrail / 100))
+    return `trailing stop ${pnl.toFixed(1)}% (peaked +${peakPnl.toFixed(1)}%)`;
   if (pos.timeExitMin != null && pos.timeExitMin > 0 && nowSec - pos.openedAt >= pos.timeExitMin * 60)
     return `time exit ${pnl.toFixed(1)}%`;
   return null;

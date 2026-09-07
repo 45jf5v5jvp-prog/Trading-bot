@@ -26,6 +26,14 @@ export interface Candle {
   // while genuinely trading often - trade count answers "is this actually
   // being traded" without needing a per-token dollar guess.
   trades: number;
+  // buyVol/sellVol/buyTrades/sellTrades split vol/trades above by which
+  // side of the swap WPLS was on (see prices.ts's scanSwapVolume) - what
+  // Hunter Bot's order-flow signals (indicators.ts's orderFlow) actually
+  // read. Same "0 means no data yet, not a real zero" convention as vol.
+  buyVol: number;
+  sellVol: number;
+  buyTrades: number;
+  sellTrades: number;
 }
 
 /**
@@ -45,16 +53,21 @@ export function toCandles(rows: PricePoint[], bucketSeconds: number): Candle[] {
   }
   return [...buckets.keys()].sort((a, b) => a - b).map((k) => {
     const ticks = buckets.get(k)!;
-    let high = -Infinity, low = Infinity, vol = 0, trades = 0;
+    let high = -Infinity, low = Infinity, vol = 0, trades = 0, buyVol = 0, sellVol = 0, buyTrades = 0, sellTrades = 0;
     for (const t of ticks) {
       if (t.price > high) high = t.price;
       if (t.price < low) low = t.price;
       vol += t.vol ?? 0;
       trades += t.trades ?? 0;
+      buyVol += t.buyVol ?? 0;
+      sellVol += t.sellVol ?? 0;
+      buyTrades += t.buyTrades ?? 0;
+      sellTrades += t.sellTrades ?? 0;
     }
     return {
       ts: k, open: ticks[0]!.price, high, low,
       close: ticks[ticks.length - 1]!.price, liq: ticks[ticks.length - 1]!.liq, vol, trades,
+      buyVol, sellVol, buyTrades, sellTrades,
     };
   });
 }

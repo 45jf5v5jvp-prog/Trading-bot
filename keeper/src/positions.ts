@@ -14,6 +14,11 @@ export interface OpenArgs {
   spentPls: number; tokensOut: bigint;
   tpPct: number; slPct: number; timeExitMin: number;
   trailPct?: number;
+  /** Hunter Bot's tiered trail - see portfolio.ts's ExitInputs/sellSignal
+   * and db.ts's positions migration comment. Undefined/null for every
+   * other bot, which keeps the old single-trailPct behavior unchanged. */
+  tightTrailPct?: number;
+  trailWidenAtPct?: number;
   /** Legacy: Hunter Bot used to support an AI-driven "full" exit mode
    * alongside the normal fixed tp/sl/trailing/time "limited" mode. That AI
    * exit judgment has been removed entirely (Hunter is mechanical-only now,
@@ -46,14 +51,14 @@ export function openPosition(a: OpenArgs): void {
   const tokens = Number(formatUnits(a.tokensOut, w ? w.decimals : 18));
   const entry = tokens > 0 ? a.spentPls / tokens : 0;
   db.prepare(`INSERT INTO positions
-    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status,exit_mode,source_tx_hash)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?)`).run(
+    (vault,bot,token,opened_at,entry_price,spent_pls,tokens_held,high_water,tp_pct,sl_pct,trail_pct,time_exit_min,status,exit_mode,source_tx_hash,tight_trail_pct,trail_widen_at_pct)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)`).run(
     a.vault.toLowerCase(), a.bot, a.token.toLowerCase(), Math.floor(Date.now() / 1000),
     // high_water is the peak value/cost ratio, so it starts at 1.0 (break even),
     // not at the entry price. Trailing stops read it as a ratio.
     entry, a.spentPls, a.tokensOut.toString(), 1.0,
     a.tpPct, a.slPct || null, a.trailPct || null, a.timeExitMin || null, a.exitMode ?? null,
-    a.sourceTxHash ?? null,
+    a.sourceTxHash ?? null, a.tightTrailPct ?? null, a.trailWidenAtPct ?? null,
   );
 }
 
@@ -63,6 +68,7 @@ interface Row {
   bot: "launch" | "trading" | "snipe" | "limit" | "discovery" | "hunter" | "ask" | "deposit";
   tp_pct: number | null; sl_pct: number | null; trail_pct: number | null; time_exit_min: number | null;
   fail_count: number | null; exit_mode: string | null;
+  tight_trail_pct: number | null; trail_widen_at_pct: number | null;
 }
 
 /**
@@ -252,8 +258,7 @@ async function fetchCloseRequests(vault: string): Promise<Set<number>> {
 /**
  * `forceReason`, when non-null, closes the position immediately regardless
  * of what sellSignal() says and is used verbatim as the recorded
- * close_reason - either an owner-requested manual close, or (Auto Full
- * Hunter positions only) the AI's own exit judgment. Null means "no
+ * close_reason - an owner-requested manual close. Null means "no
  * override," the normal tp/sl/trailing/time check applies.
  */
 async function checkAndClose(
@@ -289,7 +294,8 @@ async function checkAndClose(
   // take-profit/stop-loss/trailing/time thresholds first.
   const reason = forceReason ?? sellSignal(
     { tpPct: r.tp_pct, slPct: r.sl_pct, trailPct: r.trail_pct, timeExitMin: r.time_exit_min,
-      openedAt: r.opened_at, highWater },
+      openedAt: r.opened_at, highWater,
+      tightTrailPct: r.tight_trail_pct, trailWidenAtPct: r.trail_widen_at_pct },
     ratio, now,
   );
   if (!reason) return "priced";

@@ -56,10 +56,9 @@ function getPositions(vault) {
   // COMBINED at 100 rows, ordered by opened_at - a vault that traded
   // heavily that same day had its own currently-open positions crowded out
   // by newer closed trades, everywhere this list is read (Current Holdings,
-  // Talk to Your Hunter's context, the round-trip/lifetime figures fixed
-  // earlier tonight). A vault owner with 50 real open positions saw only
-  // ~8 of them - unacceptable for something the owner needs to see and be
-  // able to act on in full.
+  // the round-trip/lifetime figures fixed earlier tonight). A vault owner
+  // with 50 real open positions saw only ~8 of them - unacceptable for
+  // something the owner needs to see and be able to act on in full.
   const open = d.prepare(
     `SELECT ${POSITION_COLUMNS} ${POSITION_JOINS} WHERE p.vault = ? AND p.status = 'open' ORDER BY p.opened_at DESC`,
   ).all(v);

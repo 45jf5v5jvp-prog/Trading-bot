@@ -5,9 +5,9 @@ import { useState } from "react";
  * so there's nothing to select and copy by hand otherwise. Exists so a
  * token can be pasted into DexScreener or the emergency withdraw field
  * without retyping a 42-character address. Shared across every panel that
- * lists a token (Current Holdings, Closed/Rugged Positions, Portfolio,
- * Hunter IQ's trade feed) so copying an address works the same way
- * everywhere instead of some places having it and others not. */
+ * lists a token (Current Holdings, Closed/Rugged Positions, Portfolio) so
+ * copying an address works the same way everywhere instead of some places
+ * having it and others not. */
 export default function CopyAddressButton({ address }) {
   const [copied, setCopied] = useState(false);
   async function handleCopy() {

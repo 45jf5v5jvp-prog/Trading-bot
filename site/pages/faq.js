@@ -138,10 +138,10 @@ export default function Faq() {
             Hunts oversold setups using real technical analysis - RSI, MACD crossovers, Bollinger
             Bands - instead of reacting to a launch or a price breakout. Trades a dedicated slice of
             your vault you choose, not the whole balance, so it can't accidentally consume funds
-            you'd earmarked for something else. Optionally gated behind an AI judgment call before it
-            auto-buys anything - a technical setup and a passed screen aren't enough on their own;
-            Claude looks at the whole picture first, and if no AI key is configured this fails safe
-            by notifying you instead of ever buying blind.
+            you'd earmarked for something else. Purely mechanical, buy and sell - no AI judgment
+            anywhere - and built to day-trade: a take-profit, stop-loss, trailing stop, and a time
+            exit all apply exactly as configured, so a position closes within hours to a couple of
+            days rather than sitting open indefinitely.
           </Q>
 
           <Q q="What's the difference between the Hunter Bot and Discovery Bot?">
@@ -178,14 +178,12 @@ export default function Faq() {
                   <tr>
                     <td>Sizing</td>
                     <td>A fixed amount per buy you set (or a % of balance via Quick Setup)</td>
-                    <td>AI-decided position sizing within a max-per-trade cap, from a dedicated
-                      slice of your vault you choose</td>
+                    <td>A max-per-trade cap you set, from a dedicated slice of your vault you choose</td>
                   </tr>
                   <tr>
                     <td>Extra safety gate</td>
                     <td>None beyond the standard honeypot/tax/LP-lock/renounce screen</td>
-                    <td>Optionally gated behind an AI judgment call before auto-buying - if no AI
-                      key is configured it fails safe by notifying instead of buying blind</td>
+                    <td>None beyond the standard honeypot/tax/LP-lock/renounce screen</td>
                   </tr>
                 </tbody>
               </table>
@@ -193,15 +191,6 @@ export default function Faq() {
             Both run the exact same honeypot/tax/LP-lock/renounce screen before anything is ever
             shown as buyable, and both support notify or auto-buy mode. Discovery reacts to a move
             already happening; Hunter tries to catch one before it happens.
-          </Q>
-
-          <Q q="What is Ask Icaria?">
-            Paste in any token address - not just ones a bot already flagged - and get a plain-English
-            read on it. It runs the exact same mechanical checks every bot here runs before ever
-            asking the AI anything: honeypot/sellability simulation, buy/sell tax, LP-lock percentage,
-            whether ownership is renounced. The AI never overrides a failed mechanical check - if a
-            token can't be sold, that's reported directly, no AI opinion substitutes for it. You can
-            buy directly from the answer if you want to act on it.
           </Q>
 
           <Q q="What are Limit Orders and the Portfolio panel?">

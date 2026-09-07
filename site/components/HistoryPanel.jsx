@@ -261,17 +261,18 @@ function NoLiquidityPositionRow({ p, onClose, closeState }) {
  * live P&L; the bar fills from breakeven (the thin center tick) toward
  * whichever side it's currently on.
  *
- * A Hunter position in Auto Full mode has no fixed take-profit at all - the
- * AI re-judges every cycle instead (see hunter.ts's reviewFullModePositions)
- * - so there's nothing to show progress toward on the upside. Its stop-loss
- * floor is still real and still mandatory, so that side still renders.
+ * A legacy Hunter position opened before Hunter Bot went mechanical-only
+ * could have no fixed take-profit at all (its AI-managed exit mode has since
+ * been removed entirely - new positions always have a real take-profit) -
+ * so there's nothing to show progress toward on the upside for those. Its
+ * stop-loss floor is still real and still mandatory, so that side still
+ * renders.
  */
 function ExitProgress({ p }) {
   const pnl = p.pnlPct;
   if (pnl === null || pnl === undefined) return null;
   const tp = p.tp_pct || 0;
   const sl = p.sl_pct || 0;
-  const aiManaged = p.bot === "hunter" && p.exit_mode === "full";
   if (!tp && !sl) return null; // nothing configured to show progress toward
 
   // Span: stop-loss floor on the left, take-profit target on the right. A
@@ -298,7 +299,7 @@ function ExitProgress({ p }) {
       </div>
       <div className="exit-progress-labels">
         <span>{sl > 0 ? `stop -${sl}%` : "no stop"}</span>
-        <span>{tp > 0 ? `target +${tp}%` : aiManaged ? "AI-managed target" : "no target"}</span>
+        <span>{tp > 0 ? `target +${tp}%` : "no target"}</span>
       </div>
     </div>
   );

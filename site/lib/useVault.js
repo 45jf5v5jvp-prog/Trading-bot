@@ -49,6 +49,32 @@ export async function waitForReceipt(txHash, { timeoutMs = 120_000, intervalMs =
 }
 
 /**
+ * Fetches a real, boosted gas price and returns it as an override object to
+ * spread into a transaction call - the same fix that solved this exact
+ * problem for the keeper's own transactions (see keeper/src/executor.ts's
+ * boostedGasPrice and its own comment for the full history). Left to a
+ * wallet's own default gas estimate, a transaction can sit unconfirmed in
+ * PulseChain's mempool for a long time during a busy stretch, with no
+ * visible error at all - it just never gets mined, and the owner has no way
+ * to tell from this dashboard alone. Doubling the current network reading
+ * (200% headroom, same multiplier the keeper settled on after its own live
+ * incident) trades a bit of extra gas spend for actually landing quickly,
+ * which matters far more for a fraction-of-a-cent owner action like this
+ * than the cost difference. Falls back to no override (the wallet's own
+ * default) on any failure reading fee data, rather than blocking the send.
+ */
+export async function boostedGasOverrides(provider) {
+  try {
+    const fee = await provider.getFeeData();
+    const gp = fee.gasPrice ?? 0n;
+    if (gp <= 0n) return {};
+    return { gasPrice: (gp * 200n) / 100n };
+  } catch {
+    return {};
+  }
+}
+
+/**
  * All wallet + on-chain state for the dashboard, in one hook. Every value here
  * comes from a real read against the deployed contracts - nothing is seeded or
  * simulated.
@@ -262,8 +288,9 @@ export function useVault() {
       const newKind = MULTI_VENUE_V4_VAULT_FACTORY ? "multiVenueV4"
         : MULTI_VENUE_VAULT_FACTORY ? "multiVenue" : "v2";
       const factory = new Contract(factoryAddr, VAULT_FACTORY_ABI, signer);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Confirm the transaction in your wallet...");
-      const tx = await factory.createVault([]);
+      const tx = await factory.createVault([], overrides);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       const addr = await factory.vaultOf(account);
@@ -288,13 +315,14 @@ export function useVault() {
       const signer = await provider.getSigner();
       const amount = parseEther(String(amount_));
       const wrapped = new Contract(WRAPPED, ERC20_ABI, signer);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Step 1 of 2: confirm the approval in your wallet...");
-      const approveTx = await wrapped.approve(vaultAddress, amount);
+      const approveTx = await wrapped.approve(vaultAddress, amount, overrides);
       onProgress?.("Waiting for the approval to confirm on-chain...");
       await waitForReceipt(approveTx.hash);
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
       onProgress?.("Step 2 of 2: confirm the deposit in your wallet...");
-      const depositTx = await vault.deposit(WRAPPED, amount);
+      const depositTx = await vault.deposit(WRAPPED, amount, overrides);
       onProgress?.("Waiting for the deposit to confirm on-chain...");
       await waitForReceipt(depositTx.hash);
       await refreshVaultInfo(vaultAddress);
@@ -347,8 +375,9 @@ export function useVault() {
       const erc = new Contract(tokenAddress, ERC20_ABI, signer);
       const decimals = await erc.decimals();
       const amount = parseUnits(String(amount_), decimals);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Confirm the transfer in your wallet...");
-      const tx = await erc.transfer(vaultAddress, amount);
+      const tx = await erc.transfer(vaultAddress, amount, overrides);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       onProgress?.("Telling the bot to start tracking it...");
@@ -380,8 +409,9 @@ export function useVault() {
       const signer = await provider.getSigner();
       const amount = parseEther(String(amount_));
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Confirm the withdrawal in your wallet...");
-      const tx = await vault.withdraw(WRAPPED, amount);
+      const tx = await vault.withdraw(WRAPPED, amount, overrides);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);
@@ -407,8 +437,9 @@ export function useVault() {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Confirm the withdrawal in your wallet...");
-      const tx = await vault.withdrawAll([tokenAddress]);
+      const tx = await vault.withdrawAll([tokenAddress], overrides);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);
@@ -431,8 +462,9 @@ export function useVault() {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Confirm the transaction in your wallet...");
-      const tx = await vault.setPaused(paused);
+      const tx = await vault.setPaused(paused, overrides);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);
@@ -458,8 +490,9 @@ export function useVault() {
       const provider = getProvider();
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
+      const overrides = await boostedGasOverrides(provider);
       onProgress?.("Confirm the transaction in your wallet...");
-      const tx = await vault.revokeExecutor();
+      const tx = await vault.revokeExecutor(overrides);
       onProgress?.("Waiting for it to confirm on-chain...");
       await waitForReceipt(tx.hash);
       await refreshVaultInfo(vaultAddress);

@@ -14,13 +14,32 @@ import { notifyDeposit } from "./depositTokenNotice";
  * never got past awaiting it to ask for the second (deposit) signature.
  * Polling a plain RPC directly sidesteps whatever the wallet's provider
  * is doing internally.
+ *
+ * Real bug found live: this used to return the moment ANY receipt existed,
+ * never checking receipt.status - a transaction that was mined but REVERTED
+ * (wrong wallet for an onlyOwner call, a condition the contract rejected,
+ * anything) looked identical to a real success. Every write in this file
+ * (deposit, withdraw, setPaused, revokeExecutor, createVault) calls this and
+ * then reports success with no exception - so a reverted "Resume" could
+ * show "Bot resumed." on screen while the vault was still paused on chain,
+ * with no visible error at all. Checking status here means a revert now
+ * throws and the caller's existing catch/setError path actually fires.
  */
 export async function waitForReceipt(txHash, { timeoutMs = 120_000, intervalMs = 3000 } = {}) {
   const rpc = new JsonRpcProvider(RPC_URL);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const receipt = await rpc.getTransactionReceipt(txHash);
-    if (receipt) return receipt;
+    if (receipt) {
+      if (receipt.status === 0) {
+        throw new Error(
+          `Transaction was mined but REVERTED (${txHash}) - it did not actually take effect. ` +
+          "Common causes: the connected wallet isn't the vault's owner, or an on-chain condition " +
+          `wasn't met. Look up ${txHash} on a ${CHAIN.chainName} block explorer for the exact reason.`,
+        );
+      }
+      return receipt;
+    }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(

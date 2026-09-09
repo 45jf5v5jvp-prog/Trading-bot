@@ -75,6 +75,35 @@ export async function boostedGasOverrides(provider) {
 }
 
 /**
+ * Re-checks the wallet's active chain right before an owner-signed write.
+ * finishConnecting only checks this once, at connect time - if the wallet
+ * later switches networks on its own (Rabby in particular resets to its
+ * last-used chain after being force-closed and reopened, which is exactly
+ * what fixes its "Already processing connect" glitch), nothing here would
+ * otherwise notice. Without this, the wallet happily signs and broadcasts
+ * setPaused/deposit/withdraw against vaultAddress on whatever chain it's
+ * actually on - since the EVM's CALL succeeds trivially against an address
+ * with no contract code, the wallet reports "Confirmed / Success" and a
+ * real, mined, block-explorer-visible transaction exists, just not on
+ * PulseChain and with zero effect on the real vault. That silent-wrong-chain
+ * send is indistinguishable from a stuck/slow transaction from the
+ * dashboard's point of view (both just show "waiting to confirm" forever,
+ * since waitForReceipt polls PulseChain's own RPC for a hash that will
+ * never appear there) - this check turns it into an immediate, explicit
+ * error instead.
+ */
+export async function assertCorrectNetwork(provider) {
+  const network = await provider.getNetwork();
+  if (Number(network.chainId) !== CHAIN_ID) {
+    throw new Error(
+      `Wrong network - your wallet is on chain ID ${Number(network.chainId)}, not ${CHAIN.chainName} ` +
+      `(chain ID ${CHAIN_ID}). Switch your wallet back to ${CHAIN.chainName} and try again. ` +
+      "Nothing was sent.",
+    );
+  }
+}
+
+/**
  * All wallet + on-chain state for the dashboard, in one hook. Every value here
  * comes from a real read against the deployed contracts - nothing is seeded or
  * simulated.
@@ -283,6 +312,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const factoryAddr = MULTI_VENUE_V4_VAULT_FACTORY || MULTI_VENUE_VAULT_FACTORY || VAULT_FACTORY;
       const newKind = MULTI_VENUE_V4_VAULT_FACTORY ? "multiVenueV4"
@@ -312,6 +342,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const amount = parseEther(String(amount_));
       const wrapped = new Contract(WRAPPED, ERC20_ABI, signer);
@@ -371,6 +402,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const erc = new Contract(tokenAddress, ERC20_ABI, signer);
       const decimals = await erc.decimals();
@@ -406,6 +438,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const amount = parseEther(String(amount_));
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
@@ -435,6 +468,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
       const overrides = await boostedGasOverrides(provider);
@@ -460,6 +494,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
       const overrides = await boostedGasOverrides(provider);
@@ -488,6 +523,7 @@ export function useVault() {
     setError(null);
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const vault = new Contract(vaultAddress, VAULT_ABI, signer);
       const overrides = await boostedGasOverrides(provider);

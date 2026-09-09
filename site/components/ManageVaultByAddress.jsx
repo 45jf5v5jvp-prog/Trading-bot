@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Contract, ZeroAddress } from "ethers";
 import { VAULT_ABI, CHAIN } from "../lib/contracts";
-import { waitForReceipt, boostedGasOverrides } from "../lib/useVault";
+import { waitForReceipt, boostedGasOverrides, assertCorrectNetwork } from "../lib/useVault";
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -60,6 +60,7 @@ export default function ManageVaultByAddress({ getProvider, account }) {
     setStatus("");
     try {
       const provider = getProvider();
+      await assertCorrectNetwork(provider);
       const signer = await provider.getSigner();
       const v = new Contract(addr, VAULT_ABI, signer);
       const overrides = await boostedGasOverrides(provider);

@@ -31,8 +31,10 @@ const SB_ON = !!(SB_URL && SB_KEY);
 /* How long a cached answer stays fresh. Scorecards almost never change, so a
    full course card can live a long time; a search list is refreshed sooner in
    case a new course shows up. */
-const TTL_COURSE = 30 * 24 * 60 * 60 * 1000; // 30 days
-const TTL_SEARCH = 3 * 24 * 60 * 60 * 1000;  // 3 days
+const TTL_COURSE = 60 * 24 * 60 * 60 * 1000; // 60 days
+const TTL_SEARCH = 30 * 24 * 60 * 60 * 1000; // 30 days — repeat searches of the
+// same course stay free for a month, so the small free-tier daily budget is
+// spent only on genuinely new courses.
 
 const sbHeaders = () => ({ apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` });
 

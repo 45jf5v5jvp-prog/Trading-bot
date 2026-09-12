@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.10b';
+const BUILD_ID = '2026.10c';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -159,6 +159,58 @@ async function saveToLibrary(course) {
 const PINS_KEY = 'ugb:pins';
 const loadPins = () => { try { return JSON.parse(localStorage.getItem(PINS_KEY) || '[]'); } catch { return []; } };
 const savePins = (ids) => { try { localStorage.setItem(PINS_KEY, JSON.stringify(ids)); } catch {} };
+
+/* ---- Personal season ledger (per device, no login) -----------------------
+   Your phone remembers which player is "you" (by name) and folds every round
+   you finish into a private season tally: net, who you paid/collected from, and
+   which games you played. Lives only in this browser — nothing shared. */
+const MYNAME_KEY = 'ugb:myname';
+const loadMyName = () => { try { return localStorage.getItem(MYNAME_KEY) || ''; } catch { return ''; } };
+const saveMyName = (nm) => { try { nm ? localStorage.setItem(MYNAME_KEY, nm) : localStorage.removeItem(MYNAME_KEY); } catch {} };
+
+const LEDGER_KEY = 'ugb:myledger';
+const loadMyLedger = () => { try { const r = JSON.parse(localStorage.getItem(LEDGER_KEY) || '{}'); return r && r.rounds ? r : { rounds: {} }; } catch { return { rounds: {} }; } };
+const saveMyLedger = (l) => { try { localStorage.setItem(LEDGER_KEY, JSON.stringify(l)); } catch {} };
+const nrm = (s) => (s || '').trim().toLowerCase();
+/* One stable id per round so re-saving the same round overwrites instead of
+   duplicating (a round can be locked, reopened, and re-locked). */
+const ledgerKeyFor = (round) => 'r:' + (round.code || round.startedAt || `${round.course || ''}|${(round.players || []).map(p => p.name).join(',')}|${round.holes}`);
+
+/* Fold one finished round into the personal ledger under the given name. Returns
+   the updated ledger, or null if that name is not a player in this round. */
+function recordRound(round, meName) {
+  const me = (round.players || []).find(p => nrm(p.name) === nrm(meName));
+  if (!me) return null;
+  const money = fullLedger(round).money;
+  const vs = {};
+  for (const t of directTransfers(money, round.players)) {
+    if (t.from === me.id) { const nm = nameOf(round, t.to); vs[nm] = r2((vs[nm] || 0) - t.amt); }
+    else if (t.to === me.id) { const nm = nameOf(round, t.from); vs[nm] = r2((vs[nm] || 0) + t.amt); }
+  }
+  const l = loadMyLedger();
+  const key = ledgerKeyFor(round);
+  l.rounds[key] = {
+    key, date: round.finishedAt || Date.now(), course: round.course || '',
+    meName: me.name, net: r2(money[me.id] || 0), games: (round.games || []).slice(), vs,
+  };
+  saveMyLedger(l);
+  return l;
+}
+const forgetRound = (key) => { const l = loadMyLedger(); delete l.rounds[key]; saveMyLedger(l); return l; };
+
+/* Roll the stored rounds up into season stats for the My Ledger screen. */
+function summarizeLedger(l) {
+  const rounds = Object.values(l.rounds || {}).sort((a, b) => b.date - a.date);
+  const net = r2(rounds.reduce((s, r) => s + (r.net || 0), 0));
+  const up = rounds.filter(r => r.net > 0).length, down = rounds.filter(r => r.net < 0).length;
+  const best = rounds.reduce((m, r) => (r.net > (m ? m.net : -Infinity) ? r : m), null);
+  const worst = rounds.reduce((m, r) => (r.net < (m ? m.net : Infinity) ? r : m), null);
+  const vs = {}; rounds.forEach(r => { for (const nm in (r.vs || {})) vs[nm] = r2((vs[nm] || 0) + r.vs[nm]); });
+  const rivals = Object.entries(vs).map(([name, amt]) => ({ name, amt })).sort((a, b) => b.amt - a.amt);
+  const gc = {}; rounds.forEach(r => (r.games || []).forEach(g => { gc[g] = (gc[g] || 0) + 1; }));
+  const games = Object.entries(gc).map(([k, n]) => ({ k, n })).sort((a, b) => b.n - a.n);
+  return { rounds, net, up, down, best, worst, rivals, games };
+}
 
 /* ==========================================================================
    GAMES
@@ -3120,6 +3172,8 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
             </Btn>
           )}
 
+          {locked && !guest && <LedgerSaveCard round={round} />}
+
           <GamesGuide round={round} />
           <div style={{ height: 10 }} />
         </div>
@@ -3353,7 +3407,160 @@ const SHARE_STATUS = {
   http: 'Shared board: the database returned an error. Check the setup.',
   network: 'Shared board: cannot reach the database. Check the Supabase URL, or your connection.',
 };
-function Home({ onNew, onTrip, onJoin, resume, tripResume, theme, setTheme }) {
+/* Shown on a finished round: folds it into your personal season ledger and lets
+   you correct who "you" are. Auto-saves once your name is known; else it asks. */
+function LedgerSaveCard({ round }) {
+  const [myName, setMyName] = useState(loadMyName());
+  const [saved, setSaved] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const match = round.players.find(p => nrm(p.name) === nrm(myName));
+  useEffect(() => {
+    if (myName && match && !saved) { if (recordRound(round, myName)) setSaved(true); }
+  }, [myName, saved]); // eslint-disable-line
+  const chooseMe = (name) => { saveMyName(name); recordRound(round, name); setMyName(name); setSaved(true); setChoosing(false); };
+  const remove = () => { forgetRound(ledgerKeyFor(round)); setSaved(false); setChoosing(false); };
+  const myNet = match ? r2(fullLedger(round).money[match.id] || 0) : 0;
+  return (
+    <div style={{ marginTop: 16, padding: '13px 14px', background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13 }}>
+      <Eyebrow style={{ color: C.ink, marginBottom: 6 }}>your golf ledger</Eyebrow>
+      {saved && match && !choosing ? (
+        <>
+          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, lineHeight: 1.45 }}>
+            Saved to your ledger as {match.name} — <span style={{ color: myNet > 0 ? C.up : myNet < 0 ? C.down : C.chalk }}>{money(myNet)}</span> this round.
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <Btn onClick={() => setChoosing(true)} style={{ flex: 1, fontSize: 11 }}>Not me / change</Btn>
+            <Btn onClick={remove} style={{ flex: 1, fontSize: 11 }}>Remove</Btn>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginBottom: 9, lineHeight: 1.5 }}>
+            Track this round in your season ledger — which player are you? Kept on this phone only.
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {round.players.map(p => (
+              <Btn key={p.id} onClick={() => chooseMe(p.name)} style={{ fontSize: 12, padding: '9px 12px' }}>{p.name}</Btn>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* The personal season tracker — private to this phone. */
+function MyLedger({ onBack }) {
+  const [l, setL] = useState(loadMyLedger());
+  const [name, setName] = useState(loadMyName());
+  const [editName, setEditName] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const s = summarizeLedger(l);
+  const has = s.rounds.length > 0;
+  const saveName = () => { const v = draft.trim(); saveMyName(v); setName(v); setEditName(false); setL(loadMyLedger()); };
+  const clearAll = () => { saveMyLedger({ rounds: {} }); setL({ rounds: {} }); };
+  const bigNet = { color: s.net > 0 ? C.up : s.net < 0 ? C.down : C.chalk };
+  const stat = (label, val, col) => (
+    <div style={{ flex: 1, background: C.card, borderRadius: 11, padding: '11px 12px' }}>
+      <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 18, color: col || C.chalk, marginTop: 3 }}>{val}</div>
+    </div>
+  );
+  const dt = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; } };
+
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '46px 18px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 6 }}>
+        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 1 }}>My Golf Ledger</div>
+        <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', padding: 0 }}>×</button>
+      </div>
+      <Eyebrow style={{ marginBottom: 18 }}>private to this phone · {name ? `you are ${name}` : 'no name set yet'}</Eyebrow>
+
+      {!has ? (
+        <div style={{ background: C.card, borderRadius: 13, padding: '18px 16px' }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 15, color: C.chalk, marginBottom: 6 }}>Nothing tracked yet.</div>
+          <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+            Finish a round on this phone and tap <b>which player is you</b> — from then on every round you finish here lands in your season ledger automatically.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13, padding: '15px 16px', marginBottom: 12 }}>
+            <Eyebrow style={{ color: C.ink }}>season so far</Eyebrow>
+            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 40, letterSpacing: '-0.02em', marginTop: 2, ...bigNet }}>{money(s.net)}</div>
+            <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.muted, marginTop: 2 }}>{s.rounds.length} round{s.rounds.length === 1 ? '' : 's'} · {s.up} up · {s.down} down</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            {stat('best day', s.best ? money(s.best.net) : '—', C.up)}
+            {stat('worst day', s.worst ? money(s.worst.net) : '—', C.down)}
+          </div>
+
+          {!!s.rivals.length && (
+            <div style={{ marginBottom: 12 }}>
+              <Eyebrow style={{ marginBottom: 8 }}>who you win from & pay</Eyebrow>
+              {s.rivals.map(r => (
+                <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: C.card, borderRadius: 10, marginBottom: 5 }}>
+                  <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{r.name}</span>
+                  <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: r.amt > 0 ? C.up : r.amt < 0 ? C.down : C.muted }}>
+                    {r.amt > 0 ? '+' : ''}{money(r.amt)}
+                  </span>
+                </div>
+              ))}
+              <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 3 }}>+ you're up on them for the season · − you're down</div>
+            </div>
+          )}
+
+          {!!s.games.length && (
+            <div style={{ marginBottom: 12 }}>
+              <Eyebrow style={{ marginBottom: 8 }}>most-played games</Eyebrow>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {s.games.map(g => (
+                  <div key={g.k} style={{ fontFamily: F_MONO, fontSize: 11, color: C.chalk, background: C.card, borderRadius: 8, padding: '7px 10px' }}>
+                    {GAMES[g.k] ? GAMES[g.k].name(4) : g.k} · {g.n}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Eyebrow style={{ marginBottom: 8 }}>rounds</Eyebrow>
+          {s.rounds.map(r => (
+            <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13.5, color: C.chalk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.course || 'Round'}</div>
+                <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 2 }}>{dt(r.date)} · {(r.games || []).map(k => (GAMES[k] ? GAMES[k].name(4) : k)).join(', ')}</div>
+              </div>
+              <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: r.net > 0 ? C.up : r.net < 0 ? C.down : C.muted }}>{money(r.net)}</span>
+              <button onClick={() => setL(forgetRound(r.key))} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 15, cursor: 'pointer', padding: '0 2px' }}>×</button>
+            </div>
+          ))}
+        </>
+      )}
+
+      <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
+        {editName ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="your name in the group"
+              style={{ ...inputStyle, flex: 1 }} />
+            <Btn kind="solid" onClick={saveName} style={{ fontSize: 12 }}>Save</Btn>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: F_MONO, fontSize: 10.5, color: C.muted }}>{name ? `You are “${name}.”` : 'No name set.'}</span>
+            <Btn onClick={() => { setDraft(name); setEditName(true); }} style={{ fontSize: 10.5, padding: '7px 10px' }}>{name ? 'Change name' : 'Set your name'}</Btn>
+            {has && <Btn onClick={clearAll} style={{ marginLeft: 'auto', fontSize: 10.5, padding: '7px 10px' }}>Clear ledger</Btn>}
+          </div>
+        )}
+        <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 10, lineHeight: 1.6 }}>
+          Stored only on this phone. Clearing your browser data or switching phones resets it. Accounts (coming with the app) will make it portable.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Home({ onNew, onTrip, onJoin, onLedger, resume, tripResume, theme, setTheme }) {
   const [conn, setConn] = useState(null);
   useEffect(() => { if (SHARING_ON) remote.ping().then(setConn).catch(() => setConn({ ok: false, reason: 'network' })); }, []);
   return (
@@ -3388,8 +3595,9 @@ function Home({ onNew, onTrip, onJoin, resume, tripResume, theme, setTheme }) {
       )}
 
       <Btn onClick={onNew} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a round</Btn>
-      <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: SHARING_ON ? 10 : 0 }}>Start a trip</Btn>
-      {SHARING_ON && <Btn onClick={onJoin} style={{ width: '100%', padding: '20px', fontSize: 16 }}>Join with a code</Btn>}
+      <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a trip</Btn>
+      {SHARING_ON && <Btn onClick={onJoin} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Join with a code</Btn>}
+      <Btn onClick={onLedger} style={{ width: '100%', padding: '16px', fontSize: 14 }}>My golf ledger</Btn>
 
       <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 18, lineHeight: 1.6 }}>
         {SHARING_ON
@@ -3591,6 +3799,7 @@ function Viewer({ code, initial, onLeave }) {
           <Standings round={round} ledger={ledger} />
           <SettleUp round={round} ledger={ledger} />
           <HoleFeed round={round} ledger={ledger} />
+          {round.locked && <LedgerSaveCard round={round} />}
           <GamesGuide round={round} defaultOpen />
           <div style={{ height: 12 }} />
         </div>
@@ -4079,6 +4288,8 @@ export default function App() {
 
   if (screen === 'setup') return shell(<Setup onStart={startRound} onBack={() => setScreen('home')} />);
 
+  if (screen === 'ledger') return shell(<MyLedger onBack={() => setScreen('home')} />);
+
   if (screen === 'edit' && round) return shell(
     <Setup editRound={round}
       onStart={(updated) => { setRound(updated); setScreen('play'); }}
@@ -4097,6 +4308,7 @@ export default function App() {
       onNew={() => setScreen('setup')}
       onTrip={() => setScreen('tripsetup')}
       onJoin={() => setScreen('join')}
+      onLedger={() => setScreen('ledger')}
       resume={saved?.games ? {
         label: `${saved.games.map(k => gameName(k, saved.players.length)).join(' + ')} · ${saved.players.map(p => p.name).join(', ')}`,
         go: () => { setRound(saved); setScreen('play'); },
@@ -4115,4 +4327,5 @@ export default function App() {
 export const __TEST__ = {
   GAMES, ENGINES, MULT_GAMES, fullLedger, calcJunk, settle, allocate,
   playedHoles, net, gross, strokesFor, skinsCarryInto, calcTrain, trainCat,
+  recordRound, summarizeLedger, ledgerKeyFor, directTransfers,
 };

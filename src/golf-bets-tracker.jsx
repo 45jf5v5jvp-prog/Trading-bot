@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.10a';
+const BUILD_ID = '2026.10b';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -1823,22 +1823,30 @@ function Setup({ onStart, onBack, roster, editRound }) {
           )}
 
           {games.includes('train') && (
-            <>
-              <Eyebrow style={{ marginBottom: 8 }}>the train · caboose on {holes >= 18 ? '18' : `the last hole`}</Eyebrow>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <div style={{ background: C.card2, borderRadius: 12, border: `1px solid ${C.line}`, padding: 13, marginBottom: 18 }}>
+              <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 16, color: C.chalk, marginBottom: 2 }}>Configure The Train</div>
+              <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, letterSpacing: '0.04em', marginBottom: 12 }}>the defaults are fine — change only if you want</div>
+
+              <Eyebrow style={{ marginBottom: 7 }}>the caboose · {holes >= 18 ? 'hole 18' : 'last hole'}</Eyebrow>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 7 }}>
                 <Btn active={trainCaboose} onClick={() => setTrainCaboose(true)} style={{ flex: 1, fontSize: 11.5 }}>Caboose on</Btn>
                 <Btn active={!trainCaboose} onClick={() => setTrainCaboose(false)} style={{ flex: 1, fontSize: 11.5 }}>Off</Btn>
               </div>
-              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 12 }}>
+              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 16 }}>
                 {trainCaboose
                   ? 'On the last hole everybody is automatically aboard and every point doubles, so the whole group has something to play for coming up the last hole.'
                   : 'The last hole plays like any other — you only score if you are already on the train.'}
               </div>
-              <div onClick={() => setTrainCustom(v => !v)} style={{ cursor: 'pointer', marginBottom: 8 }}>
-                <Eyebrow style={{ color: C.ink }}>points per hole {trainCustom ? '▴' : '▾'}</Eyebrow>
+
+              <Eyebrow style={{ marginBottom: 7 }}>points per hole</Eyebrow>
+              <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.chalk, marginBottom: 8 }}>
+                Bogey {fmtP(Number(trainPts.bogey) || 0)} · Par {fmtP(Number(trainPts.par) || 0)} · Birdie {fmtP(Number(trainPts.birdie) || 0)} · Eagle {fmtP(Number(trainPts.eagle) || 0)}
               </div>
+              <Btn onClick={() => setTrainCustom(v => !v)} style={{ width: '100%', fontSize: 12 }}>
+                {trainCustom ? 'Done — use these points' : 'Customize the points'}
+              </Btn>
               {trainCustom && (
-                <div style={{ marginBottom: 8 }}>
+                <div style={{ marginTop: 10 }}>
                   {[['bogey', 'Bogey'], ['par', 'Par'], ['birdie', 'Birdie'], ['eagle', 'Eagle']].map(([k, lbl]) => (
                     <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13, color: C.chalk, width: 72 }}>{lbl}</span>
@@ -1850,12 +1858,11 @@ function Setup({ onStart, onBack, roster, editRound }) {
                   ))}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                     <span style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, flex: 1, lineHeight: 1.6 }}>Double bogey or worse is always 0 and derails you.</span>
-                    <Btn onClick={() => setTrainPts({ bogey: 1, par: 2, birdie: 4, eagle: 8 })} style={{ fontSize: 10.5, padding: '7px 10px' }}>Reset</Btn>
+                    <Btn onClick={() => setTrainPts({ bogey: 1, par: 2, birdie: 4, eagle: 8 })} style={{ fontSize: 10.5, padding: '7px 10px' }}>Reset to default</Btn>
                   </div>
                 </div>
               )}
-              <div style={{ marginBottom: 18 }} />
-            </>
+            </div>
           )}
 
           {bigField && (

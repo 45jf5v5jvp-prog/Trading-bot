@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06o';
+const BUILD_ID = '2026.09.06p';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -220,6 +220,11 @@ const GAMES = {
     ok: (n) => n >= 2 && n <= 6,
     blurb: () => 'Three points a hole: first on the green, closest once all are on, first in the cup.',
   },
+  train: {
+    name: () => 'The Train', unit: 'per point', teams: false, defStake: 0.5,
+    ok: (n) => n >= 2,
+    blurb: () => 'Board the train with a birdie or two pars in a row — the boarding hole itself pays nothing. Once aboard you bank points every hole: bogey 1, par 2, birdie 4, eagle 8. A double bogey, or two bogeys in a row, derails you — your banked points stay, but you have to climb back on to score again. The Caboose: on the last hole everybody is automatically aboard and every point doubles, so the whole group has something to play for coming up 18.',
+  },
 };
 const gameName = (k, n) => GAMES[k].name(n);
 const isPointGame = (k) => GAMES[k].unit === 'per point';
@@ -301,7 +306,7 @@ const teamsAt = (r, h) => (r.partnerMode === 'rotate' && r.holeTeams?.[h]) || r.
    defaults to 1 (a no-op), so with nothing set the scoring is exactly as
    before. It scales the per-hole games below — not the match-play games,
    Hammer (its own doubling) or junk (its own ladder). */
-const MULT_GAMES = ['skins', 'wolf', 'vegas', 'points', 'yardage', 'stableford', 'bbb'];
+const MULT_GAMES = ['skins', 'wolf', 'vegas', 'points', 'yardage', 'stableford', 'bbb', 'train'];
 const holeMult = (round, h) => Number(round.mult?.[h]) || 1;
 const scaleMap = (m, x) => { if (x !== 1) for (const k in m) m[k] = (m[k] || 0) * x; return m; };
 
@@ -776,6 +781,66 @@ function calcStableford(round, stake) {
   return { money: settle(round, pts, stake), points: pts, log };
 }
 
+/* THE TRAIN. Board with a birdie (or better) or two pars in a row; the boarding
+   hole itself never scores. Once ON the train you bank points every hole
+   (bogey 1, par 2, birdie 4, eagle 8 by default, customizable). A double bogey
+   or worse derails you on the spot (0 that hole); two bogeys in a row also
+   derails. Banked points stay; you must re-board to score again. THE CABOOSE:
+   on the last hole everybody is automatically aboard and every point doubles,
+   so the whole field has something to play for coming up 18. Money settles per
+   point via settle(), so it's zero-sum like Stableford. */
+const cleanTrainPts = (t) => ({ bogey: Number(t?.bogey) || 0, par: Number(t?.par) || 0, birdie: Number(t?.birdie) || 0, eagle: Number(t?.eagle) || 0 });
+function trainCat(round, pid, h) {
+  const sc = round.useNet ? net(round, pid, h) : gross(round, pid, h);
+  if (sc == null) return null;
+  const rel = sc - round.pars[h];
+  if (rel <= -2) return 'eagle';
+  if (rel === -1) return 'birdie';
+  if (rel === 0) return 'par';
+  if (rel === 1) return 'bogey';
+  return 'double';
+}
+function calcTrain(round, stake) {
+  const P = round.trainPts || {};
+  const gv = (v, d) => { const x = Number(v); return Number.isFinite(x) ? x : d; };
+  const pv = { bogey: gv(P.bogey, 1), par: gv(P.par, 2), birdie: gv(P.birdie, 4), eagle: gv(P.eagle, 8), double: 0 };
+  const caboose = round.trainCaboose !== false;
+  const finalIdx = round.holes - 1;
+  const pts = zero(round), evByH = {};
+  round.players.forEach(p => {
+    let onTrain = false, offPars = 0, onBogeys = 0;
+    for (const h of playedHoles(round)) {
+      const cat = trainCat(round, p.id, h);
+      if (cat == null) continue;
+      const ride = caboose && h === finalIdx;   // last hole: everyone aboard, doubled
+      const effOn = onTrain || ride;
+      let got = 0;
+      if (effOn) { got = pv[cat] * holeMult(round, h) * (ride ? 2 : 1); pts[p.id] += got; }
+      let note = '';
+      if (onTrain) {
+        if (cat === 'double') { onTrain = false; onBogeys = 0; note = 'derailed'; }
+        else if (cat === 'bogey') { onBogeys++; if (onBogeys >= 2) { onTrain = false; onBogeys = 0; note = 'then off'; } }
+        else onBogeys = 0;
+        offPars = 0;
+      } else {
+        onBogeys = 0;
+        if (cat === 'eagle' || cat === 'birdie') { onTrain = true; offPars = 0; note = 'boarded'; }
+        else if (cat === 'par') { offPars++; if (offPars >= 2) { onTrain = true; offPars = 0; note = 'boarded'; } }
+        else offPars = 0;
+      }
+      if (ride) note = ''; // no boarding chatter on the caboose hole
+      const label = (effOn && got > 0) ? `+${fmtP(got)}${note ? ' ' + note : ''}` : (note || '·');
+      (evByH[h] = evByH[h] || []).push(`${nameOf(round, p.id)} ${label}`);
+    }
+  });
+  const log = playedHoles(round).map(h => ({
+    h,
+    text: ((caboose && h === finalIdx) ? '🚂 Caboose — everyone aboard, points double. ' : '') + (evByH[h] || []).join('  ·  '),
+    m: zero(round),
+  }));
+  return { money: settle(round, pts, stake), points: pts, log };
+}
+
 function calcBBB(round, stake) {
   const pts = zero(round), log = [];
   const keys = [['bingo', 'first on'], ['bango', 'closest'], ['bongo', 'first in']];
@@ -808,7 +873,7 @@ function calcYardage(round, rate) {
   return { money: total, points: null, log };
 }
 
-const ENGINES = { skins: calcSkins, nassau: calcNassau, wolf: calcWolf, vegas: calcVegas, hammer: calcHammer, points: calcPoints, roundrobin: calcRoundRobin, yardage: calcYardage, stableford: calcStableford, bbb: calcBBB };
+const ENGINES = { skins: calcSkins, nassau: calcNassau, wolf: calcWolf, vegas: calcVegas, hammer: calcHammer, points: calcPoints, roundrobin: calcRoundRobin, yardage: calcYardage, stableford: calcStableford, bbb: calcBBB, train: calcTrain };
 
 /* --- junk, including the escalating snake --- */
 /* Junk can climb the same way the snake does. The count is kept per type, so
@@ -1417,6 +1482,9 @@ function Setup({ onStart, onBack, roster, editRound }) {
   const [si, setSi] = useState(E ? DEF_SI.map((d, i) => E.si?.[i] ?? d) : [...DEF_SI]);
   const [yards, setYards] = useState(E ? DEF_YDS.map((d, i) => String(E.yards?.[i] ?? d)) : DEF_YDS.map(String));
   const [yardMode, setYardMode] = useState(E?.yardMode || 'each');
+  const [trainPts, setTrainPts] = useState(() => ({ bogey: 1, par: 2, birdie: 4, eagle: 8, ...(E?.trainPts || {}) }));
+  const [trainCaboose, setTrainCaboose] = useState(E ? E.trainCaboose !== false : true);
+  const [trainCustom, setTrainCustom] = useState(false);
   const [courseName, setCourseName] = useState(E?.course || '');
   const [showCourse, setShowCourse] = useState(!E);
 
@@ -1476,6 +1544,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
         holes, groups, pointsSplit: oddSplit(count),
         junkOn, junkValue: Number(junkValue) || 1, junkValues, junkEscalate, junkMode,
         snakeBase: Number(snakeBase) || 1, snakeMode,
+        trainPts: cleanTrainPts(trainPts), trainCaboose,
       });
       return;
     }
@@ -1506,6 +1575,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
       groups, blindDraw: oddMan && blindDraw,
       junkOn, junkValue: Number(junkValue) || 1, junkValues, junkEscalate, junkMode,
       snakeBase: Number(snakeBase) || 1, snakeMode,
+      trainPts: cleanTrainPts(trainPts), trainCaboose,
       startedAt: Date.now(),
     });
   };
@@ -1749,6 +1819,42 @@ function Setup({ onStart, onBack, roster, editRound }) {
                   ? 'A halved hole rolls into the next one and the pot builds.'
                   : 'A halved hole is gone. Every hole is worth the same all day.'}
               </div>
+            </>
+          )}
+
+          {games.includes('train') && (
+            <>
+              <Eyebrow style={{ marginBottom: 8 }}>the train · caboose on {holes >= 18 ? '18' : `the last hole`}</Eyebrow>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <Btn active={trainCaboose} onClick={() => setTrainCaboose(true)} style={{ flex: 1, fontSize: 11.5 }}>Caboose on</Btn>
+                <Btn active={!trainCaboose} onClick={() => setTrainCaboose(false)} style={{ flex: 1, fontSize: 11.5 }}>Off</Btn>
+              </div>
+              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 12 }}>
+                {trainCaboose
+                  ? 'On the last hole everybody is automatically aboard and every point doubles, so the whole group has something to play for coming up the last hole.'
+                  : 'The last hole plays like any other — you only score if you are already on the train.'}
+              </div>
+              <div onClick={() => setTrainCustom(v => !v)} style={{ cursor: 'pointer', marginBottom: 8 }}>
+                <Eyebrow style={{ color: C.ink }}>points per hole {trainCustom ? '▴' : '▾'}</Eyebrow>
+              </div>
+              {trainCustom && (
+                <div style={{ marginBottom: 8 }}>
+                  {[['bogey', 'Bogey'], ['par', 'Par'], ['birdie', 'Birdie'], ['eagle', 'Eagle']].map(([k, lbl]) => (
+                    <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13, color: C.chalk, width: 72 }}>{lbl}</span>
+                      <input value={trainPts[k]} inputMode="numeric"
+                        onChange={e => { const v = e.target.value.replace(/[^0-9.]/g, ''); setTrainPts(o => ({ ...o, [k]: v })); }}
+                        style={{ ...inputStyle, width: 70, flex: '0 0 70px', textAlign: 'center' }} />
+                      <span style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted }}>pts</span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    <span style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, flex: 1, lineHeight: 1.6 }}>Double bogey or worse is always 0 and derails you.</span>
+                    <Btn onClick={() => setTrainPts({ bogey: 1, par: 2, birdie: 4, eagle: 8 })} style={{ fontSize: 10.5, padding: '7px 10px' }}>Reset</Btn>
+                  </div>
+                </div>
+              )}
+              <div style={{ marginBottom: 18 }} />
             </>
           )}
 
@@ -3995,3 +4101,11 @@ export default function App() {
     />
   );
 }
+
+/* Test-only export: exposes the pure scoring engine so the offline audit
+   harness can exercise the real code (not a copy). Unused by the app and
+   tree-shaken out of the production bundle. */
+export const __TEST__ = {
+  GAMES, ENGINES, MULT_GAMES, fullLedger, calcJunk, settle, allocate,
+  playedHoles, net, gross, strokesFor, skinsCarryInto, calcTrain, trainCat,
+};

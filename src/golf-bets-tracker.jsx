@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.10c';
+const BUILD_ID = '4.1a';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -192,6 +192,7 @@ function recordRound(round, meName) {
   l.rounds[key] = {
     key, date: round.finishedAt || Date.now(), course: round.course || '',
     meName: me.name, net: r2(money[me.id] || 0), games: (round.games || []).slice(), vs,
+    groupCode: round.groupCode || null,
   };
   saveMyLedger(l);
   return l;
@@ -211,6 +212,21 @@ function summarizeLedger(l) {
   const games = Object.entries(gc).map(([k, n]) => ({ k, n })).sort((a, b) => b.n - a.n);
   return { rounds, net, up, down, best, worst, rivals, games };
 }
+/* Same stats, but only the rounds tagged to one group (for "my stats in this
+   group"). Kept separate from the all-rounds ledger view on purpose. */
+const summarizeLedgerFor = (l, groupCode) => summarizeLedger({ rounds: Object.fromEntries(Object.entries(l.rounds || {}).filter(([, r]) => r.groupCode === groupCode)) });
+
+/* ---- Device identity + group membership (per device, no login) ------------
+   A login-free identity: a random id minted once per phone, plus the list of
+   group codes this phone has joined. Groups themselves live in shared storage
+   (see groupKey/publishGroup below); this is just what THIS device knows. */
+const DEVICE_KEY = 'ugb:device';
+const deviceId = () => { try { let d = localStorage.getItem(DEVICE_KEY); if (!d) { d = 'dev_' + Math.random().toString(36).slice(2, 10); localStorage.setItem(DEVICE_KEY, d); } return d; } catch { return 'dev_anon'; } };
+const MYGROUPS_KEY = 'ugb:mygroups';
+const loadMyGroups = () => { try { return JSON.parse(localStorage.getItem(MYGROUPS_KEY) || '[]'); } catch { return []; } };
+const saveMyGroups = (arr) => { try { localStorage.setItem(MYGROUPS_KEY, JSON.stringify(arr)); } catch {} };
+const addMyGroup = (code) => { const a = loadMyGroups().filter(c => c !== code); a.unshift(code); saveMyGroups(a); return a; };
+const removeMyGroup = (code) => { const a = loadMyGroups().filter(c => c !== code); saveMyGroups(a); return a; };
 
 /* ==========================================================================
    GAMES
@@ -2645,6 +2661,12 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
   const [pressing, setPressing] = useState(false);
   const [padFor, setPadFor] = useState(null); // which player's quick score pad is open
   useEffect(() => { setPadFor(null); }, [h]); // close the pad when the hole changes
+  // When a round tied to a group is locked in, clear that group's "live" flag.
+  useEffect(() => {
+    if (round.locked && round.groupCode && round.code) {
+      updateGroup(round.groupCode, x => { if (x.liveRound === round.code) x.liveRound = null; }).catch(() => {});
+    }
+  }, [round.locked]); // eslint-disable-line
 
   const ledger = useMemo(() => fullLedger(round), [round]);
   const n = round.players.length;
@@ -3286,9 +3308,74 @@ async function freshCode() {
   return rollCode();
 }
 
-/* Per hole data every scorer owns for their own foursome. Everything else is
-   config the host owns. Split this way, two groups can post at the same time
-   without stepping on each other. */
+/* ==========================================================================
+   GROUPS
+   A persistent playing group: a standing roster, an activity feed, and (later)
+   group stats. Stored as one shared JSON blob per group under ugb:group:<code>,
+   the same key/value pattern rounds and trips already use — no new backend.
+   Identity is the device id + a chosen name; no login.
+   ========================================================================== */
+const groupKey = (code) => `ugb:group:${code}`;
+
+async function freshGroupCode() {
+  if (!SHARING_ON) return null;
+  for (let i = 0; i < 8; i++) {
+    const c = rollCode();
+    let taken = false;
+    try { await storage.get(groupKey(c), true); taken = true; } catch { /* free */ }
+    if (!taken) return c;
+  }
+  return rollCode();
+}
+
+async function publishGroup(g) {
+  if (!g?.code) return;
+  await storage.set(groupKey(g.code), JSON.stringify({ group: g, at: Date.now() }), true);
+}
+async function pullGroup(code) {
+  const r = await storage.get(groupKey(code), true);
+  if (!r?.value) throw new Error('empty');
+  const d = JSON.parse(r.value);
+  return d.group || d;
+}
+
+/* Create a new group and remember it on this device. */
+async function createGroup({ name, homeCourse, myName }) {
+  const code = await freshGroupCode();
+  const g = {
+    code, name: (name || '').trim() || 'My Group', homeCourse: (homeCourse || '').trim(),
+    createdBy: deviceId(), createdAt: Date.now(),
+    members: [{ deviceId: deviceId(), name: (myName || '').trim() || 'Me', joinedAt: Date.now() }],
+    activity: [], snapshots: [], liveRound: null,
+  };
+  if (code) await publishGroup(g);
+  addMyGroup(code || 'local');
+  return g;
+}
+
+/* Join an existing group (or update your name if your device is already in it). */
+async function joinGroup(code, myName) {
+  const g = await pullGroup(code);
+  const me = deviceId();
+  const nm = (myName || '').trim() || 'Me';
+  const i = (g.members || []).findIndex(m => m.deviceId === me);
+  if (i >= 0) g.members[i].name = nm;
+  else (g.members = g.members || []).push({ deviceId: me, name: nm, joinedAt: Date.now() });
+  await publishGroup(g);
+  addMyGroup(code);
+  return g;
+}
+
+/* Read-modify-write a group blob. Best-effort, mirrors how trips update. */
+async function updateGroup(code, mutate) {
+  let g; try { g = await pullGroup(code); } catch { return null; }
+  mutate(g);
+  await publishGroup(g);
+  return g;
+}
+const nameInGroup = (g) => { const me = deviceId(); return (g?.members || []).find(m => m.deviceId === me)?.name || ''; };
+
+
 const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams', 'mult'];
 const cardKey = (code, gi) => `${gameKey(code)}:c${gi}`;
 
@@ -3407,6 +3494,201 @@ const SHARE_STATUS = {
   http: 'Shared board: the database returned an error. Check the setup.',
   network: 'Shared board: cannot reach the database. Check the Supabase URL, or your connection.',
 };
+/* ---- Groups UI ----------------------------------------------------------- */
+
+function GroupsList({ onOpen, onCreate, onJoin, onBack }) {
+  const codes = loadMyGroups();
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let live = true;
+    Promise.all(codes.map(c => pullGroup(c).then(g => ({ ok: true, g, c })).catch(() => ({ ok: false, c }))))
+      .then(rs => { if (live) setRows(rs); });
+    return () => { live = false; };
+  }, []); // eslint-disable-line
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '46px 18px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 18 }}>
+        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk }}>Your Groups</div>
+        <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+      {!SHARING_ON && <div style={{ background: C.card, borderRadius: 12, padding: '13px 14px', marginBottom: 12, fontFamily: F_DISP, fontSize: 12.5, color: C.down, lineHeight: 1.5 }}>Groups need the shared leaderboard, which isn't set up on this build.</div>}
+      {rows == null ? (
+        <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.muted, padding: '8px 0' }}>Loading…</div>
+      ) : rows.length === 0 ? (
+        <div style={{ background: C.card, borderRadius: 13, padding: 16, marginBottom: 14, fontFamily: F_DISP, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+          No groups yet. Create one for your regular crew, or join with a code.
+        </div>
+      ) : rows.map(r => r.ok ? (
+        <div key={r.c} onClick={() => onOpen(r.c)} style={{ padding: 15, background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13, marginBottom: 10, cursor: 'pointer' }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 16, color: C.chalk }}>{r.g.name}</div>
+          <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 3 }}>#{r.c} · {(r.g.members || []).length} member{(r.g.members || []).length === 1 ? '' : 's'}{r.g.homeCourse ? ` · ${r.g.homeCourse}` : ''}</div>
+          {r.g.liveRound && <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.ink, marginTop: 4 }}>● live round now</div>}
+        </div>
+      ) : (
+        <div key={r.c} style={{ padding: 13, background: C.card, borderRadius: 12, marginBottom: 10, fontFamily: F_MONO, fontSize: 11, color: C.muted }}>#{r.c} — couldn't load</div>
+      ))}
+      {SHARING_ON && <>
+        <Btn onClick={onCreate} style={{ width: '100%', padding: '16px', fontSize: 14, marginTop: 6, marginBottom: 10 }}>Create a group</Btn>
+        <Btn onClick={onJoin} style={{ width: '100%', padding: '16px', fontSize: 14 }}>Join with a code</Btn>
+      </>}
+    </div>
+  );
+}
+
+function GroupCreate({ onCreated, onBack }) {
+  const [name, setName] = useState('');
+  const [home, setHome] = useState('');
+  const [me, setMe] = useState(loadMyName());
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try { if (me.trim()) saveMyName(me.trim()); const g = await createGroup({ name, homeCourse: home, myName: me }); onCreated(g.code); }
+    catch { setBusy(false); }
+  };
+  const L = (t) => <Eyebrow style={{ marginBottom: 6 }}>{t}</Eyebrow>;
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '46px 18px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 18 }}>
+        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 28, letterSpacing: '-0.03em', color: C.chalk }}>Create a Group</div>
+        <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+      {L('group name')}
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="River's Bend Saturday Crew" style={{ ...inputStyle, marginBottom: 14 }} />
+      {L('home course (optional)')}
+      <input value={home} onChange={e => setHome(e.target.value)} placeholder="TPC River's Bend" style={{ ...inputStyle, marginBottom: 14 }} />
+      {L('your name in the group')}
+      <input value={me} onChange={e => setMe(e.target.value)} placeholder="Geoff" style={{ ...inputStyle, marginBottom: 20 }} />
+      <Btn kind="solid" onClick={go} disabled={!name.trim() || busy} style={{ width: '100%', padding: 16, fontSize: 15 }}>{busy ? 'Creating…' : 'Create group'}</Btn>
+    </div>
+  );
+}
+
+function GroupJoin({ onJoined, onBack }) {
+  const [code, setCode] = useState('');
+  const [me, setMe] = useState(loadMyName());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const go = async () => {
+    if (!code.trim() || busy) return;
+    setBusy(true); setErr(null);
+    try { if (me.trim()) saveMyName(me.trim()); const g = await joinGroup(cleanCode(code), me); onJoined(g.code); }
+    catch { setErr('No group with that code.'); setBusy(false); }
+  };
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '46px 18px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 18 }}>
+        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 28, letterSpacing: '-0.03em', color: C.chalk }}>Join a Group</div>
+        <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+      <Eyebrow style={{ marginBottom: 6 }}>group code</Eyebrow>
+      <input value={code} onChange={e => setCode(cleanCode(e.target.value))} placeholder="ABC123" autoCapitalize="characters"
+        style={{ ...inputStyle, marginBottom: 14, fontFamily: F_MONO, letterSpacing: '0.2em', fontSize: 18, textAlign: 'center' }} />
+      <Eyebrow style={{ marginBottom: 6 }}>your name in the group</Eyebrow>
+      <input value={me} onChange={e => setMe(e.target.value)} placeholder="Geoff" style={{ ...inputStyle, marginBottom: 16 }} />
+      {err && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.down, marginBottom: 12 }}>{err}</div>}
+      <Btn kind="solid" onClick={go} disabled={!code.trim() || busy} style={{ width: '100%', padding: 16, fontSize: 15 }}>{busy ? 'Joining…' : 'Join group'}</Btn>
+    </div>
+  );
+}
+
+function GroupHub({ code, onBack, onStartRound, onOpenRound }) {
+  const [g, setG] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [note, setNote] = useState('');
+  const me = deviceId();
+  const refresh = () => pullGroup(code).then(x => { setG(x); setLoading(false); }).catch(() => setLoading(false));
+  useEffect(() => { refresh(); const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [code]); // eslint-disable-line
+  const myName = g ? nameInGroup(g) : '';
+  const postPlaying = async () => {
+    const entry = { id: uid(), type: 'playing', deviceId: me, name: myName || 'Someone', when: Date.now(), note: note.trim(), inOut: { [me]: 'in' } };
+    setNote('');
+    const ng = await updateGroup(code, x => { x.activity = [entry, ...(x.activity || [])].slice(0, 30); }); if (ng) setG(ng);
+  };
+  const setInOut = async (id, v) => { const ng = await updateGroup(code, x => { const a = (x.activity || []).find(e => e.id === id); if (a) { a.inOut = a.inOut || {}; a.inOut[me] = a.inOut[me] === v ? undefined : v; } }); if (ng) setG(ng); };
+  const stats = summarizeLedgerFor(loadMyLedger(), code);
+
+  if (loading) return <div style={{ maxWidth: 520, margin: '0 auto', padding: '60px 18px', fontFamily: F_MONO, fontSize: 12, color: C.muted }}>Loading group…</div>;
+  if (!g) return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '60px 18px' }}>
+      <div style={{ fontFamily: F_DISP, fontSize: 15, color: C.down, marginBottom: 14 }}>Couldn't load this group.</div>
+      <Btn onClick={onBack} style={{ width: '100%' }}>Back</Btn>
+    </div>
+  );
+  const inCount = (a) => Object.values(a.inOut || {}).filter(v => v === 'in').length;
+  const snaps = g.snapshots || [];
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '44px 16px 70px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 4 }}>
+        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 27, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 1 }}>{g.name}</div>
+        <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+      <Eyebrow style={{ marginBottom: 14 }}>#{g.code}{g.homeCourse ? ` · ${g.homeCourse}` : ''} · {(g.members || []).length} member{(g.members || []).length === 1 ? '' : 's'}</Eyebrow>
+
+      {g.liveRound && (
+        <div onClick={() => onOpenRound(g.liveRound)} style={{ padding: 14, background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 13, marginBottom: 12, cursor: 'pointer' }}>
+          <Eyebrow style={{ color: C.ink }}>● round in progress</Eyebrow>
+          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, marginTop: 4 }}>Tap to watch the leaderboard →</div>
+        </div>
+      )}
+
+      <Btn kind="solid" onClick={() => onStartRound(g.code)} style={{ width: '100%', padding: 15, fontSize: 15, marginBottom: 16 }}>Start a round for this group</Btn>
+
+      <Eyebrow style={{ marginBottom: 8 }}>who's playing</Eyebrow>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Saturday 8:10 tee time?" style={{ ...inputStyle, flex: 1 }} />
+        <Btn onClick={postPlaying} style={{ fontSize: 12 }}>Post</Btn>
+      </div>
+      {(g.activity || []).length === 0 && <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginBottom: 14 }}>Nobody's posted yet. Float a tee time.</div>}
+      {(g.activity || []).map(a => (
+        <div key={a.id} style={{ background: C.card, borderRadius: 11, padding: '10px 12px', marginBottom: 7 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13.5, color: C.chalk }}>{a.name}</span>
+            <span style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted }}>{ago(a.when)}</span>
+            <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, color: C.ink }}>{inCount(a)} in</span>
+          </div>
+          {a.note && <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.chalk, marginTop: 3 }}>{a.note}</div>}
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <Btn active={a.inOut?.[me] === 'in'} onClick={() => setInOut(a.id, 'in')} style={{ flex: 1, fontSize: 11 }}>I'm in</Btn>
+            <Btn active={a.inOut?.[me] === 'out'} onClick={() => setInOut(a.id, 'out')} style={{ flex: 1, fontSize: 11 }}>Out</Btn>
+          </div>
+        </div>
+      ))}
+
+      <Eyebrow style={{ margin: '18px 0 8px' }}>19th hole snapshots</Eyebrow>
+      {snaps.length === 0 ? (
+        <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginBottom: 14 }}>Recaps from this group's rounds will show up here once you finish one.</div>
+      ) : snaps.slice(0, 5).map((s, i) => (
+        <div key={i} style={{ background: C.card, borderRadius: 11, padding: '10px 12px', marginBottom: 7 }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13.5, color: C.chalk }}>{s.headline || s.course || 'Round'}</div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 2 }}>{s.course}{s.date ? ` · ${new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}</div>
+        </div>
+      ))}
+
+      <Eyebrow style={{ margin: '18px 0 8px' }}>my stats in this group</Eyebrow>
+      {stats.rounds.length === 0 ? (
+        <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted }}>No rounds tagged to this group yet. Start one above and it'll count here (separate from your private ledger).</div>
+      ) : (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1, background: C.card, borderRadius: 11, padding: '11px 12px' }}>
+            <Eyebrow>net here</Eyebrow>
+            <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 18, color: stats.net > 0 ? C.up : stats.net < 0 ? C.down : C.chalk, marginTop: 3 }}>{money(stats.net)}</div>
+          </div>
+          <div style={{ flex: 1, background: C.card, borderRadius: 11, padding: '11px 12px' }}>
+            <Eyebrow>rounds</Eyebrow>
+            <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 18, color: C.chalk, marginTop: 3 }}>{stats.rounds.length}</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 22, paddingTop: 14, borderTop: `1px solid ${C.line}`, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, flex: 1, lineHeight: 1.6 }}>Share code #{g.code} so your crew can join.</span>
+        <Btn onClick={() => { removeMyGroup(code); onBack(); }} style={{ fontSize: 10.5, padding: '7px 10px' }}>Leave</Btn>
+      </div>
+    </div>
+  );
+}
+
 /* Shown on a finished round: folds it into your personal season ledger and lets
    you correct who "you" are. Auto-saves once your name is known; else it asks. */
 function LedgerSaveCard({ round }) {
@@ -3560,7 +3842,7 @@ function MyLedger({ onBack }) {
   );
 }
 
-function Home({ onNew, onTrip, onJoin, onLedger, resume, tripResume, theme, setTheme }) {
+function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, theme, setTheme }) {
   const [conn, setConn] = useState(null);
   useEffect(() => { if (SHARING_ON) remote.ping().then(setConn).catch(() => setConn({ ok: false, reason: 'network' })); }, []);
   return (
@@ -3597,6 +3879,7 @@ function Home({ onNew, onTrip, onJoin, onLedger, resume, tripResume, theme, setT
       <Btn onClick={onNew} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a round</Btn>
       <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a trip</Btn>
       {SHARING_ON && <Btn onClick={onJoin} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Join with a code</Btn>}
+      {SHARING_ON && <Btn onClick={onGroups} style={{ width: '100%', padding: '16px', fontSize: 14, marginBottom: 10 }}>Groups</Btn>}
       <Btn onClick={onLedger} style={{ width: '100%', padding: '16px', fontSize: 14 }}>My golf ledger</Btn>
 
       <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 18, lineHeight: 1.6 }}>
@@ -4120,6 +4403,8 @@ export default function App() {
   const [activeId, setActiveId] = useState(null); // which trip round is open
   const [coverage, setCoverage] = useState([]);
   const [view, setView] = useState(null);
+  const [groupCode, setGroupCode] = useState(null);   // group being viewed
+  const [pendingGroup, setPendingGroup] = useState(null); // tag the next new round to this group
   const [loaded, setLoaded] = useState(false);
   const first = useRef(true), firstTrip = useRef(true);
 
@@ -4214,9 +4499,18 @@ export default function App() {
   const startRound = async (r) => {
     let code = null;
     try { code = await freshCode(); } catch {}
-    const full = { ...r, code };
+    const gc = pendingGroup || null;
+    const full = { ...r, code, groupCode: gc };
+    setPendingGroup(null);
     setRound(full); setScreen('play');
     if (code) publish(full).catch(() => {});
+    if (gc && code) updateGroup(gc, x => { x.liveRound = code; }).catch(() => {});
+  };
+
+  /* Open a group's in-progress round as a follower. */
+  const openLive = async (liveCode) => {
+    try { const data = await pull(liveCode); setView({ code: liveCode, data }); setScreen('view'); }
+    catch { /* round may be gone */ }
   };
 
   const addTripRound = (r) => {
@@ -4290,6 +4584,25 @@ export default function App() {
 
   if (screen === 'ledger') return shell(<MyLedger onBack={() => setScreen('home')} />);
 
+  if (screen === 'groups') return shell(
+    <GroupsList
+      onOpen={(c) => { setGroupCode(c); setScreen('group'); }}
+      onCreate={() => setScreen('groupcreate')}
+      onJoin={() => setScreen('groupjoin')}
+      onBack={() => setScreen('home')} />
+  );
+  if (screen === 'groupcreate') return shell(
+    <GroupCreate onCreated={(c) => { setGroupCode(c); setScreen('group'); }} onBack={() => setScreen('groups')} />
+  );
+  if (screen === 'groupjoin') return shell(
+    <GroupJoin onJoined={(c) => { setGroupCode(c); setScreen('group'); }} onBack={() => setScreen('groups')} />
+  );
+  if (screen === 'group' && groupCode) return shell(
+    <GroupHub code={groupCode} onBack={() => setScreen('groups')}
+      onStartRound={(c) => { setPendingGroup(c); setScreen('setup'); }}
+      onOpenRound={openLive} />
+  );
+
   if (screen === 'edit' && round) return shell(
     <Setup editRound={round}
       onStart={(updated) => { setRound(updated); setScreen('play'); }}
@@ -4309,6 +4622,7 @@ export default function App() {
       onTrip={() => setScreen('tripsetup')}
       onJoin={() => setScreen('join')}
       onLedger={() => setScreen('ledger')}
+      onGroups={() => setScreen('groups')}
       resume={saved?.games ? {
         label: `${saved.games.map(k => gameName(k, saved.players.length)).join(' + ')} · ${saved.players.map(p => p.name).join(', ')}`,
         go: () => { setRound(saved); setScreen('play'); },

@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '2026.09.06n';
+const BUILD_ID = '2026.09.06o';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -550,6 +550,23 @@ function calcSkins(round, stake) {
     }
   }
   return { money: total, points: null, log, extra: carry > 1 ? `${carry} skins riding` : null };
+}
+
+/* How many skins are riding INTO hole h — 1 plus every halved hole that carried
+   just before it. Lets the play screen show what the current hole is worth so
+   the scorekeeper can call it out, which is easy to lose track of after a few
+   carryovers. Mirrors the carry logic in calcSkins. */
+function skinsCarryInto(round, h) {
+  let carry = 1;
+  const carries = round.skinsCarry !== false;
+  for (const hh of playedHoles(round)) {
+    if (hh >= h) break;
+    const nets = round.players.map(p => net(round, p.id, hh));
+    const low = Math.min(...nets);
+    if (nets.filter(x => x === low).length === 1) carry = 1;
+    else if (carries) carry++;
+  }
+  return carry;
 }
 
 function diffFor(round, A, B, s, e) {
@@ -2330,6 +2347,82 @@ function PressSheet({ round, setRound, h, onClose }) {
   );
 }
 
+/* Full scorecard. On an 18-hole round it splits into Out (front 9), In (back 9)
+   and Total; a 9-hole (or shorter) round just gets a Total. activeHole, when
+   given, highlights the hole being played. Used by the live board and the
+   watcher view so both read like a real paper card. */
+function Scorecard({ round, activeHole = -1 }) {
+  const holes = round.holes;
+  const split = holes > 9;
+  const idx = Array.from({ length: holes }, (_, i) => i);
+  const sumG = (pid, a, b) => { let s = 0; for (let i = a; i < b && i < holes; i++) s += (gross(round, pid, i) || 0); return s; };
+  const sumPar = (a, b) => { let s = 0; for (let i = a; i < b && i < holes; i++) s += round.pars[i]; return s; };
+  const relCol = (rel) => rel == null ? C.line : rel <= -1 ? C.up : rel === 0 ? C.chalk : rel === 1 ? C.muted : C.down;
+  const splitCell = { ...cell, color: C.ink, fontWeight: 700, background: C.card2 };
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: F_MONO, fontSize: 11 }}>
+        <thead>
+          <tr>
+            <th style={{ ...cell, position: 'sticky', left: 0, background: C.felt }} />
+            {idx.map(i => (
+              <React.Fragment key={i}>
+                <th style={{ ...cell, color: i === activeHole ? C.ink : C.muted }}>{i + 1}</th>
+                {split && i === 8 && <th style={splitCell}>Out</th>}
+              </React.Fragment>
+            ))}
+            {split && <th style={splitCell}>In</th>}
+            <th style={{ ...cell, color: C.chalk }}>{split ? 'Tot' : 'T'}</th>
+          </tr>
+          <tr>
+            <td style={{ ...cell, textAlign: 'left', color: C.muted, position: 'sticky', left: 0, background: C.felt }}>par</td>
+            {idx.map(i => (
+              <React.Fragment key={i}>
+                <td style={{ ...cell, color: C.muted }}>{round.pars[i]}</td>
+                {split && i === 8 && <td style={{ ...splitCell, color: C.muted }}>{sumPar(0, 9)}</td>}
+              </React.Fragment>
+            ))}
+            {split && <td style={{ ...splitCell, color: C.muted }}>{sumPar(9, holes)}</td>}
+            <td style={{ ...cell, color: C.muted }}>{sumPar(0, holes)}</td>
+          </tr>
+        </thead>
+        <tbody>
+          {round.players.map(p => {
+            const out = sumG(p.id, 0, 9), inn = sumG(p.id, 9, holes), tot = out + inn;
+            return (
+              <tr key={p.id}>
+                <td style={{ ...cell, textAlign: 'left', color: C.chalk, fontFamily: F_DISP, fontWeight: 700, position: 'sticky', left: 0, background: C.felt, paddingRight: 7 }}>{short(p.name)}</td>
+                {idx.map(i => {
+                  const s = gross(round, p.id, i);
+                  const rel = s == null ? null : s - round.pars[i];
+                  const st = strokesFor(round, p.id, i);
+                  return (
+                    <React.Fragment key={i}>
+                      <td style={{ ...cell, background: i === activeHole ? C.card : 'transparent', position: 'relative', color: relCol(rel) }}>
+                        {st > 0 && (
+                          <span style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 1 }}>
+                            {Array.from({ length: Math.min(st, 2) }).map((_, k) => (
+                              <span key={k} style={{ width: 3, height: 3, borderRadius: 3, background: C.ball, display: 'block' }} />
+                            ))}
+                          </span>
+                        )}
+                        {s ?? '·'}
+                      </td>
+                      {split && i === 8 && <td style={{ ...splitCell, color: C.chalk }}>{out || '·'}</td>}
+                    </React.Fragment>
+                  );
+                })}
+                {split && <td style={{ ...splitCell, color: C.chalk }}>{inn || '·'}</td>}
+                <td style={{ ...cell, color: C.chalk, fontWeight: 700 }}>{tot || '·'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /* A plain-English rundown of the games and side bets in THIS round. Sits at the
    bottom of the leaderboard so anyone who joins to watch can scroll down and see
    what's being played and how it works. Every word comes from the game and junk
@@ -2489,6 +2582,27 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
             </div>
             <button onClick={() => setH(x => Math.min(round.holes - 1, x + 1))} style={navBtn}>▶</button>
           </div>
+
+          {has('skins') && (() => {
+            const carry = skinsCarryInto(round, h);
+            const perMan = r2((round.stakes.skins || 0) * carry * holeX);
+            const take = r2(perMan * (n - 1));
+            const big = carry > 1;
+            return (
+              <div style={{ ...panel, background: big ? C.card2 : C.card, border: `1px solid ${big ? C.ball : 'transparent'}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Eyebrow style={{ color: big ? C.ink : C.muted }}>{big ? 'skins carried over' : 'skins · this hole'}</Eyebrow>
+                  <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 20, color: C.chalk, marginTop: 2 }}>
+                    {carry} skin{carry === 1 ? '' : 's'} · {money(perMan)} a man
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <Eyebrow style={{ color: C.muted }}>winner takes</Eyebrow>
+                  <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 19, color: big ? C.ball : C.chalk, marginTop: 2 }}>{money(take)}</div>
+                </div>
+              </div>
+            );
+          })()}
 
           {multGamesOn && (
             <div style={panel}>
@@ -2959,53 +3073,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
       {tab === 'card' && (
         <div style={{ padding: '4px 10px' }}>
           <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 25, color: C.chalk, marginBottom: 12, letterSpacing: '-0.02em', paddingLeft: 6 }}>Card</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: F_MONO, fontSize: 11 }}>
-              <thead>
-                <tr>
-                  <th style={{ ...cell, position: 'sticky', left: 0, background: C.felt }} />
-                  {Array.from({ length: round.holes }).map((_, i) => <th key={i} style={{ ...cell, color: i === h ? C.ink : C.muted }}>{i + 1}</th>)}
-                  <th style={{ ...cell, color: C.chalk }}>T</th>
-                </tr>
-                <tr>
-                  <td style={{ ...cell, textAlign: 'left', color: C.muted, position: 'sticky', left: 0, background: C.felt }}>par</td>
-                  {round.pars.map((p, i) => <td key={i} style={{ ...cell, color: C.muted }}>{p}</td>)}
-                  <td style={{ ...cell, color: C.muted }}>{round.pars.reduce((a, b) => a + b, 0)}</td>
-                </tr>
-              </thead>
-              <tbody>
-                {round.players.map(p => {
-                  const tot = Array.from({ length: round.holes }).reduce((s, _, i) => s + (gross(round, p.id, i) || 0), 0);
-                  return (
-                    <tr key={p.id}>
-                      <td style={{ ...cell, textAlign: 'left', color: C.chalk, fontFamily: F_DISP, fontWeight: 700, position: 'sticky', left: 0, background: C.felt, paddingRight: 7 }}>{short(p.name)}</td>
-                      {Array.from({ length: round.holes }).map((_, i) => {
-                        const s = gross(round, p.id, i);
-                        const rel = s == null ? null : s - round.pars[i];
-                        const st = strokesFor(round, p.id, i);
-                        return (
-                          <td key={i} style={{
-                            ...cell, background: i === h ? C.card : 'transparent', position: 'relative',
-                            color: rel == null ? C.line : rel <= -1 ? C.up : rel === 0 ? C.chalk : rel === 1 ? C.muted : C.down,
-                          }}>
-                            {st > 0 && (
-                              <span style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 1 }}>
-                                {Array.from({ length: Math.min(st, 2) }).map((_, k) => (
-                                  <span key={k} style={{ width: 3, height: 3, borderRadius: 3, background: C.ball, display: 'block' }} />
-                                ))}
-                              </span>
-                            )}
-                            {s ?? '·'}
-                          </td>
-                        );
-                      })}
-                      <td style={{ ...cell, color: C.chalk, fontWeight: 700 }}>{tot || '·'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <Scorecard round={round} activeHole={h} />
           <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginTop: 12, paddingLeft: 6, lineHeight: 1.6 }}>
             Gross scores, dots mark strokes. Bets settle on {round.useNet ? 'net' : 'gross'}.
           </div>
@@ -3416,36 +3484,8 @@ function Viewer({ code, initial, onLeave }) {
       )}
 
       {tab === 'card' && (
-        <div style={{ padding: '0 10px', overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: F_MONO, fontSize: 11 }}>
-            <thead>
-              <tr>
-                <th style={{ ...cell, position: 'sticky', left: 0, background: C.felt }} />
-                {round.pars.map((_, i) => <th key={i} style={{ ...cell, color: C.muted }}>{i + 1}</th>)}
-                <th style={{ ...cell, color: C.chalk }}>T</th>
-              </tr>
-              <tr>
-                <td style={{ ...cell, textAlign: 'left', color: C.muted, position: 'sticky', left: 0, background: C.felt }}>par</td>
-                {round.pars.map((p, i) => <td key={i} style={{ ...cell, color: C.muted }}>{p}</td>)}
-                <td style={{ ...cell, color: C.muted }}>{round.pars.reduce((a, b) => a + b, 0)}</td>
-              </tr>
-            </thead>
-            <tbody>
-              {round.players.map(p => {
-                const tot = round.pars.reduce((s, _, i) => s + (gross(round, p.id, i) || 0), 0);
-                return (
-                  <tr key={p.id}>
-                    <td style={{ ...cell, textAlign: 'left', color: C.chalk, fontFamily: F_DISP, fontWeight: 700, position: 'sticky', left: 0, background: C.felt, paddingRight: 7 }}>{short(p.name)}</td>
-                    {round.pars.map((pr, i) => {
-                      const sc = gross(round, p.id, i), rel = sc == null ? null : sc - pr;
-                      return <td key={i} style={{ ...cell, color: rel == null ? C.line : rel <= -1 ? C.up : rel === 0 ? C.chalk : rel === 1 ? C.muted : C.down }}>{sc ?? '·'}</td>;
-                    })}
-                    <td style={{ ...cell, color: C.chalk, fontWeight: 700 }}>{tot || '·'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div style={{ padding: '0 10px' }}>
+          <Scorecard round={round} />
         </div>
       )}
 

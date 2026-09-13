@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.1f';
+const BUILD_ID = '4.1g';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -245,9 +245,31 @@ function buildSnapshot(round, records) {
   const snake = led.snakeHolder ? { name: nameOf(round, led.snakeHolder), val: r2(led.snakeVal || 0) } : null;
   const colLabels = cols.map(c => c.label);
   const headline = snapHeadline(rows.map(r => ({ name: r.name, net: r.total })), snake);
-  return { course: round.course || 'The Course', date: round.finishedAt || Date.now(), colLabels, rows, snake, records, headline, games: colLabels, roundCode: round.code || null };
+  return { course: round.course || 'The Course', date: round.finishedAt || Date.now(), colLabels, rows, snake, records, headline, games: colLabels, junkPlayed: junkTally(round), roundCode: round.code || null };
 }
 const SNAP_SHORT = { skins: 'Skins', nassau: 'Nassau', roundrobin: 'Sixes', wolf: 'Wolf', vegas: 'Vegas', hammer: 'Hammer', points: 'Points', stableford: 'Stbl', bbb: 'BBB', train: 'Train', yardage: 'Yards' };
+
+/* Which junk games were played and who cashed them — the part people actually
+   want to relive. Auto junk (Birdie Machine) is counted off the card; the rest
+   from what was tapped in. */
+function junkTally(round) {
+  const out = [];
+  for (const type of (round.junkOn || [])) {
+    if (type === 'snake') continue; // snake has its own line on the card
+    const t = {};
+    if (JUNK[type]?.auto) {
+      for (const h of playedHoles(round)) round.players.forEach(p => {
+        const sc = round.useNet ? net(round, p.id, h) : gross(round, p.id, h);
+        if (sc != null && (round.pars[h] - sc) >= 1) t[p.id] = (t[p.id] || 0) + 1;
+      });
+    } else {
+      for (const h in (round.junk || {})) (round.junk[h]?.[type] || []).forEach(id => { t[id] = (t[id] || 0) + 1; });
+    }
+    const entries = Object.entries(t).map(([id, n]) => ({ name: nameOf(round, id), n })).sort((a, b) => b.n - a.n);
+    out.push({ name: (JUNK[type] && JUNK[type].name) || type, entries });
+  }
+  return out;
+}
 
 /* Paint a snapshot onto a canvas at a fixed, share-friendly size. Colors are
    fixed (betting-felt green + gold) so the image looks the same for everyone,
@@ -302,6 +324,20 @@ function drawSnapshot(canvas, snap) {
     g.fillText((r.total > 0 ? '+' : '') + money(r.total), W - P - 6, top + 46);
     g.textAlign = 'left';
     y += rowH;
+  }
+
+  // junk games played + who cashed them
+  if ((snap.junkPlayed || []).length) {
+    y += 18; g.fillStyle = COL.muted; g.font = mono(22); g.fillText('JUNK', P, y); y += 12;
+    for (const j of snap.junkPlayed.slice(0, 6)) {
+      const who = j.entries.length ? j.entries.map(e => e.n > 1 ? `${e.name} x${e.n}` : e.name).join(', ') : 'nobody';
+      g.fillStyle = COL.gold; g.font = disp(700, 30); g.fillText(j.name, P, y + 30);
+      g.fillStyle = COL.chalk; g.font = disp(500, 28);
+      let txt = who; while (g.measureText(txt).width > W - P * 2 - 340 && txt.length > 4) txt = txt.slice(0, -2);
+      if (txt !== who) txt = txt.replace(/,?\s*$/, '') + '…';
+      g.textAlign = 'right'; g.fillText(txt, W - P, y + 30); g.textAlign = 'left';
+      y += 46;
+    }
   }
 
   // snake + records
@@ -2807,6 +2843,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
   const [tab, setTab] = useState('play');
   const [info, setInfo] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [showSnap, setShowSnap] = useState(false);   // pop the recap right after locking
   const [pressing, setPressing] = useState(false);
   const [padFor, setPadFor] = useState(null); // which player's quick score pad is open
   useEffect(() => { setPadFor(null); }, [h]); // close the pad when the hole changes
@@ -3360,6 +3397,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
       )}
 
       {pressing && <PressSheet round={round} setRound={setRound} h={h} onClose={() => setPressing(false)} />}
+      {showSnap && round.locked && <SnapshotModal round={round} onClose={() => setShowSnap(false)} />}
 
       {confirming && (
         <div onClick={() => setConfirming(false)} style={{
@@ -3410,7 +3448,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
 
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
               <Btn onClick={() => setConfirming(false)} style={{ flex: '0 0 110px', padding: 15 }}>Keep playing</Btn>
-              <Btn kind="solid" onClick={() => { setRound(r => ({ ...r, locked: true, finishedAt: Date.now() })); setConfirming(false); }}
+              <Btn kind="solid" onClick={() => { setRound(r => ({ ...r, locked: true, finishedAt: Date.now() })); setConfirming(false); setShowSnap(true); }}
                 style={{ flex: 1, padding: 15, fontSize: 15 }}>Lock it in</Btn>
             </div>
           </div>

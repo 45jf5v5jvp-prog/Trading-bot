@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.1c';
+const BUILD_ID = '4.1d';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -231,7 +231,8 @@ function snapHeadline(rows, snake) {
   if (margin <= 5) return `${w.name} steals it by a hair — up ${money(w.net)}.${tail}`;
   return `${w.name} takes the day, up ${money(w.net)}.${tail}`;
 }
-function buildSnapshot(round, records = []) {
+function buildSnapshot(round, records) {
+  records = records || round.snapRecords || [];
   const led = fullLedger(round);
   const n = round.players.length;
   const cols = (round.games || []).map(k => ({ key: k, label: SNAP_SHORT[k] || (GAMES[k] ? GAMES[k].name(n) : k), money: led.byGame[k]?.money || {} }));
@@ -313,6 +314,55 @@ function drawSnapshot(canvas, snap) {
   g.fillStyle = COL.gold; g.font = mono(24); g.fillText('golfbetstracker.netlify.app', P, H - 40);
 }
 function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+
+/* ---- Group records ---------------------------------------------------------
+   Compare a finished round against the group's stored bests and update them.
+   The FIRST time a record is seen it just sets the baseline (no announcement);
+   after that, beating it returns a headline line for the snapshot. Pure: takes
+   the previous records object, returns the new one plus any "broken" lines. */
+function checkGroupRecords(prev, round) {
+  const rec = { ...(prev || {}) };
+  const broken = [];
+  const led = fullLedger(round);
+  const at = round.finishedAt || Date.now();
+  const nm = (id) => nameOf(round, id);
+  // Biggest single-round win
+  let topId = null, topVal = -Infinity;
+  round.players.forEach(p => { const v = led.money[p.id] || 0; if (v > topVal) { topVal = v; topId = p.id; } });
+  if (topId && topVal > 0) {
+    const cur = rec.biggestWin ? rec.biggestWin.value : -Infinity;
+    if (topVal > cur) { const had = !!rec.biggestWin; rec.biggestWin = { value: r2(topVal), name: nm(topId), roundCode: round.code, date: at }; if (had) broken.push(`${nm(topId)} — biggest win ever, ${money(r2(topVal))}`); }
+  }
+  // Longest snake (by passes)
+  if (led.snakeHolder && (led.snakePasses || 0) > 0) {
+    const passes = led.snakePasses;
+    const cur = rec.longestSnake ? rec.longestSnake.value : -Infinity;
+    if (passes > cur) { const had = !!rec.longestSnake; rec.longestSnake = { value: passes, name: nm(led.snakeHolder), roundCode: round.code, date: at }; if (had) broken.push(`Longest snake ever — ${passes} pass${passes === 1 ? '' : 'es'}, ${nm(led.snakeHolder)} holding`); }
+  }
+  // Most junk won by one player in a round
+  let jId = null, jVal = 0;
+  round.players.forEach(p => { const v = (led.junk && led.junk.money[p.id]) || 0; if (v > jVal) { jVal = v; jId = p.id; } });
+  if (jId && jVal > 0) {
+    const cur = rec.mostJunk ? rec.mostJunk.value : -Infinity;
+    if (jVal > cur) { const had = !!rec.mostJunk; rec.mostJunk = { value: r2(jVal), name: nm(jId), roundCode: round.code, date: at }; if (had) broken.push(`${nm(jId)} — most junk in a round, ${money(r2(jVal))}`); }
+  }
+  return { records: rec, broken };
+}
+
+/* Group-wide standings across the rounds banked in the group's snapshot feed.
+   Sums each name's per-round totals, counts rounds and wins. */
+function groupStandings(g) {
+  const acc = {};
+  for (const s of (g?.snapshots || [])) {
+    const rows = s.rows || [];
+    rows.forEach((r, i) => {
+      const k = r.name; acc[k] = acc[k] || { name: k, total: 0, rounds: 0, wins: 0 };
+      acc[k].total = r2(acc[k].total + (r.total || 0)); acc[k].rounds += 1; if (i === 0 && (r.total || 0) > 0) acc[k].wins += 1;
+    });
+  }
+  return Object.values(acc).sort((a, b) => b.total - a.total);
+}
+
 
 
 /* ---- Device identity + group membership (per device, no login) ------------
@@ -2760,13 +2810,16 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
   const [pressing, setPressing] = useState(false);
   const [padFor, setPadFor] = useState(null); // which player's quick score pad is open
   useEffect(() => { setPadFor(null); }, [h]); // close the pad when the hole changes
-  // When a round tied to a group is locked in, clear that group's "live" flag
-  // and bank its 19th Hole Snapshot to the group feed.
+  // When a round tied to a group is locked in, clear the group's "live" flag,
+  // check it against the group records, and bank its 19th Hole Snapshot.
   useEffect(() => {
     if (round.locked && round.groupCode && round.code) {
-      const snap = buildSnapshot(round);
       updateGroup(round.groupCode, x => {
         if (x.liveRound === round.code) x.liveRound = null;
+        const { records, broken } = checkGroupRecords(x.records, round);
+        x.records = records;
+        if (broken.length) setRound(r => ({ ...r, snapRecords: broken }));
+        const snap = buildSnapshot(round, broken);
         x.snapshots = [snap, ...((x.snapshots || []).filter(s => s.roundCode !== round.code))].slice(0, 10);
       }).catch(() => {});
     }
@@ -3769,6 +3822,45 @@ function GroupHub({ code, onBack, onStartRound, onOpenRound }) {
           <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 2 }}>{s.course}{s.date ? ` · ${new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}</div>
         </div>
       ))}
+
+      {(() => {
+        const rec = g.records || {};
+        const items = [];
+        if (rec.biggestWin) items.push(['Biggest win', `${rec.biggestWin.name} · ${money(rec.biggestWin.value)}`]);
+        if (rec.longestSnake) items.push(['Longest snake', `${rec.longestSnake.name} · ${rec.longestSnake.value} pass${rec.longestSnake.value === 1 ? '' : 'es'}`]);
+        if (rec.mostJunk) items.push(['Most junk', `${rec.mostJunk.name} · ${money(rec.mostJunk.value)}`]);
+        if (!items.length) return null;
+        return (
+          <>
+            <Eyebrow style={{ margin: '18px 0 8px' }}>group records</Eyebrow>
+            {items.map(([label, val]) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: C.card, borderRadius: 10, marginBottom: 5 }}>
+                <span style={{ fontFamily: F_MONO, fontSize: 10, color: C.ink, letterSpacing: '0.08em', textTransform: 'uppercase' }}>★ {label}</span>
+                <span style={{ marginLeft: 'auto', fontFamily: F_DISP, fontWeight: 700, fontSize: 13.5, color: C.chalk }}>{val}</span>
+              </div>
+            ))}
+          </>
+        );
+      })()}
+
+      {(() => {
+        const st = groupStandings(g);
+        if (!st.length) return null;
+        return (
+          <>
+            <Eyebrow style={{ margin: '18px 0 8px' }}>group leaderboard <span style={{ textTransform: 'none', letterSpacing: 0 }}>(last {snaps.length} round{snaps.length === 1 ? '' : 's'})</span></Eyebrow>
+            {st.map((p, i) => (
+              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: C.card, borderRadius: 10, marginBottom: 5 }}>
+                <span style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 13, color: i === 0 ? C.ink : C.muted, width: 18 }}>{i + 1}</span>
+                <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{p.name}</span>
+                <span style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted }}>{p.wins}W · {p.rounds}rd</span>
+                <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: p.total > 0 ? C.up : p.total < 0 ? C.down : C.muted }}>{p.total > 0 ? '+' : ''}{money(p.total)}</span>
+              </div>
+            ))}
+            <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 3 }}>from the group's banked recaps · rivalry & sandbagger stats coming later</div>
+          </>
+        );
+      })()}
 
       <Eyebrow style={{ margin: '18px 0 8px' }}>my stats in this group</Eyebrow>
       {stats.rounds.length === 0 ? (
@@ -4803,4 +4895,5 @@ export const __TEST__ = {
   GAMES, ENGINES, MULT_GAMES, fullLedger, calcJunk, settle, allocate,
   playedHoles, net, gross, strokesFor, skinsCarryInto, calcTrain, trainCat,
   recordRound, summarizeLedger, ledgerKeyFor, directTransfers,
+  buildSnapshot, checkGroupRecords, groupStandings,
 };

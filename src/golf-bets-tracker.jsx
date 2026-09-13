@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.1a';
+const BUILD_ID = '4.1b';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -215,6 +215,88 @@ function summarizeLedger(l) {
 /* Same stats, but only the rounds tagged to one group (for "my stats in this
    group"). Kept separate from the all-rounds ledger view on purpose. */
 const summarizeLedgerFor = (l, groupCode) => summarizeLedger({ rounds: Object.fromEntries(Object.entries(l.rounds || {}).filter(([, r]) => r.groupCode === groupCode)) });
+
+/* ---- 19th Hole Snapshot ---------------------------------------------------
+   A short, shareable recap built from a finished round: standings, the snake,
+   any record broken, and a one-line headline. buildSnapshot is pure (reads the
+   existing ledger); drawSnapshot paints it to a canvas so it can export as an
+   image for the group text. */
+function snapHeadline(rows, snake) {
+  const w = rows[0];
+  if (!w) return "That's a wrap.";
+  if (w.net <= 0) return 'Everybody walked even — nobody got rich today.';
+  const margin = rows.length > 1 ? r2(w.net - rows[1].net) : w.net;
+  const tail = snake ? ` ${snake.name} carried the snake.` : '';
+  if (margin >= 40) return `${w.name} runs away with it, up ${money(w.net)}.${tail}`;
+  if (margin <= 5) return `${w.name} steals it by a hair — up ${money(w.net)}.${tail}`;
+  return `${w.name} takes the day, up ${money(w.net)}.${tail}`;
+}
+function buildSnapshot(round, records = []) {
+  const led = fullLedger(round);
+  const rows = round.players.map(p => ({ name: p.name, net: r2(led.money[p.id] || 0) })).sort((a, b) => b.net - a.net);
+  const snake = led.snakeHolder ? { name: nameOf(round, led.snakeHolder), val: r2(led.snakeVal || 0) } : null;
+  const games = (round.games || []).map(k => (GAMES[k] ? GAMES[k].name(round.players.length) : k));
+  return {
+    course: round.course || 'The Course', date: round.finishedAt || Date.now(),
+    rows, snake, games, records, headline: snapHeadline(rows, snake), roundCode: round.code || null,
+  };
+}
+
+/* Paint a snapshot onto a canvas at a fixed, share-friendly size. Colors are
+   fixed (betting-felt green + gold) so the image looks the same for everyone,
+   independent of the app's light/dark theme. */
+function drawSnapshot(canvas, snap) {
+  const W = 1080, H = 1350, P = 80;
+  canvas.width = W; canvas.height = H;
+  const g = canvas.getContext('2d');
+  const COL = { felt: '#0e2a1d', card: '#163a28', line: '#2b5540', chalk: '#F3F1E7', gold: '#E4B24A', muted: '#93a898', up: '#7FD19E', down: '#E77C6B' };
+  const disp = (w, s) => `${w} ${s}px Archivo, "Helvetica Neue", Arial, sans-serif`;
+  const mono = (s) => `${s}px "IBM Plex Mono", Menlo, monospace`;
+  g.fillStyle = COL.felt; g.fillRect(0, 0, W, H);
+  // subtle top band
+  g.fillStyle = COL.card; g.fillRect(0, 0, W, 250);
+  g.textBaseline = 'alphabetic';
+  // eyebrow
+  g.fillStyle = COL.gold; g.font = mono(26); g.fillText('GOLF BETS TRACKER', P, 100);
+  // title
+  g.fillStyle = COL.chalk; g.font = disp(900, 96); g.fillText('THE 19TH HOLE', P, 195);
+  // course + date
+  const d = new Date(snap.date); const ds = d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+  g.fillStyle = COL.muted; g.font = mono(28); g.fillText(`${snap.course}  ·  ${ds}`, P, 320);
+
+  // headline (wrapped, gold)
+  g.fillStyle = COL.gold; g.font = disp(800, 46);
+  let y = 400; const words = snap.headline.split(' '); let line = '';
+  for (const w of words) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > W - P * 2 && line) { g.fillText(line, P, y); y += 58; line = w; } else line = t; }
+  if (line) { g.fillText(line, P, y); y += 58; }
+
+  // standings
+  y += 34; g.fillStyle = COL.muted; g.font = mono(24); g.fillText('FINAL', P, y); y += 20;
+  const rowH = 92; const maxRows = Math.min(snap.rows.length, 6);
+  for (let i = 0; i < maxRows; i++) {
+    const r = snap.rows[i]; const top = y;
+    g.fillStyle = COL.card; roundRect(g, P, top, W - P * 2, rowH - 14, 18); g.fill();
+    g.fillStyle = i === 0 ? COL.gold : COL.muted; g.font = disp(800, 40); g.fillText(String(i + 1), P + 30, top + 60);
+    g.fillStyle = COL.chalk; g.font = disp(700, 44); g.fillText(r.name, P + 90, top + 60);
+    const amt = (r.net > 0 ? '+' : '') + money(r.net);
+    g.fillStyle = r.net > 0 ? COL.up : r.net < 0 ? COL.down : COL.muted; g.font = mono(42);
+    g.textAlign = 'right'; g.fillText(amt, W - P - 30, top + 60); g.textAlign = 'left';
+    y += rowH;
+  }
+
+  // snake + records
+  y += 10;
+  if (snap.snake) { g.fillStyle = COL.chalk; g.font = disp(600, 32); g.fillText(`🐍  ${snap.snake.name} got snaked — ${money(snap.snake.val)} a man`, P, y + 20); y += 60; }
+  (snap.records || []).forEach(rec => { g.fillStyle = COL.gold; g.font = disp(700, 32); g.fillText(`★  ${rec}`, P, y + 20); y += 56; });
+
+  // footer: games + brand
+  g.fillStyle = COL.muted; g.font = mono(24);
+  g.fillText((snap.games || []).join('  ·  ').slice(0, 60), P, H - 96);
+  g.fillStyle = COL.line; g.fillRect(P, H - 78, W - P * 2, 2);
+  g.fillStyle = COL.gold; g.font = mono(24); g.fillText('golfbetstracker.netlify.app', P, H - 40);
+}
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+
 
 /* ---- Device identity + group membership (per device, no login) ------------
    A login-free identity: a random id minted once per phone, plus the list of
@@ -2661,10 +2743,15 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
   const [pressing, setPressing] = useState(false);
   const [padFor, setPadFor] = useState(null); // which player's quick score pad is open
   useEffect(() => { setPadFor(null); }, [h]); // close the pad when the hole changes
-  // When a round tied to a group is locked in, clear that group's "live" flag.
+  // When a round tied to a group is locked in, clear that group's "live" flag
+  // and bank its 19th Hole Snapshot to the group feed.
   useEffect(() => {
     if (round.locked && round.groupCode && round.code) {
-      updateGroup(round.groupCode, x => { if (x.liveRound === round.code) x.liveRound = null; }).catch(() => {});
+      const snap = buildSnapshot(round);
+      updateGroup(round.groupCode, x => {
+        if (x.liveRound === round.code) x.liveRound = null;
+        x.snapshots = [snap, ...((x.snapshots || []).filter(s => s.roundCode !== round.code))].slice(0, 10);
+      }).catch(() => {});
     }
   }, [round.locked]); // eslint-disable-line
 
@@ -3150,6 +3237,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
           {round.code && <CodeCard code={round.code} />}
           <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 25, color: C.chalk, letterSpacing: '-0.02em' }}>Leaderboard</div>
           <Eyebrow style={{ marginBottom: 16, marginTop: 3 }}>through {playedHoles(round).length} hole{playedHoles(round).length === 1 ? '' : 's'}</Eyebrow>
+          {round.locked && <SnapshotTile round={round} />}
           <Standings round={round} ledger={ledger} />
 
           <SettleUp round={round} ledger={ledger} setRound={setRound} />
@@ -3689,6 +3777,61 @@ function GroupHub({ code, onBack, onStartRound, onOpenRound }) {
   );
 }
 
+/* The 19th Hole Snapshot modal — renders the recap to a canvas and offers a
+   real image to share (Web Share with a file where supported; otherwise the
+   image is shown to press-and-hold save). */
+function SnapshotModal({ round, onClose }) {
+  const ref = useRef(null);
+  const [url, setUrl] = useState(null);
+  const snap = useMemo(() => buildSnapshot(round), [round]);
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    try { drawSnapshot(c, snap); setUrl(c.toDataURL('image/png')); } catch {}
+  }, [snap]);
+  const share = async () => {
+    const c = ref.current; if (!c) return;
+    try {
+      const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+      const file = new File([blob], '19th-hole.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: snap.headline }); return; }
+      if (navigator.share) { await navigator.share({ text: snap.headline }); }
+    } catch { /* user cancelled or unsupported — image is on screen to save */ }
+  };
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(6,14,10,.92)', zIndex: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 16, overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 400 }}>
+        <canvas ref={ref} style={{ display: 'none' }} />
+        {url
+          ? <img src={url} alt="19th Hole Snapshot" style={{ width: '100%', borderRadius: 16, display: 'block', boxShadow: '0 12px 44px rgba(0,0,0,.55)' }} />
+          : <div style={{ fontFamily: F_MONO, fontSize: 12, color: '#cdd', textAlign: 'center', padding: 40 }}>Drawing…</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <Btn kind="solid" onClick={share} style={{ flex: 1, padding: 14, fontSize: 14 }}>Share to group chat</Btn>
+          <Btn onClick={onClose} style={{ flex: '0 0 88px', padding: 14, fontSize: 13 }}>Close</Btn>
+        </div>
+        <div style={{ fontFamily: F_MONO, fontSize: 10, color: '#b9c7bd', textAlign: 'center', marginTop: 10, lineHeight: 1.6 }}>Press and hold the image to save it, or tap Share.</div>
+      </div>
+    </div>
+  );
+}
+
+/* Tile that sits near the top of a finished round's leaderboard. */
+function SnapshotTile({ round }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div onClick={() => setOpen(true)} style={{ margin: '4px 0 14px', padding: '14px 15px', background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 11 }}>
+        <div style={{ fontSize: 22 }}>🏁</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>19th Hole Snapshot</div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 2 }}>tap for the recap · share it to the group text</div>
+        </div>
+        <span style={{ fontFamily: F_MONO, fontSize: 11, color: C.ink, whiteSpace: 'nowrap' }}>open ▸</span>
+      </div>
+      {open && <SnapshotModal round={round} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 /* Shown on a finished round: folds it into your personal season ledger and lets
    you correct who "you" are. Auto-saves once your name is known; else it asks. */
 function LedgerSaveCard({ round }) {
@@ -4079,6 +4222,7 @@ function Viewer({ code, initial, onLeave }) {
 
       {tab === 'money' && (
         <div style={{ padding: '0 16px' }}>
+          {round.locked && <SnapshotTile round={round} />}
           <Standings round={round} ledger={ledger} />
           <SettleUp round={round} ledger={ledger} />
           <HoleFeed round={round} ledger={ledger} />

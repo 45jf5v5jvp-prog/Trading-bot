@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.1e';
+const BUILD_ID = '4.1f';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -4132,7 +4132,7 @@ function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, t
       <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a trip</Btn>
       {SHARING_ON && <Btn onClick={onJoin} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Join with a code</Btn>}
       {SHARING_ON && <Btn onClick={onGroups} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Groups</Btn>}
-      <Btn onClick={onLedger} style={{ width: '100%', padding: '20px', fontSize: 16 }}>My golf ledger</Btn>
+      <Btn onClick={onLedger} style={{ width: '100%', padding: '20px', fontSize: 16 }}>My Golf Ledger</Btn>
 
       <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 18, lineHeight: 1.6 }}>
         {SHARING_ON

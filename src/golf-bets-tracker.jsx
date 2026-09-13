@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.1b';
+const BUILD_ID = '4.1c';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -233,14 +233,20 @@ function snapHeadline(rows, snake) {
 }
 function buildSnapshot(round, records = []) {
   const led = fullLedger(round);
-  const rows = round.players.map(p => ({ name: p.name, net: r2(led.money[p.id] || 0) })).sort((a, b) => b.net - a.net);
+  const n = round.players.length;
+  const cols = (round.games || []).map(k => ({ key: k, label: SNAP_SHORT[k] || (GAMES[k] ? GAMES[k].name(n) : k), money: led.byGame[k]?.money || {} }));
+  if (round.junkOn?.length) cols.push({ key: 'junk', label: 'Junk', money: led.junk?.money || {} });
+  const rows = round.players.map(p => ({
+    name: p.name,
+    cells: cols.map(c => r2(c.money[p.id] || 0)),
+    total: r2(led.money[p.id] || 0),
+  })).sort((a, b) => b.total - a.total);
   const snake = led.snakeHolder ? { name: nameOf(round, led.snakeHolder), val: r2(led.snakeVal || 0) } : null;
-  const games = (round.games || []).map(k => (GAMES[k] ? GAMES[k].name(round.players.length) : k));
-  return {
-    course: round.course || 'The Course', date: round.finishedAt || Date.now(),
-    rows, snake, games, records, headline: snapHeadline(rows, snake), roundCode: round.code || null,
-  };
+  const colLabels = cols.map(c => c.label);
+  const headline = snapHeadline(rows.map(r => ({ name: r.name, net: r.total })), snake);
+  return { course: round.course || 'The Course', date: round.finishedAt || Date.now(), colLabels, rows, snake, records, headline, games: colLabels, roundCode: round.code || null };
 }
+const SNAP_SHORT = { skins: 'Skins', nassau: 'Nassau', roundrobin: 'Sixes', wolf: 'Wolf', vegas: 'Vegas', hammer: 'Hammer', points: 'Points', stableford: 'Stbl', bbb: 'BBB', train: 'Train', yardage: 'Yards' };
 
 /* Paint a snapshot onto a canvas at a fixed, share-friendly size. Colors are
    fixed (betting-felt green + gold) so the image looks the same for everyone,
@@ -270,17 +276,30 @@ function drawSnapshot(canvas, snap) {
   for (const w of words) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > W - P * 2 && line) { g.fillText(line, P, y); y += 58; line = w; } else line = t; }
   if (line) { g.fillText(line, P, y); y += 58; }
 
-  // standings
-  y += 34; g.fillStyle = COL.muted; g.font = mono(24); g.fillText('FINAL', P, y); y += 20;
-  const rowH = 92; const maxRows = Math.min(snap.rows.length, 6);
+  // standings — a matrix: each game across the top, players down the side, Total
+  y += 30; g.fillStyle = COL.muted; g.font = mono(24); g.fillText('WHERE EVERYONE STOOD', P, y); y += 22;
+  const labels = snap.colLabels || [];
+  const nameW = 250;
+  const xNum0 = P + nameW;
+  const unit = (W - P - xNum0) / (labels.length + 1);           // one slot per game + Total
+  const colRight = (i) => xNum0 + unit * (i + 1);
+  const fs = Math.max(19, Math.min(28, unit * 0.30));
+  // header row
+  g.textAlign = 'right'; g.font = mono(22);
+  labels.forEach((lbl, i) => { g.fillStyle = COL.muted; g.fillText(String(lbl).slice(0, 7), colRight(i) - 8, y); });
+  g.fillStyle = COL.gold; g.fillText('TOTAL', W - P - 6, y);
+  g.textAlign = 'left'; y += 12;
+  // player rows
+  const rowH = 76; const maxRows = Math.min(snap.rows.length, 6);
   for (let i = 0; i < maxRows; i++) {
     const r = snap.rows[i]; const top = y;
-    g.fillStyle = COL.card; roundRect(g, P, top, W - P * 2, rowH - 14, 18); g.fill();
-    g.fillStyle = i === 0 ? COL.gold : COL.muted; g.font = disp(800, 40); g.fillText(String(i + 1), P + 30, top + 60);
-    g.fillStyle = COL.chalk; g.font = disp(700, 44); g.fillText(r.name, P + 90, top + 60);
-    const amt = (r.net > 0 ? '+' : '') + money(r.net);
-    g.fillStyle = r.net > 0 ? COL.up : r.net < 0 ? COL.down : COL.muted; g.font = mono(42);
-    g.textAlign = 'right'; g.fillText(amt, W - P - 30, top + 60); g.textAlign = 'left';
+    g.fillStyle = COL.card; roundRect(g, P, top, W - P * 2, rowH - 12, 16); g.fill();
+    g.fillStyle = COL.chalk; g.font = disp(700, 38); g.fillText(String(r.name).slice(0, 12), P + 24, top + 46);
+    g.font = mono(fs); g.textAlign = 'right';
+    r.cells.forEach((v, ci) => { g.fillStyle = v > 0 ? COL.up : v < 0 ? COL.down : COL.muted; g.fillText(v === 0 ? '—' : (v > 0 ? '+' : '') + money(v), colRight(ci) - 8, top + 46); });
+    g.fillStyle = r.total > 0 ? COL.up : r.total < 0 ? COL.down : COL.muted; g.font = mono(fs + 3);
+    g.fillText((r.total > 0 ? '+' : '') + money(r.total), W - P - 6, top + 46);
+    g.textAlign = 'left';
     y += rowH;
   }
 
@@ -289,9 +308,7 @@ function drawSnapshot(canvas, snap) {
   if (snap.snake) { g.fillStyle = COL.chalk; g.font = disp(600, 32); g.fillText(`🐍  ${snap.snake.name} got snaked — ${money(snap.snake.val)} a man`, P, y + 20); y += 60; }
   (snap.records || []).forEach(rec => { g.fillStyle = COL.gold; g.font = disp(700, 32); g.fillText(`★  ${rec}`, P, y + 20); y += 56; });
 
-  // footer: games + brand
-  g.fillStyle = COL.muted; g.font = mono(24);
-  g.fillText((snap.games || []).join('  ·  ').slice(0, 60), P, H - 96);
+  // footer: brand
   g.fillStyle = COL.line; g.fillRect(P, H - 78, W - P * 2, 2);
   g.fillStyle = COL.gold; g.font = mono(24); g.fillText('golfbetstracker.netlify.app', P, H - 40);
 }

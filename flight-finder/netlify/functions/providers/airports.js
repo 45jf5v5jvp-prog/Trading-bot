@@ -1,0 +1,30 @@
+/* Small reference table so mock (and future real) results can show a city
+   name instead of a bare IATA code. Not exhaustive — just enough airports
+   for the mock provider to generate a believable "anywhere" result set. */
+export const AIRPORTS = {
+  MCO: { city: 'Orlando', country: 'US' },
+  LAX: { city: 'Los Angeles', country: 'US' },
+  SAN: { city: 'San Diego', country: 'US' },
+  HNL: { city: 'Honolulu', country: 'US' },
+  DEN: { city: 'Denver', country: 'US' },
+  SEA: { city: 'Seattle', country: 'US' },
+  MCI: { city: 'Kansas City', country: 'US' },
+  ATL: { city: 'Atlanta', country: 'US' },
+  JFK: { city: 'New York', country: 'US' },
+  MIA: { city: 'Miami', country: 'US' },
+  CUN: { city: 'Cancun', country: 'MX' },
+  PUJ: { city: 'Punta Cana', country: 'DO' },
+  SJU: { city: 'San Juan', country: 'PR' },
+  NAS: { city: 'Nassau', country: 'BS' },
+  YYZ: { city: 'Toronto', country: 'CA' },
+  CDG: { city: 'Paris', country: 'FR' },
+  LHR: { city: 'London', country: 'GB' },
+  BCN: { city: 'Barcelona', country: 'ES' },
+  FCO: { city: 'Rome', country: 'IT' },
+  LIS: { city: 'Lisbon', country: 'PT' },
+  CVG: { city: 'Cincinnati', country: 'US' },
+  ORD: { city: 'Chicago', country: 'US' },
+  DFW: { city: 'Dallas', country: 'US' },
+  PHX: { city: 'Phoenix', country: 'US' },
+  AUS: { city: 'Austin', country: 'US' },
+};

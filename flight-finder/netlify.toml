@@ -1,0 +1,16 @@
+# Deploy this subfolder as its own Netlify site: point the site's "Base
+# directory" at flight-finder/ (or run `netlify deploy` from inside it).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Search runs as a Netlify Function on the same site as the app (no CORS,
+# no exposed API key). Reachable at /.netlify/functions/search, and proxied
+# to /api/search below so the frontend never hardcodes the netlify path.
+[functions]
+  directory = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200

@@ -10,6 +10,11 @@
 [functions]
   directory = "netlify/functions"
 
+# Keep-alive: ping Supabase every 3 days so the free-tier project is never idle
+# long enough (7 days) to be auto-paused. Cheap; runs server-side on a schedule.
+[functions."keepalive"]
+  schedule = "0 9 */3 * *"
+
 # Cache rules also live in public/_headers so manual folder/zip deploys get them
 # too; these mirror them for git-based builds.
 [[headers]]

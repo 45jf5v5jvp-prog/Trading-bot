@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.1h';
+const BUILD_ID = '4.2';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -399,6 +399,85 @@ function groupStandings(g) {
   return Object.values(acc).sort((a, b) => b.total - a.total);
 }
 
+/* ---- Match summary (box score) --------------------------------------------
+   A read-only breakdown of a finished round in each game's own terms — birdies,
+   points, Nassau segments, Vegas team points, junk — so nobody tallies by hand.
+   Pulls from the existing ledger and mirrors engine logic; changes no scoring. */
+function skinsWonCounts(round) {
+  let carry = 1; const won = {}; let pushed = 0;
+  const carries = round.skinsCarry !== false;
+  for (const h of playedHoles(round)) {
+    const nets = round.players.map(p => net(round, p.id, h));
+    const low = Math.min(...nets);
+    const w = round.players.filter((p, i) => nets[i] === low);
+    if (w.length === 1) { won[w[0].id] = (won[w[0].id] || 0) + carry; carry = 1; }
+    else { if (carries) carry++; pushed++; }
+  }
+  return { won, pushed };
+}
+function vegasTeamPoints(round) {
+  const per = {}; round.players.forEach(p => { per[p.id] = 0; });
+  let stable = true, ref = null;
+  for (const h of playedHoles(round)) {
+    const tms = round.players.length > 4 || round.blindDraw ? vegasTeamsAt(round, h) : teamsAt(round, h);
+    if (!tms || tms.length < 2) continue;
+    const sig = tms.map(t => [...t].sort().join(',')).sort().join('|');
+    if (ref == null) ref = sig; else if (ref !== sig) stable = false;
+    const par = round.pars[h], on = round.vegasFlip !== false;
+    const info = tms.map(t => ({ sc: t.map(id => net(round, id, h)), gb: on && t.some(id => { const g = gross(round, id, h); return g != null && g <= par - 1; }) }));
+    const anyGross = info.some(x => x.gb), maxPain = round.vegasPain === 'maxpain';
+    const numFor = (i, j) => combine(info[i].sc[0], info[i].sc[1], maxPain ? (anyGross && !info[i].gb) : (info[j].gb && !info[i].gb));
+    const pts = tms.map(() => 0);
+    for (let i = 0; i < tms.length; i++) for (let j = i + 1; j < tms.length; j++) { const a = numFor(i, j), b = numFor(j, i); const diff = Math.abs(a - b); if (!diff) continue; const [w, l] = a < b ? [i, j] : [j, i]; pts[w] += diff; pts[l] -= diff; }
+    const mx = holeMult(round, h); for (let z = 0; z < pts.length; z++) pts[z] *= mx;
+    tms.forEach((t, i) => t.forEach(id => { per[id] += pts[i]; }));
+  }
+  const fixed = stable && !(round.players.length > 4 || round.blindDraw);
+  let rows;
+  if (fixed) rows = sidesOf(round).map(t => ({ left: t.map(id => short(nameOf(round, id))).join('/'), right: `${per[t[0]] > 0 ? '+' : ''}${per[t[0]]} pts`, tone: per[t[0]] > 0 ? 'up' : per[t[0]] < 0 ? 'down' : 'muted' }));
+  else rows = round.players.map(p => ({ id: p.id, v: per[p.id] })).sort((a, b) => b.v - a.v).map(r => ({ left: nameOf(round, r.id), right: `${r.v > 0 ? '+' : ''}${r.v} pts`, tone: r.v > 0 ? 'up' : r.v < 0 ? 'down' : 'muted' }));
+  return { rows, per, fixed };
+}
+function matchSummary(round) {
+  const led = fullLedger(round), n = round.players.length, sections = [];
+  // Birdies (gross)
+  const bird = {};
+  for (const h of playedHoles(round)) round.players.forEach(p => { const g = gross(round, p.id, h); if (g != null && round.pars[h] - g >= 1) bird[p.id] = (bird[p.id] || 0) + 1; });
+  if (Object.keys(bird).length) sections.push({ title: 'Birdies (or better)', rows: round.players.filter(p => bird[p.id]).sort((a, b) => bird[b.id] - bird[a.id]).map(p => ({ left: p.name, right: String(bird[p.id]) })) });
+  // Per game, in the order they were chosen
+  for (const k of round.games) {
+    if (k === 'nassau') {
+      const [A, B] = sidesOf(round);
+      const st = round.stakes.nassau || 0;
+      const segs = [['Front', 0, 8], ['Back', 9, 17], ['Overall', 0, 17]].filter(s => s[1] < round.holes || s[0] !== 'Back');
+      const rows = segs.map(([label, s, e]) => {
+        const ee = Math.min(e, round.holes - 1); const d = diffFor(round, A, B, s, ee);
+        const side = (t) => t.map(id => nameOf(round, id)).join(' + ');
+        return d === 0 ? { left: label, right: 'halved', tone: 'muted' } : { left: label, right: `${side(d > 0 ? A : B)} ${Math.abs(d)} up · ${money(st)}`, tone: 'up' };
+      });
+      if ((round.presses || []).some(p => (p.game || 'nassau') === 'nassau')) rows.push({ left: 'Presses', right: `${(round.presses || []).filter(p => (p.game || 'nassau') === 'nassau').length} on the board`, tone: 'muted' });
+      sections.push({ title: 'Nassau', rows });
+    } else if (['train', 'points', 'stableford', 'bbb', 'wolf'].includes(k)) {
+      const pts = led.byGame[k]?.points || {};
+      sections.push({ title: `${gameName(k, n)} — points`, rows: round.players.map(p => ({ name: p.name, v: pts[p.id] || 0 })).sort((a, b) => b.v - a.v).map(r => ({ left: r.name, right: `${fmtP(r.v)}` })) });
+    } else if (k === 'skins') {
+      const sk = skinsWonCounts(round);
+      const rows = round.players.filter(p => sk.won[p.id]).sort((a, b) => sk.won[b.id] - sk.won[a.id]).map(p => ({ left: p.name, right: `${sk.won[p.id]} skin${sk.won[p.id] === 1 ? '' : 's'}` }));
+      if (sk.pushed) rows.push({ left: 'Pushed', right: `${sk.pushed} hole${sk.pushed === 1 ? '' : 's'}`, tone: 'muted' });
+      if (rows.length) sections.push({ title: 'Skins', rows });
+    } else if (k === 'vegas') {
+      sections.push({ title: 'Vegas — points', rows: vegasTeamPoints(round).rows });
+    }
+  }
+  // Junk (types, who cashed) + snake
+  const jt = junkTally(round);
+  if (jt.length || led.snakeHolder) {
+    const rows = jt.map(j => ({ left: j.name, right: j.entries.length ? j.entries.map(e => e.n > 1 ? `${e.name} x${e.n}` : e.name).join(', ') : 'nobody' }));
+    if (led.snakeHolder) rows.push({ left: 'Snake', right: `${nameOf(round, led.snakeHolder)} — ${money(led.snakeVal)}/man`, tone: 'down' });
+    sections.push({ title: 'Junk', rows });
+  }
+  return sections;
+}
 
 
 /* ---- Device identity + group membership (per device, no login) ------------
@@ -3381,6 +3460,8 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
             </>
           )}
 
+          <MatchSummary round={round} />
+
           <HoleFeed round={round} ledger={ledger} />
 
           {!locked && !guest && (
@@ -3979,6 +4060,38 @@ function SnapshotTile({ round }) {
   );
 }
 
+/* Match summary (box score) for the leaderboard — birdies, points, Nassau
+   segments, Vegas team points, junk. Read-only. */
+function MatchSummary({ round }) {
+  const [open, setOpen] = useState(true);
+  const sections = useMemo(() => matchSummary(round), [round]);
+  if (!sections.length) return null;
+  const toneCol = (t) => t === 'up' ? C.up : t === 'down' ? C.down : t === 'muted' ? C.muted : C.chalk;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
+        <Eyebrow>match summary</Eyebrow>
+        <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 11, color: C.ink }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {sections.map((s, i) => (
+            <div key={i} style={{ marginBottom: 12 }}>
+              <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 13.5, color: C.ink, marginBottom: 6 }}>{s.title}</div>
+              {s.rows.map((r, j) => (
+                <div key={j} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '8px 12px', background: C.card, borderRadius: 9, marginBottom: 4 }}>
+                  <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13, color: C.chalk, flex: '0 0 auto' }}>{r.left}</span>
+                  <span style={{ marginLeft: 'auto', textAlign: 'right', fontFamily: F_MONO, fontSize: 12, color: toneCol(r.tone), lineHeight: 1.4 }}>{r.right}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* Shown on a finished round: folds it into your personal season ledger and lets
    you correct who "you" are. Auto-saves once your name is known; else it asks. */
 function LedgerSaveCard({ round }) {
@@ -4372,6 +4485,7 @@ function Viewer({ code, initial, onLeave }) {
           {round.locked && <SnapshotTile round={round} />}
           <Standings round={round} ledger={ledger} />
           <SettleUp round={round} ledger={ledger} />
+          <MatchSummary round={round} />
           <HoleFeed round={round} ledger={ledger} />
           {round.locked && <LedgerSaveCard round={round} />}
           <GamesGuide round={round} defaultOpen />
@@ -4934,4 +5048,5 @@ export const __TEST__ = {
   playedHoles, net, gross, strokesFor, skinsCarryInto, calcTrain, trainCat,
   recordRound, summarizeLedger, ledgerKeyFor, directTransfers,
   buildSnapshot, checkGroupRecords, groupStandings,
+  matchSummary, vegasTeamPoints, skinsWonCounts,
 };

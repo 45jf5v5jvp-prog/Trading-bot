@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.2b';
+const BUILD_ID = '4.2c';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -271,6 +271,49 @@ function junkTally(round) {
   return out;
 }
 
+/* Money each junk type was worth, per player, mirroring calcJunk exactly (same
+   ladder, same "seen" ordering). Returns per-type gross (what a casher won/paid
+   from their OWN events), birdie gross per player, the snake, and the net per
+   player (verified against calcJunk in the audit). Read-only. */
+function junkBreakdown(round) {
+  const np = round.players.length;
+  const grossByType = {}, cashersByType = {}, birdieGross = {}, netM = zero(round);
+  const seen = {};
+  const baseOf = (t) => Number(round.junkValues?.[t] ?? round.junkValue) || 1;
+  const payNet = (pid, sign, amount) => round.players.forEach(p => { netM[p.id] = r2(netM[p.id] + (p.id === pid ? sign * amount * (np - 1) : -sign * amount)); });
+  let snakeHolder = null, snakePasses = 0;
+  if (round.junkOn?.length) for (let h = 0; h < round.holes; h++) {
+    const rec = round.junk?.[h] || {};
+    if (round.junkOn.includes('birdie') && holeComplete(round, h)) {
+      for (const p of round.players) {
+        const sc = round.useNet ? net(round, p.id, h) : gross(round, p.id, h);
+        const under = round.pars[h] - sc; if (under < 1) continue;
+        seen.birdie = (seen.birdie || 0) + 1;
+        const amt = r2(junkLadder(round, baseOf('birdie'), seen.birdie) * under);
+        birdieGross[p.id] = r2((birdieGross[p.id] || 0) + amt * (np - 1));
+        payNet(p.id, 1, amt);
+      }
+    }
+    for (const type of round.junkOn) {
+      const def = JUNK[type], ids = rec[type] || [];
+      if (!def || def.auto || !ids.length) continue;
+      if (def.hold) { ids.forEach(pid => { snakePasses++; snakeHolder = pid; }); continue; }
+      for (const pid of ids) {
+        seen[type] = (seen[type] || 0) + 1;
+        const amt = r2(junkLadder(round, baseOf(type), seen[type]));
+        grossByType[type] = grossByType[type] || {}; cashersByType[type] = cashersByType[type] || {};
+        grossByType[type][pid] = r2((grossByType[type][pid] || 0) + def.sign * amt * (np - 1));
+        cashersByType[type][pid] = (cashersByType[type][pid] || 0) + 1;
+        payNet(pid, def.sign, amt);
+      }
+    }
+  }
+  const snakeVal = snakeValue(round, snakePasses);
+  let snake = null;
+  if (snakeHolder && snakeVal) { snake = { holder: snakeHolder, val: snakeVal }; round.players.forEach(p => { netM[p.id] = r2(netM[p.id] + (p.id === snakeHolder ? -snakeVal * (np - 1) : snakeVal)); }); }
+  return { grossByType, cashersByType, birdieGross, snake, net: netM };
+}
+
 /* Paint a snapshot onto a canvas at a fixed, share-friendly size. Colors are
    fixed (betting-felt green + gold) so the image looks the same for everyone,
    independent of the app's light/dark theme. */
@@ -461,10 +504,19 @@ function trainStatus(round) {
 }
 function matchSummary(round) {
   const led = fullLedger(round), n = round.players.length, sections = [];
-  // Birdies (gross)
+  const jb = junkBreakdown(round);
+  const birdieOn = (round.junkOn || []).includes('birdie');
+  // Birdies (gross count) + what they were worth if the Birdie Machine is on
   const bird = {};
   for (const h of playedHoles(round)) round.players.forEach(p => { const g = gross(round, p.id, h); if (g != null && round.pars[h] - g >= 1) bird[p.id] = (bird[p.id] || 0) + 1; });
-  if (Object.keys(bird).length) sections.push({ title: 'Birdies (or better)', rows: round.players.filter(p => bird[p.id]).sort((a, b) => bird[b.id] - bird[a.id]).map(p => ({ left: p.name, right: String(bird[p.id]) })) });
+  if (Object.keys(bird).length) sections.push({
+    title: birdieOn ? 'Birdies (or better) — worth' : 'Birdies (or better)',
+    rows: round.players.filter(p => bird[p.id]).sort((a, b) => bird[b.id] - bird[a.id]).map(p => ({
+      left: p.name,
+      right: birdieOn ? `${bird[p.id]} · +${money(jb.birdieGross[p.id] || 0)}` : String(bird[p.id]),
+      tone: birdieOn ? 'up' : undefined,
+    })),
+  });
   // Per game, in the order they were chosen
   for (const k of round.games) {
     if (k === 'nassau') {
@@ -510,12 +562,21 @@ function matchSummary(round) {
       sections.push({ title: `${gameName(k, n)} — standing`, rows });
     }
   }
-  // Junk (types, who cashed) + snake
-  const jt = junkTally(round);
-  if (jt.length || led.snakeHolder) {
-    const rows = jt.map(j => ({ left: j.name, right: j.entries.length ? j.entries.map(e => e.n > 1 ? `${e.name} x${e.n}` : e.name).join(', ') : 'nobody' }));
+  // Junk (each type, who cashed + what it was worth) + snake. Birdie Machine is
+  // covered in the Birdies section above, so skip it here.
+  const jtypes = (round.junkOn || []).filter(t => t !== 'snake' && !(JUNK[t] && JUNK[t].auto));
+  if (jtypes.length || led.snakeHolder) {
+    const rows = jtypes.map(t => {
+      const cash = jb.cashersByType[t] || {};
+      const ids = Object.keys(cash).sort((a, b) => cash[b] - cash[a]);
+      const detail = ids.length ? ids.map(id => {
+        const cnt = cash[id], g = jb.grossByType[t]?.[id] || 0;
+        return `${short(nameOf(round, id))}${cnt > 1 ? ` x${cnt}` : ''} ${g > 0 ? '+' : ''}${money(g)}`;
+      }).join(', ') : 'nobody';
+      return { left: (JUNK[t] && JUNK[t].name) || t, right: detail };
+    });
     if (led.snakeHolder) rows.push({ left: 'Snake', right: `${nameOf(round, led.snakeHolder)} — ${money(led.snakeVal)}/man`, tone: 'down' });
-    sections.push({ title: 'Junk', rows });
+    sections.push({ title: 'Junk — worth', rows });
   }
   return sections;
 }
@@ -5089,5 +5150,5 @@ export const __TEST__ = {
   playedHoles, net, gross, strokesFor, skinsCarryInto, calcTrain, trainCat,
   recordRound, summarizeLedger, ledgerKeyFor, directTransfers,
   buildSnapshot, checkGroupRecords, groupStandings,
-  matchSummary, vegasTeamPoints, skinsWonCounts,
+  matchSummary, vegasTeamPoints, skinsWonCounts, junkBreakdown,
 };

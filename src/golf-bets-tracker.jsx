@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.2';
+const BUILD_ID = '4.2a';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -438,6 +438,27 @@ function vegasTeamPoints(round) {
   else rows = round.players.map(p => ({ id: p.id, v: per[p.id] })).sort((a, b) => b.v - a.v).map(r => ({ left: nameOf(round, r.id), right: `${r.v > 0 ? '+' : ''}${r.v} pts`, tone: r.v > 0 ? 'up' : r.v < 0 ? 'down' : 'muted' }));
   return { rows, per, fixed };
 }
+/* Live Train state as of the last played hole: who's aboard, who's one par from
+   boarding, and everyone's points. Mirrors calcTrain's state machine, read-only. */
+function trainStatus(round) {
+  const P = round.trainPts || {};
+  const gv = (v, d) => { const x = Number(v); return Number.isFinite(x) ? x : d; };
+  const pv = { bogey: gv(P.bogey, 1), par: gv(P.par, 2), birdie: gv(P.birdie, 4), eagle: gv(P.eagle, 8), double: 0 };
+  const caboose = round.trainCaboose !== false, finalIdx = round.holes - 1;
+  const res = {};
+  round.players.forEach(p => {
+    let onTrain = false, offPars = 0, onBogeys = 0, points = 0;
+    for (const h of playedHoles(round)) {
+      const cat = trainCat(round, p.id, h); if (cat == null) continue;
+      const ride = caboose && h === finalIdx, effOn = onTrain || ride;
+      if (effOn) points += pv[cat] * holeMult(round, h) * (ride ? 2 : 1);
+      if (onTrain) { if (cat === 'double') { onTrain = false; onBogeys = 0; } else if (cat === 'bogey') { onBogeys++; if (onBogeys >= 2) { onTrain = false; onBogeys = 0; } } else onBogeys = 0; offPars = 0; }
+      else { onBogeys = 0; if (cat === 'eagle' || cat === 'birdie') { onTrain = true; offPars = 0; } else if (cat === 'par') { offPars++; if (offPars >= 2) { onTrain = true; offPars = 0; } } else offPars = 0; }
+    }
+    res[p.id] = { onTrain, points, offPars, onBogeys };
+  });
+  return res;
+}
 function matchSummary(round) {
   const led = fullLedger(round), n = round.players.length, sections = [];
   // Birdies (gross)
@@ -451,13 +472,24 @@ function matchSummary(round) {
       const st = round.stakes.nassau || 0;
       const segs = [['Front', 0, 8], ['Back', 9, 17], ['Overall', 0, 17]].filter(s => s[1] < round.holes || s[0] !== 'Back');
       const rows = segs.map(([label, s, e]) => {
-        const ee = Math.min(e, round.holes - 1); const d = diffFor(round, A, B, s, ee);
+        const ee = Math.min(e, round.holes - 1);
+        const d = diffFor(round, A, B, s, ee);
+        const played = playedHoles(round).filter(h => h >= s && h <= ee).length;
+        const done = played === (ee - s + 1);
         const side = (t) => t.map(id => nameOf(round, id)).join(' + ');
-        return d === 0 ? { left: label, right: 'halved', tone: 'muted' } : { left: label, right: `${side(d > 0 ? A : B)} ${Math.abs(d)} up · ${money(st)}`, tone: 'up' };
+        const status = d === 0 ? 'all square' : `${side(d > 0 ? A : B)} ${Math.abs(d)} up`;
+        return { left: label, right: done ? `${status} · ${money(st)}` : `${status} · thru ${played}`, tone: d === 0 ? 'muted' : 'up' };
       });
       if ((round.presses || []).some(p => (p.game || 'nassau') === 'nassau')) rows.push({ left: 'Presses', right: `${(round.presses || []).filter(p => (p.game || 'nassau') === 'nassau').length} on the board`, tone: 'muted' });
-      sections.push({ title: 'Nassau', rows });
-    } else if (['train', 'points', 'stableford', 'bbb', 'wolf'].includes(k)) {
+      sections.push({ title: 'Nassau — match status', rows });
+    } else if (k === 'train') {
+      const ts = trainStatus(round);
+      const rows = round.players.map(p => ({ p, s: ts[p.id] })).sort((a, b) => b.s.points - a.s.points).map(({ p, s }) => {
+        const status = s.onTrain ? (s.onBogeys === 1 ? 'aboard · 1 from derail' : 'aboard') : (s.offPars === 1 ? '1 par from boarding' : 'off the train');
+        return { left: p.name, right: `${fmtP(s.points)} pt${s.points === 1 ? '' : 's'} · ${status}`, tone: s.onTrain ? 'up' : (s.offPars === 1 ? 'ink' : 'muted') };
+      });
+      sections.push({ title: 'The Train — status', rows });
+    } else if (['points', 'stableford', 'bbb', 'wolf'].includes(k)) {
       const pts = led.byGame[k]?.points || {};
       sections.push({ title: `${gameName(k, n)} — points`, rows: round.players.map(p => ({ name: p.name, v: pts[p.id] || 0 })).sort((a, b) => b.v - a.v).map(r => ({ left: r.name, right: `${fmtP(r.v)}` })) });
     } else if (k === 'skins') {
@@ -4066,11 +4098,11 @@ function MatchSummary({ round }) {
   const [open, setOpen] = useState(true);
   const sections = useMemo(() => matchSummary(round), [round]);
   if (!sections.length) return null;
-  const toneCol = (t) => t === 'up' ? C.up : t === 'down' ? C.down : t === 'muted' ? C.muted : C.chalk;
+  const toneCol = (t) => t === 'up' ? C.up : t === 'down' ? C.down : t === 'ink' ? C.ink : t === 'muted' ? C.muted : C.chalk;
   return (
     <div style={{ marginTop: 22 }}>
       <button onClick={() => setOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
-        <Eyebrow>match summary</Eyebrow>
+        <Eyebrow>{round.locked ? 'match summary' : 'game status'}</Eyebrow>
         <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 11, color: C.ink }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (

@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.2a';
+const BUILD_ID = '4.2b';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -413,7 +413,7 @@ function skinsWonCounts(round) {
     if (w.length === 1) { won[w[0].id] = (won[w[0].id] || 0) + carry; carry = 1; }
     else { if (carries) carry++; pushed++; }
   }
-  return { won, pushed };
+  return { won, pushed, riding: carry > 1 ? carry : 0 };
 }
 function vegasTeamPoints(round) {
   const per = {}; round.players.forEach(p => { per[p.id] = 0; });
@@ -494,11 +494,20 @@ function matchSummary(round) {
       sections.push({ title: `${gameName(k, n)} — points`, rows: round.players.map(p => ({ name: p.name, v: pts[p.id] || 0 })).sort((a, b) => b.v - a.v).map(r => ({ left: r.name, right: `${fmtP(r.v)}` })) });
     } else if (k === 'skins') {
       const sk = skinsWonCounts(round);
-      const rows = round.players.filter(p => sk.won[p.id]).sort((a, b) => sk.won[b.id] - sk.won[a.id]).map(p => ({ left: p.name, right: `${sk.won[p.id]} skin${sk.won[p.id] === 1 ? '' : 's'}` }));
+      const st = round.stakes.skins || 0;
+      const rows = round.players.filter(p => sk.won[p.id]).sort((a, b) => sk.won[b.id] - sk.won[a.id]).map(p => ({ left: p.name, right: `${sk.won[p.id]} skin${sk.won[p.id] === 1 ? '' : 's'}`, tone: 'up' }));
+      if (sk.riding) rows.push({ left: 'Riding now', right: `${sk.riding} skins · ${money(st * sk.riding)} on the next hole`, tone: 'ink' });
       if (sk.pushed) rows.push({ left: 'Pushed', right: `${sk.pushed} hole${sk.pushed === 1 ? '' : 's'}`, tone: 'muted' });
-      if (rows.length) sections.push({ title: 'Skins', rows });
+      if (rows.length) sections.push({ title: 'Skins — status', rows });
     } else if (k === 'vegas') {
-      sections.push({ title: 'Vegas — points', rows: vegasTeamPoints(round).rows });
+      sections.push({ title: 'Vegas — team points', rows: vegasTeamPoints(round).rows });
+    } else {
+      // Money-based games without a separate points system (Nassau Sixes, Hammer,
+      // Yardage): show the running standing so every game has a live status line.
+      const mny = led.byGame[k]?.money || {};
+      const rows = round.players.map(p => ({ name: p.name, v: r2(mny[p.id] || 0) })).sort((a, b) => b.v - a.v)
+        .map(r => ({ left: r.name, right: `${r.v > 0 ? '+' : ''}${money(r.v)}`, tone: r.v > 0 ? 'up' : r.v < 0 ? 'down' : 'muted' }));
+      sections.push({ title: `${gameName(k, n)} — standing`, rows });
     }
   }
   // Junk (types, who cashed) + snake

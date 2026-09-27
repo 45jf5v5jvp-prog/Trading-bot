@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.3';
+const BUILD_ID = '4.3a';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -553,6 +553,24 @@ function matchSummary(round) {
       if (rows.length) sections.push({ title: 'Skins — status', rows });
     } else if (k === 'vegas') {
       sections.push({ title: 'Vegas — team points', rows: vegasTeamPoints(round).rows });
+    } else if (k === 'banker') {
+      const mny = led.byGame.banker?.money || {};
+      const stat = {}; round.players.forEach(p => { stat[p.id] = { banked: 0, w: 0, l: 0 }; });
+      for (const h of playedHoles(round)) {
+        const bId = bankerAt(round, h); if (!bId) continue;
+        stat[bId].banked++;
+        const bs = bankerScore(round, bId, h);
+        round.players.forEach(p => { if (p.id === bId) return; const s = bankerScore(round, p.id, h); if (bs < s) stat[bId].w++; else if (s < bs) stat[bId].l++; });
+      }
+      const played = playedHoles(round);
+      let nextH = round.holes - 1; for (let i = 0; i < round.holes; i++) { if (!played.includes(i)) { nextH = i; break; } }
+      const curB = bankerAt(round, nextH);
+      const rows = round.players.map(p => ({ p, net: r2(mny[p.id] || 0), st: stat[p.id] })).sort((a, b) => b.net - a.net).map(x => ({
+        left: `${x.p.name}${curB === x.p.id ? ' 🏦' : ''}`,
+        right: `${x.net > 0 ? '+' : ''}${money(x.net)}${x.st.banked ? ` · banked ${x.st.banked} (${x.st.w}-${x.st.l})` : ''}`,
+        tone: x.net > 0 ? 'up' : x.net < 0 ? 'down' : 'muted',
+      }));
+      sections.push({ title: `Banker — standing${curB ? ` · now banking: ${nameOf(round, curB)}` : ''}`, rows });
     } else {
       // Money-based games without a separate points system (Nassau Sixes, Hammer,
       // Yardage): show the running standing so every game has a live status line.
@@ -1339,16 +1357,18 @@ function calcBanker(round, stake) {
   for (const h of playedHoles(round)) {
     const bId = bankerAt(round, h);
     if (!bId) { log.push({ h, text: 'No banker set for this hole', m: zero(round), pending: true }); continue; }
+    const mult = Math.max(1, Number(round.bankerMult?.[h]) || 1);   // 2x/3x double-or-triple the bet
+    const bet = stake * mult;
     const bs = bankerScore(round, bId, h);
     const m = zero(round); let w = 0, l = 0;
     for (const p of round.players) {
       if (p.id === bId) continue;
       const s = bankerScore(round, p.id, h);
-      if (bs < s) { m[bId] += stake; m[p.id] -= stake; w++; }
-      else if (s < bs) { m[bId] -= stake; m[p.id] += stake; l++; }
+      if (bs < s) { m[bId] += bet; m[p.id] -= bet; w++; }
+      else if (s < bs) { m[bId] -= bet; m[p.id] += bet; l++; }
     }
     addInto(total, scaleMap(m, holeMult(round, h)));
-    log.push({ h, text: `${nameOf(round, bId)} banks · ${w}W ${l}L`, m });
+    log.push({ h, text: `${nameOf(round, bId)} banks${mult > 1 ? ` (${mult}x)` : ''} · ${w}W ${l}L`, m });
   }
   return { money: total, points: null, log };
 }
@@ -3273,6 +3293,15 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
                 const b = bankerAt(round, h);
                 return <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14.5, color: C.chalk }}>{b ? `${nameOf(round, b)} is banking — plays everyone straight up` : 'Post a hole to set the banker'}</div>;
               })()}
+              {/* Double or triple the bet on this hole */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
+                <span style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, flex: '0 0 auto' }}>bet</span>
+                {[1, 2, 3].map(mx => {
+                  const cur = Math.max(1, Number(round.bankerMult?.[h]) || 1);
+                  return <Btn key={mx} active={cur === mx} disabled={locked} onClick={() => setRound(r => ({ ...r, bankerMult: { ...(r.bankerMult || {}), [h]: mx } }))} style={{ flex: 1, fontSize: 12, padding: '9px 4px' }}>{mx}x</Btn>;
+                })}
+                <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 13, color: C.chalk }}>{money(round.stakes.banker * Math.max(1, Number(round.bankerMult?.[h]) || 1))}/man</span>
+              </div>
             </div>
           )}
 
@@ -3836,7 +3865,7 @@ async function updateGroup(code, mutate) {
 const nameInGroup = (g) => { const me = deviceId(); return (g?.members || []).find(m => m.deviceId === me)?.name || ''; };
 
 
-const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker'];
+const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker', 'bankerMult'];
 const cardKey = (code, gi) => `${gameKey(code)}:c${gi}`;
 
 const emptyCard = () => Object.fromEntries(CARD_FIELDS.map(k => [k, {}]));
@@ -3854,7 +3883,7 @@ function scopeCard(round, ids) {
       if (kept.length) { c.junk[h] = c.junk[h] || {}; c.junk[h][t] = kept; }
     }
   }
-  ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker'].forEach(k => { c[k] = round[k] || {}; });
+  ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker', 'bankerMult'].forEach(k => { c[k] = round[k] || {}; });
   return c;
 }
 
@@ -3867,7 +3896,7 @@ function mergeRound(config, cards) {
       out.junk[h] = out.junk[h] || {};
       for (const t in c.junk[h]) out.junk[h][t] = [...new Set([...(out.junk[h][t] || []), ...c.junk[h][t]])];
     }
-    ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker'].forEach(k => {
+    ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker', 'bankerMult'].forEach(k => {
       for (const h in c[k] || {}) if (c[k][h] != null) out[k][h] = c[k][h];
     });
   }

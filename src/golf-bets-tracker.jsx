@@ -9,7 +9,7 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.2c';
+const BUILD_ID = '4.3';
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -659,6 +659,11 @@ const GAMES = {
     ok: (n) => n >= 2,
     blurb: () => 'Board the train with a birdie or two pars in a row — the boarding hole itself pays nothing. Once aboard you bank points every hole: bogey 1, par 2, birdie 4, eagle 8. A double bogey, or two bogeys in a row, derails you — your banked points stay, but you have to climb back on to score again. The Caboose: on the last hole everybody is automatically aboard and every point doubles, so the whole group has something to play for coming up 18.',
   },
+  banker: {
+    name: () => 'Banker', unit: 'per match', teams: false, defStake: 2,
+    ok: (n) => n >= 2,
+    blurb: () => 'One player is the banker each hole and plays every other player at once — beat a man you win the bet from him, lose and you pay him, ties push. The banker moves around: in Defender mode it passes to whoever wins a hole; in Manual mode you tap who banks each hole.',
+  },
 };
 const gameName = (k, n) => GAMES[k].name(n);
 const isPointGame = (k) => GAMES[k].unit === 'per point';
@@ -740,7 +745,7 @@ const teamsAt = (r, h) => (r.partnerMode === 'rotate' && r.holeTeams?.[h]) || r.
    defaults to 1 (a no-op), so with nothing set the scoring is exactly as
    before. It scales the per-hole games below — not the match-play games,
    Hammer (its own doubling) or junk (its own ladder). */
-const MULT_GAMES = ['skins', 'wolf', 'vegas', 'points', 'yardage', 'stableford', 'bbb', 'train'];
+const MULT_GAMES = ['skins', 'wolf', 'vegas', 'points', 'yardage', 'stableford', 'bbb', 'train', 'banker'];
 const holeMult = (round, h) => Number(round.mult?.[h]) || 1;
 const scaleMap = (m, x) => { if (x !== 1) for (const k in m) m[k] = (m[k] || 0) * x; return m; };
 
@@ -1307,7 +1312,48 @@ function calcYardage(round, rate) {
   return { money: total, points: null, log };
 }
 
-const ENGINES = { skins: calcSkins, nassau: calcNassau, wolf: calcWolf, vegas: calcVegas, hammer: calcHammer, points: calcPoints, roundrobin: calcRoundRobin, yardage: calcYardage, stableford: calcStableford, bbb: calcBBB, train: calcTrain };
+/* BANKER. One player banks each hole and plays everyone else at once: beat a man
+   you win the stake from him, lose you pay him, tie pushes. Two ways to move the
+   hot seat, chosen at setup:
+     defender - the banker keeps it until a single other player wins a hole
+                outright; that player banks next. Hole 1 starts with the first
+                player (or an override in round.banker[firstHole]).
+     manual   - the scorer taps who banks each hole (round.banker[h]).
+   Net or gross follows the round setting, like every other game. */
+const bankerScore = (round, pid, h) => (round.useNet ? net(round, pid, h) : gross(round, pid, h));
+function bankerAt(round, h) {
+  if (round.bankerMode === 'manual') return round.banker?.[h] || null;
+  // defender: walk the completed holes up to (not including) h, carrying the seat
+  const done = playedHoles(round).filter(x => x < h);
+  let cur = round.banker?.[done[0] ?? 0] || round.players[0]?.id || null;
+  for (const x of done) {
+    const rows = round.players.map(p => ({ id: p.id, v: bankerScore(round, p.id, x) }));
+    const low = Math.min(...rows.map(r => r.v));
+    const winners = rows.filter(r => r.v === low);
+    if (winners.length === 1 && winners[0].id !== cur) cur = winners[0].id;
+  }
+  return cur;
+}
+function calcBanker(round, stake) {
+  const total = zero(round), log = [];
+  for (const h of playedHoles(round)) {
+    const bId = bankerAt(round, h);
+    if (!bId) { log.push({ h, text: 'No banker set for this hole', m: zero(round), pending: true }); continue; }
+    const bs = bankerScore(round, bId, h);
+    const m = zero(round); let w = 0, l = 0;
+    for (const p of round.players) {
+      if (p.id === bId) continue;
+      const s = bankerScore(round, p.id, h);
+      if (bs < s) { m[bId] += stake; m[p.id] -= stake; w++; }
+      else if (s < bs) { m[bId] -= stake; m[p.id] += stake; l++; }
+    }
+    addInto(total, scaleMap(m, holeMult(round, h)));
+    log.push({ h, text: `${nameOf(round, bId)} banks · ${w}W ${l}L`, m });
+  }
+  return { money: total, points: null, log };
+}
+
+const ENGINES = { skins: calcSkins, nassau: calcNassau, wolf: calcWolf, vegas: calcVegas, hammer: calcHammer, points: calcPoints, roundrobin: calcRoundRobin, yardage: calcYardage, stableford: calcStableford, bbb: calcBBB, train: calcTrain, banker: calcBanker };
 
 /* --- junk, including the escalating snake --- */
 /* Junk can climb the same way the snake does. The count is kept per type, so
@@ -1918,6 +1964,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
   const [yardMode, setYardMode] = useState(E?.yardMode || 'each');
   const [trainPts, setTrainPts] = useState(() => ({ bogey: 1, par: 2, birdie: 4, eagle: 8, ...(E?.trainPts || {}) }));
   const [trainCaboose, setTrainCaboose] = useState(E ? E.trainCaboose !== false : true);
+  const [bankerMode, setBankerMode] = useState(E?.bankerMode || 'defender');
   const [trainCustom, setTrainCustom] = useState(false);
   const [courseName, setCourseName] = useState(E?.course || '');
   const [showCourse, setShowCourse] = useState(!E);
@@ -1978,7 +2025,7 @@ function Setup({ onStart, onBack, roster, editRound }) {
         holes, groups, pointsSplit: oddSplit(count),
         junkOn, junkValue: Number(junkValue) || 1, junkValues, junkEscalate, junkMode,
         snakeBase: Number(snakeBase) || 1, snakeMode,
-        trainPts: cleanTrainPts(trainPts), trainCaboose,
+        trainPts: cleanTrainPts(trainPts), trainCaboose, bankerMode,
       });
       return;
     }
@@ -2004,12 +2051,12 @@ function Setup({ onStart, onBack, roster, editRound }) {
       stakes: Object.fromEntries(games.map(k => [k, Number(stakeOf(k)) || 1])),
       course: courseName, pars: pars.slice(0, holes), si: si.slice(0, holes),
       yards: yards.slice(0, holes).map((y, i) => Number(y) || defYards(pars[i])), yardMode,
-      scores: {}, wolf: {}, hammer: {}, bbb: {}, junk: {}, presses: [], holeTeams: {}, mult: {},
+      scores: {}, wolf: {}, hammer: {}, bbb: {}, junk: {}, presses: [], holeTeams: {}, mult: {}, banker: {},
       pointsSplit: oddSplit(count), partnerMode, vegasFlip: true, vegasPain, skinsCarry,
       groups, blindDraw: oddMan && blindDraw,
       junkOn, junkValue: Number(junkValue) || 1, junkValues, junkEscalate, junkMode,
       snakeBase: Number(snakeBase) || 1, snakeMode,
-      trainPts: cleanTrainPts(trainPts), trainCaboose,
+      trainPts: cleanTrainPts(trainPts), trainCaboose, bankerMode,
       startedAt: Date.now(),
     });
   };
@@ -2325,6 +2372,21 @@ function Setup({ onStart, onBack, roster, editRound }) {
                     ? `With ${count} playing, one man has no partner. Blind draw gives him a random one on every hole, pulled the moment the hole is posted so he is in it the whole way instead of waiting until the end. His drawn partner still plays for his own team too.`
                     : 'He plays his own ball but sits out the team bet.'}
                 </div>
+              </div>
+            </>
+          )}
+
+          {games.includes('banker') && (
+            <>
+              <Eyebrow style={{ marginBottom: 8 }}>banker — who banks each hole</Eyebrow>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <Btn active={bankerMode === 'defender'} onClick={() => setBankerMode('defender')} style={{ flex: 1, fontSize: 11.5 }}>Defender</Btn>
+                <Btn active={bankerMode === 'manual'} onClick={() => setBankerMode('manual')} style={{ flex: 1, fontSize: 11.5 }}>Pick manually</Btn>
+              </div>
+              <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, lineHeight: 1.6, marginBottom: 18 }}>
+                {bankerMode === 'defender'
+                  ? 'The banker keeps the seat until another player wins a hole outright — then that player banks next. The first hole starts with the first player.'
+                  : 'Tap who the banker is on each hole as you play. The banker plays everyone else straight up — beat a man, win the bet; lose, pay him.'}
               </div>
             </>
           )}
@@ -3195,6 +3257,25 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
             </div>
           )}
 
+          {has('banker') && (
+            <div style={panel}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                <Eyebrow style={{ color: C.ink }}>banker · hole {h + 1}</Eyebrow>
+                <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9.5, color: C.muted }}>{round.bankerMode === 'manual' ? 'tap the banker' : 'defender'}</span>
+              </div>
+              {round.bankerMode === 'manual' ? (
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {round.players.map(p => (
+                    <Btn key={p.id} active={(round.banker?.[h]) === p.id} disabled={locked} onClick={() => setRound(r => ({ ...r, banker: { ...(r.banker || {}), [h]: p.id } }))} style={{ flex: 1, fontSize: 11.5, padding: '10px 4px', minWidth: 62 }}>{short(p.name)}</Btn>
+                  ))}
+                </div>
+              ) : (() => {
+                const b = bankerAt(round, h);
+                return <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14.5, color: C.chalk }}>{b ? `${nameOf(round, b)} is banking — plays everyone straight up` : 'Post a hole to set the banker'}</div>;
+              })()}
+            </div>
+          )}
+
           {round.blindDraw && (() => {
             const solo = (round.teams || []).find(t => t.length === 1);
             if (!solo) return null;
@@ -3755,7 +3836,7 @@ async function updateGroup(code, mutate) {
 const nameInGroup = (g) => { const me = deviceId(); return (g?.members || []).find(m => m.deviceId === me)?.name || ''; };
 
 
-const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams', 'mult'];
+const CARD_FIELDS = ['scores', 'junk', 'wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker'];
 const cardKey = (code, gi) => `${gameKey(code)}:c${gi}`;
 
 const emptyCard = () => Object.fromEntries(CARD_FIELDS.map(k => [k, {}]));
@@ -3773,7 +3854,7 @@ function scopeCard(round, ids) {
       if (kept.length) { c.junk[h] = c.junk[h] || {}; c.junk[h][t] = kept; }
     }
   }
-  ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult'].forEach(k => { c[k] = round[k] || {}; });
+  ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker'].forEach(k => { c[k] = round[k] || {}; });
   return c;
 }
 
@@ -3786,7 +3867,7 @@ function mergeRound(config, cards) {
       out.junk[h] = out.junk[h] || {};
       for (const t in c.junk[h]) out.junk[h][t] = [...new Set([...(out.junk[h][t] || []), ...c.junk[h][t]])];
     }
-    ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult'].forEach(k => {
+    ['wolf', 'hammer', 'bbb', 'holeTeams', 'mult', 'banker'].forEach(k => {
       for (const h in c[k] || {}) if (c[k][h] != null) out[k][h] = c[k][h];
     });
   }

@@ -35,8 +35,8 @@ Both are stored in your Mac's **Keychain**, never in a plain file.
 Open **Terminal** on your Mac and run:
 
 ```bash
-git clone https://github.com/45jf5v5jvp-prog/trading-bot.git
-cd trading-bot/personal-assistant
+git clone -b claude/personal-assistant https://github.com/45jf5v5jvp-prog/Trading-bot.git
+cd Trading-bot/personal-assistant
 ./install.sh
 ```
 

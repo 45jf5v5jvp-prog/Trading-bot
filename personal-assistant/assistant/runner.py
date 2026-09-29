@@ -19,6 +19,21 @@ log = logging.getLogger(__name__)
 LAST_SCAN = "last_scan"
 EMAIL_CURSORS = "email_cursors"
 TEXT_CURSOR = "text_cursor"
+FORCE_SCAN = "force_scan"
+
+
+def record_health(store: Store, part: str, ok: bool, detail: str = "") -> None:
+    """Remember whether the background job could reach email/texts/calendar (shown by doctor/setup)."""
+    store.set(
+        f"health.{part}",
+        json.dumps({"ok": ok, "detail": detail, "at": datetime.now().astimezone().isoformat()}),
+    )
+    store.commit()
+
+
+def health(store: Store, part: str) -> dict | None:
+    raw = store.get(f"health.{part}")
+    return json.loads(raw) if raw else None
 
 
 def latest_slot(now: datetime, scan_times: list[str]) -> datetime | None:
@@ -57,8 +72,10 @@ def collect(cfg: Config, store: Store) -> tuple[list[SourceItem], dict]:
                 items += found
                 updates[EMAIL_CURSORS] = json.dumps(new_cursors)
                 log.info("Email: %d new message(s)", len(found))
+                record_health(store, "email", True)
             except Exception as e:  # keep going with texts if mail is down
                 log.error("Reading email failed: %s", e)
+                record_health(store, "email", False, str(e))
 
     if cfg.messages.enabled:
         try:
@@ -67,7 +84,9 @@ def collect(cfg: Config, store: Store) -> tuple[list[SourceItem], dict]:
             items += found
             updates[TEXT_CURSOR] = str(cursor)
             log.info("Texts: %d conversation(s) with new messages", len(found))
+            record_health(store, "messages", True)
         except sqlite3.OperationalError as e:
+            record_health(store, "messages", False, str(e))
             log.error(
                 "Can't read Messages (%s). Give Full Disk Access to the python program "
                 "shown by `assistant doctor` in System Settings > Privacy & Security.",
@@ -114,6 +133,10 @@ def run_once(backend: Backend, store: Store, cfg: Config, force_scan: bool = Fal
     if cfg.reminders.sync_to_calendar:
         reminders_sync.sync(backend, store, cfg, now)
 
+    if store.get(FORCE_SCAN):  # set by `assistant setup` to test the background job
+        force_scan = True
+        store.set(FORCE_SCAN, "")
+        store.commit()
     last = store.get(LAST_SCAN)
     if force_scan or scan_due(now, cfg.schedule.scan_times, datetime.fromisoformat(last) if last else None):
         scan(backend, store, cfg, now)

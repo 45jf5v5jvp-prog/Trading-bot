@@ -24,36 +24,27 @@ You keep writing in one place, Reminders, and your calendar stays up to date. No
 - **Messages → Settings → iMessage → Enable Messages in iCloud.**
 - **System Settings → [your name] → iCloud**: Calendars and Reminders are on.
 
-### 3. Get two passwords ready
-1. **An iCloud app-specific password** (lets the assistant read your mail without your real Apple ID password):
-   go to [appleid.apple.com](https://appleid.apple.com) → **Sign-In and Security → App-Specific Passwords → +** and name it "Personal Assistant".
-2. **An Anthropic API key** (lets Claude read your messages): sign in at [console.anthropic.com](https://console.anthropic.com), add a payment method, then go to **API Keys → Create Key**.
-
-Both are stored in your Mac's **Keychain**, never in a plain file.
+### 3. Have the AI key ready
+The assistant uses Claude to read messages. It needs an **Anthropic API key**: a long code starting with `sk-ant-`. Create one at [console.anthropic.com](https://console.anthropic.com) under **API Keys** (a payment method is required). If you're setting this up for someone else, send them the key.
 
 ### 4. Install
-Open **Terminal** on your Mac and run:
+1. Download `personal-assistant.zip` and double-click it. You'll get a **personal-assistant** folder in Downloads.
+2. Open **Terminal**: press ⌘ Space, type `Terminal`, press Return.
+3. Paste this line and press Return:
+   ```bash
+   bash ~/Downloads/personal-assistant/install.command
+   ```
 
-```bash
-git clone -b claude/personal-assistant https://github.com/45jf5v5jvp-prog/Trading-bot.git
-cd Trading-bot/personal-assistant
-./install.sh
-```
+It installs everything it needs, including its own copy of Python, and then starts a six-step setup:
 
-(If it says Python 3.11+ is needed, install [Homebrew](https://brew.sh), run `brew install python@3.12`, then run `./install.sh` again.)
+1. **Email**: opens Apple's website so you can make an *app-specific password* (a separate password just for this) and paste it in.
+2. **Texts**: turn text reading on or off.
+3. **AI key**: paste the `sk-ant-` key.
+4. **Approvals**: your mobile number for the "new suggestions" texts, and when to check.
+5. **Calendar & Reminders**: click **Allow** when your Mac asks.
+6. **Start**: it opens System Settings → **Full Disk Access** plus a Finder window with the file to drag in, which lets it read your texts. Then it starts in the background and checks that email and texts work.
 
-The installer walks you through setup. It asks for your iCloud email, the two passwords, and the phone number where you want the "you have suggestions" iMessages. When macOS asks whether it may access Calendars and Reminders, click **Allow**.
-
-### 5. Allow it to read your texts
-macOS protects your messages, so this step has to be done by hand:
-
-1. **System Settings → Privacy & Security → Full Disk Access**.
-2. Click **+**, press **⌘ Cmd + Shift + G**, paste the Python path that setup printed (`assistant doctor` shows it again), and click **Open**.
-3. Make sure the switch next to it is on. Add **Terminal** the same way.
-
-Then run `assistant doctor`. Every line should say **allowed / yes / ✓**.
-
-The first few times the background job runs, macOS may ask again whether "python" may use Calendars, Reminders or Messages. Click **Allow** each time.
+Passwords and keys are stored in the Mac's **Keychain**, never in a plain file. To change anything later, open Terminal and type `assistant setup`.
 
 ---
 
@@ -104,7 +95,7 @@ Claude API usage is billed by Anthropic based on how much is read. A typical inb
 | Problem | Fix |
 |---|---|
 | `doctor` says Calendars/Reminders **denied** | System Settings → Privacy & Security → Calendars (and Reminders) → switch on Terminal and python. |
-| "Can't read Messages" | Redo step 5. After `brew upgrade python` the Python path changes, so add the new one. |
+| "Can't read Messages" | Run `assistant setup` again and redo the Full Disk Access step. |
 | Email sign-in fails | Make a new app-specific password and run `assistant setup` again. |
 | No iMessage digest | Check `imessage_to` in settings. The first time, macOS asks whether python may control Messages; click **OK**. |
 | Something looks wrong | `assistant doctor` shows the last log lines. The full log is `~/.personal-assistant/assistant.log`. |

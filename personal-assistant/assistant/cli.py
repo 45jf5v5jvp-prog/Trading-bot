@@ -10,6 +10,8 @@ import os
 import plistlib
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 from . import config, keychain
@@ -53,113 +55,192 @@ def _yes(prompt: str, default: bool = True) -> bool:
 
 
 # --------------------------------------------------------------------- commands
-def cmd_setup(_args) -> None:
-    cfg = config.load()
-    print("\nPersonal Assistant setup. Press Enter to keep the value in [brackets].\n")
+def _step(n: int, title: str) -> None:
+    print(f"\n\u2500\u2500 Step {n} of 6: {title} " + "\u2500" * max(0, 40 - len(title)))
 
-    print("1) iCloud Mail")
-    cfg.email.enabled = _yes("   Read your iCloud email for things to add?", cfg.email.enabled)
+
+def _pause(msg: str = "Press Return when you're done") -> None:
+    input(f"   {msg}... ")
+
+
+def _ask_secret(label: str, existing: str | None, check) -> str | None:
+    """Ask for a password/key until `check(value)` passes (3 tries). Returns the working value."""
+    for attempt in range(3):
+        hint = " (already saved - just press Return to keep it)" if existing else ""
+        value = getpass.getpass(f"   Paste your {label}{hint}\n   (it stays hidden as you paste): ").strip()
+        value = value.replace(" ", "") or existing or ""
+        if not value:
+            print("   Nothing was pasted. Try again.")
+            continue
+        try:
+            check(value)
+            return value
+        except Exception as e:
+            print(f"   \u2717 That didn't work ({e}).")
+            if attempt < 2:
+                print("   Check it and paste it again.")
+    return None
+
+
+def _open_url(url: str) -> None:
+    subprocess.run(["open", url], capture_output=True)
+
+
+def cmd_setup(_args) -> None:
+    from .runner import FORCE_SCAN, health
+    from .store import Store
+
+    cfg = config.load()
+    print("Welcome! This sets up your assistant. It takes about 10 minutes.")
+    print("Anything in [brackets] is already filled in: just press Return to keep it.")
+
+    _step(1, "Your email")
+    cfg.email.enabled = _yes("   Should the assistant read your iCloud email?", cfg.email.enabled)
     if cfg.email.enabled:
-        cfg.email.username = _ask("   iCloud email address", cfg.email.username)
+        cfg.email.username = _ask("   Your iCloud email address", cfg.email.username)
         print(
-            "   You need an app-specific password (not your Apple ID password):\n"
-            "   appleid.apple.com > Sign-In and Security > App-Specific Passwords > +"
+            "\n   Apple needs a special password just for this (NOT your normal Apple password).\n"
+            "   I'll open the Apple website now. Sign in, then choose:\n"
+            "     Sign-In and Security \u2192 App-Specific Passwords \u2192 + \n"
+            "   Name it \"Assistant\", then copy the password it shows you (xxxx-xxxx-xxxx-xxxx)."
         )
-        existing = keychain.get(keychain.ICLOUD_APP_PASSWORD)
-        pw = getpass.getpass(
-            "   App-specific password" + (" [saved, Enter to keep]" if existing else "") + ": "
-        ).strip()
-        if pw:
-            keychain.put(keychain.ICLOUD_APP_PASSWORD, pw)
+        _pause("Press Return to open the Apple website")
+        _open_url("https://account.apple.com/account/manage")
         from .sources import email_imap
 
-        try:
-            email_imap.test_login(cfg.email, pw or existing or "")
-            print("   ✓ Signed in to iCloud Mail")
-        except Exception as e:
-            print(f"   ✗ Couldn't sign in ({e}). Re-run setup to try again.")
+        pw = _ask_secret(
+            "app-specific password",
+            keychain.get(keychain.ICLOUD_APP_PASSWORD),
+            lambda v: email_imap.test_login(cfg.email, v),
+        )
+        if pw:
+            keychain.put(keychain.ICLOUD_APP_PASSWORD, pw)
+            print("   \u2713 Connected to your email")
+        else:
+            print("   Skipping email for now. Run setup again later to add it.")
+            cfg.email.enabled = False
 
-    print("\n2) Text messages")
-    cfg.messages.enabled = _yes("   Read your texts for things to add?", cfg.messages.enabled)
+    _step(2, "Your texts")
+    cfg.messages.enabled = _yes("   Should the assistant read your text messages?", cfg.messages.enabled)
 
-    print("\n3) Claude (reads the emails/texts and picks out what matters)")
-    print("   Create an API key at console.anthropic.com > API Keys.")
-    existing = keychain.get(keychain.ANTHROPIC_API_KEY)
-    key = getpass.getpass(
-        "   Anthropic API key" + (" [saved, Enter to keep]" if existing else "") + ": "
-    ).strip()
+    _step(3, "The AI key")
+    print(
+        "   The assistant uses Claude (an AI) to read your messages and spot plans and to-dos.\n"
+        "   You need a key for it: a long code starting with sk-ant-.\n"
+        "   If someone set this up for you, they will have sent it to you."
+    )
+    import anthropic
+
+    key = _ask_secret(
+        "AI key",
+        keychain.get(keychain.ANTHROPIC_API_KEY),
+        lambda v: anthropic.Anthropic(api_key=v).models.retrieve(cfg.ai.model),
+    )
     if key:
         keychain.put(keychain.ANTHROPIC_API_KEY, key)
-    try:
-        import anthropic
+        print("   \u2713 AI key works")
+    else:
+        print("   Without the key, email and text suggestions are off. Your to-dos still sync.")
 
-        anthropic.Anthropic(api_key=key or existing).models.retrieve(cfg.ai.model)
-        print("   ✓ API key works")
-    except Exception as e:
-        print(f"   ✗ API key check failed ({e})")
-
-    print("\n4) Approvals")
+    _step(4, "How you'll approve things")
     print(
-        f"   Suggestions wait in a Reminders list called “{cfg.reminders.inbox_list}”.\n"
-        "   Check one off to approve it, delete it to dismiss it."
+        f"   New suggestions will wait in a Reminders list called \u201c{cfg.reminders.inbox_list}\u201d.\n"
+        "   Tick one to add it to your calendar. Delete it if you don't want it.\n"
+        "   The assistant can text you when new ones arrive."
     )
     cfg.notify.imessage_to = _ask(
-        "   Your phone number or Apple ID email to iMessage you when new ones arrive "
-        "(blank = Mac notification only)",
-        cfg.notify.imessage_to,
+        "   Your mobile number for those texts (or press Return to skip)", cfg.notify.imessage_to
     )
-    times = _ask("   When should it check email/texts? (24h times)", ", ".join(cfg.schedule.scan_times))
+    times = _ask(
+        "   Times to check email and texts (24-hour clock)", ", ".join(cfg.schedule.scan_times)
+    )
     cfg.schedule.scan_times = [t.strip() for t in times.split(",") if t.strip()]
-
-    print("\n5) To-do list → calendar")
-    cfg.reminders.sync_to_calendar = _yes(
-        "   Put dated Reminders on your calendar automatically?", cfg.reminders.sync_to_calendar
+    cfg.calendar.todo_calendar = _ask(
+        "   Name of the calendar your to-dos will appear on", cfg.calendar.todo_calendar
     )
-    cfg.calendar.todo_calendar = _ask("   Calendar name for to-dos", cfg.calendar.todo_calendar)
-
     config.save(cfg)
-    print(f"\nSaved settings to {config.CONFIG_PATH}")
 
-    print("\nAsking macOS for Calendar and Reminders access (click Allow)...")
+    _step(5, "Calendar and Reminders permission")
+    print("   Your Mac will ask whether Terminal can use Calendars and Reminders. Click Allow.")
     from .apple import AppleBackend
 
     backend = AppleBackend()
     backend.ensure_calendar(cfg.calendar.todo_calendar)
     backend.ensure_reminder_list(cfg.reminders.inbox_list)
-    print("✓ Calendar and Reminders ready")
+    print("   \u2713 Calendar and Reminders connected")
 
+    _step(6, "Start the assistant")
     if cfg.messages.enabled:
-        _check_messages_access(cfg)
-
-    if _yes("\nStart running in the background now?"):
-        cmd_install(None)
-    print("\nAll set. Run `assistant doctor` any time to check on things.")
-
-
-def _check_messages_access(cfg) -> bool:
-    from .sources import messages
-
-    try:
-        db = messages.open_db(cfg.messages.chat_db)
-        db.execute("SELECT 1 FROM message LIMIT 1").fetchall()
-        db.close()
-        print("✓ Can read Messages")
-        return True
-    except Exception as e:
+        _guide_full_disk_access()
+    store = Store(config.DB_PATH)
+    store.set(FORCE_SCAN, "1")
+    store.commit()
+    started = time.time()
+    cmd_install(None)
+    print(
+        "\n   The assistant is starting. If your Mac asks whether \"python\" can use\n"
+        "   Calendars, Reminders or Messages, click Allow (or OK)."
+    )
+    print("   Checking that everything works (up to 2 minutes)", end="", flush=True)
+    wanted = [p for p, on in (("email", cfg.email.enabled), ("messages", cfg.messages.enabled)) if on]
+    results: dict = {}
+    while time.time() - started < 120 and len(results) < len(wanted):
+        time.sleep(3)
+        print(".", end="", flush=True)
+        for part in wanted:
+            h = health(Store(config.DB_PATH), part)
+            if h and datetime.fromisoformat(h["at"]).timestamp() >= started:
+                results[part] = h
+    print()
+    labels = {"email": "Reading your email", "messages": "Reading your texts"}
+    all_ok = True
+    for part in wanted:
+        h = results.get(part)
+        if h and h["ok"]:
+            print(f"   \u2713 {labels[part]}")
+        else:
+            all_ok = False
+            print(f"   \u2717 {labels[part]}: {h['detail'] if h else 'no answer yet'}")
+    if "messages" in wanted and not (results.get("messages") or {}).get("ok"):
         print(
-            f"✗ Can't read Messages yet ({e}).\n"
-            "  Open System Settings > Privacy & Security > Full Disk Access, click +,\n"
-            "  press Cmd+Shift+G and paste this path, then turn it on:\n"
-            f"    {os.path.realpath(sys.executable)}\n"
-            "  (Also add Terminal if you run commands from Terminal.)"
+            "     Texts need the Full Disk Access switch from this step. Turn it on, then\n"
+            "     open Terminal and type:  assistant setup"
         )
-        return False
+    if all_ok:
+        print("\nAll done! Add a reminder with a date and it will appear on your calendar shortly.")
+    print("You can close this window. The assistant keeps running in the background.")
+
+
+def _guide_full_disk_access() -> None:
+    python = os.path.realpath(sys.executable)
+    print(
+        "   To read your texts, the assistant needs one permission that you switch on by hand.\n"
+        "   I'll open two windows:\n"
+        "     \u2022 System Settings, on the \"Full Disk Access\" page\n"
+        f"     \u2022 a Finder window with a file called \"{os.path.basename(python)}\" selected\n"
+        "   Drag that file from Finder into the list in System Settings, and make sure its\n"
+        "   switch is on. (Your Mac may ask for your password or Touch ID. That's normal.)"
+    )
+    _pause("Press Return to open them")
+    _open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+    subprocess.run(["open", "-R", python], capture_output=True)
+    _pause()
 
 
 def cmd_run(args) -> None:
-    from .runner import run_once
+    from .apple import AppleBackend
+    from .runner import record_health, run_once
+    from .store import Store
 
-    backend, store, cfg = _open()
+    cfg = config.load()
+    store = Store(config.DB_PATH)
+    try:
+        backend = AppleBackend()
+        backend.store.calendarsForEntityType_(0)  # touch EventKit so access problems show up
+    except Exception as e:
+        record_health(store, "calendar", False, str(e))
+        raise
+    record_health(store, "calendar", True)
     run_once(backend, store, cfg, force_scan=getattr(args, "scan", False))
 
 
@@ -193,21 +274,30 @@ def cmd_status(_args) -> None:
 
 
 def cmd_doctor(_args) -> None:
-    cfg = config.load()
-    print(f"Settings:      {config.CONFIG_PATH} ({'found' if config.CONFIG_PATH.exists() else 'missing - run setup'})")
-    print(f"Python:        {os.path.realpath(sys.executable)}")
-    print(f"Background job: {'installed' if AGENT_PLIST.exists() else 'not installed'}")
-    print(f"iCloud password saved:  {'yes' if keychain.get(keychain.ICLOUD_APP_PASSWORD) else 'no'}")
-    print(f"Anthropic key saved:    {'yes' if keychain.get(keychain.ANTHROPIC_API_KEY) else 'no'}")
+    from .runner import health
+    from .store import Store
+
+    print(f"Settings:        {config.CONFIG_PATH} ({'found' if config.CONFIG_PATH.exists() else 'missing - run setup'})")
+    print(f"Python:          {os.path.realpath(sys.executable)}")
+    print(f"Background job:  {'installed' if AGENT_PLIST.exists() else 'not installed'}")
+    print(f"Email password:  {'saved' if keychain.get(keychain.ICLOUD_APP_PASSWORD) else 'missing'}")
+    print(f"AI key:          {'saved' if keychain.get(keychain.ANTHROPIC_API_KEY) else 'missing'}")
     try:
         from .apple import AppleBackend
 
         for k, v in AppleBackend.access_status().items():
-            print(f"{k + ' access:':24}{v}")
+            print(f"{k + ' (Terminal):':17}{v}")
     except ImportError:
-        print("EventKit not available (are you on a Mac with requirements installed?)")
-    if cfg.messages.enabled:
-        _check_messages_access(cfg)
+        print("EventKit not available (is this a Mac?)")
+    store = Store(config.DB_PATH)
+    print("\nWhat the background job saw last time:")
+    for part, label in (("calendar", "Calendar/Reminders"), ("email", "Email"), ("messages", "Texts")):
+        h = health(store, part)
+        if h is None:
+            print(f"  {label:20}not checked yet")
+        else:
+            state = "\u2713 ok" if h["ok"] else f"\u2717 {h['detail']}"
+            print(f"  {label:20}{state}  ({h['at'][:16].replace('T', ' ')})")
     if config.LOG_PATH.exists():
         print("\nLast log lines:")
         print("".join(config.LOG_PATH.read_text().splitlines(keepends=True)[-15:]))

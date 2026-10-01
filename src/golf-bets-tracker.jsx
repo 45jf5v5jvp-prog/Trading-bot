@@ -65,23 +65,24 @@ const FEATURE_INFO = {
    back nine in fading light is a real situation.
    'ink' is the accent used as text, 'onBall' and 'onTone' are what sits on top
    of a filled button. */
+/* "Action" — a sportsbook look: near-black with one electric volt accent.
+   Money is always green up / red down regardless of theme, like a betslip. */
 const THEMES = {
-  // Night is the headline look: a deep teal fairway with a bright mint accent.
-  // Strong contrast reads well on a phone, in low light and in the sun.
+  // Night is the headline look.
   night: {
-    felt: '#0C2A24', card: '#143A31', card2: '#18463B', line: '#2A5346',
-    chalk: '#F3FBF8', muted: '#9FC2B8', ball: '#5FE6C2', ink: '#5FE6C2',
-    up: '#4FD48A', down: '#FF6E5B', snake: '#C77DFF',
-    onBall: '#06281F', onTone: '#06281F',
-    grad: 'linear-gradient(135deg,#6EE7B7,#34D399)', glow: 'rgba(52,211,153,.30)',
+    felt: '#0A0B0D', card: '#15171B', card2: '#1D2026', line: '#282C34',
+    chalk: '#FFFFFF', muted: '#8B9099', faint: '#565C66', ball: '#C8FF3C', ink: '#C8FF3C',
+    up: '#39E68A', down: '#FF5B5B', snake: '#C77DFF',
+    onBall: '#0A0B0D', onTone: '#0A0B0D',
+    grad: '#C8FF3C', glow: 'rgba(200,255,60,.20)',
   },
-  // Day is the bright-sun companion: airy mint-white with a deep teal accent.
+  // Day is the bright-sun companion: light surfaces, same volt punch.
   day: {
-    felt: '#EAF3EF', card: '#FFFFFF', card2: '#E0F2EA', line: '#CDE3D8',
-    chalk: '#0D2A24', muted: '#5B7A70', ball: '#0FBE98', ink: '#0A8E74',
-    up: '#15774A', down: '#C0372B', snake: '#7A3FBF',
-    onBall: '#04231C', onTone: '#FFFFFF',
-    grad: 'linear-gradient(135deg,#34D399,#0FBE98)', glow: 'rgba(16,185,129,.26)',
+    felt: '#F2F3F5', card: '#FFFFFF', card2: '#EBEDF0', line: '#E0E3E8',
+    chalk: '#0B0C0E', muted: '#6A7078', faint: '#9AA0A8', ball: '#AEE80F', ink: '#3F6212',
+    up: '#0E8A4F', down: '#D23B3B', snake: '#7A3FBF',
+    onBall: '#0B0C0E', onTone: '#FFFFFF',
+    grad: '#AEE80F', glow: 'rgba(174,232,15,.28)',
   },
 };
 const C = { ...THEMES.night };
@@ -94,7 +95,12 @@ function applyTheme(name) {
   Object.assign(navBtn, { border: `1px solid ${C.line}`, color: C.chalk });
   Object.assign(panel, { background: C.card });
 }
-const F_DISP = "'Archivo', 'Helvetica Neue', system-ui, sans-serif";
+// Type system for the "Action" look: Anton is the compressed scoreboard
+// display, Oswald the condensed label/button face, Inter the clean UI body,
+// Plex Mono the tabular money/odds face.
+const F_SCORE = "'Anton', 'Arial Narrow', Impact, sans-serif";
+const F_COND = "'Oswald', 'Arial Narrow', system-ui, sans-serif";
+const F_DISP = "'Inter', 'Helvetica Neue', system-ui, sans-serif";
 const F_MONO = "'IBM Plex Mono', ui-monospace, Menlo, monospace";
 
 const DEF_PAR = [4,4,3,5,4,4,3,4,5, 4,5,3,4,4,4,3,5,4];
@@ -1524,18 +1530,18 @@ function fullLedger(round) {
 
 const Btn = ({ children, onClick, active, kind = 'ghost', style = {}, disabled, tone }) => (
   <button onClick={disabled ? undefined : onClick} disabled={disabled} style={{
-    fontFamily: F_DISP, fontWeight: 700, fontSize: 13, letterSpacing: '0.03em',
+    fontFamily: F_COND, fontWeight: 600, fontSize: 14, letterSpacing: '0.05em', textTransform: 'uppercase',
     padding: '10px 14px', borderRadius: 10, cursor: disabled ? 'default' : 'pointer',
-    border: `1px solid ${active ? (tone || C.ball) : C.line}`, transition: 'all .12s',
-    background: active ? (tone || C.ball) : kind === 'solid' ? C.chalk : 'transparent',
+    border: `1px solid ${active ? (tone || C.ball) : kind === 'solid' ? C.ball : C.line}`, transition: 'all .12s',
+    background: active ? (tone || C.ball) : kind === 'solid' ? C.ball : 'transparent',
     color: active ? (tone && tone !== C.ball ? C.onTone : C.onBall)
-      : kind === 'solid' ? C.felt : disabled ? C.line : C.chalk,
+      : kind === 'solid' ? C.onBall : disabled ? C.line : C.chalk,
     opacity: disabled ? 0.35 : 1, ...style,
   }}>{children}</button>
 );
 
 const Eyebrow = ({ children, style = {} }) => (
-  <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: '0.18em', color: C.muted, textTransform: 'uppercase', ...style }}>{children}</div>
+  <div style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 11, letterSpacing: '0.16em', color: C.muted, textTransform: 'uppercase', ...style }}>{children}</div>
 );
 
 const inputStyle = {
@@ -2183,8 +2189,8 @@ function Setup({ onStart, onBack, roster, editRound }) {
           </>
         ) : (
           <>
-            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 0.95 }}>{APP_NAME}</div>
-            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.ink, lineHeight: 0.95 }}>{APP_SUB}</div>
+            <div style={{ fontFamily: F_SCORE, fontSize: 32, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.chalk, lineHeight: 0.92 }}>{APP_NAME}</div>
+            <div style={{ fontFamily: F_SCORE, fontSize: 32, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.ink, lineHeight: 0.92 }}>{APP_SUB}</div>
           </>
         )}
       </div>
@@ -3224,7 +3230,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
     <div style={{ maxWidth: 520, margin: '0 auto', paddingBottom: 86 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '13px 16px 8px' }}>
         <div>
-          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 13, color: C.chalk }}>{APP_NAME}<span style={{ color: C.ink }}> {APP_SUB}</span></div>
+          <div style={{ fontFamily: F_SCORE, fontSize: 16, letterSpacing: '0.02em', textTransform: 'uppercase', color: C.chalk }}>{APP_NAME}<span style={{ color: C.ink }}> {APP_SUB}</span></div>
           {round.code && <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 12, letterSpacing: '0.12em', color: C.ink, marginTop: 2 }}>#{round.code}</div>}
         </div>
         <div style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 9.5, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.5 }}>
@@ -4511,60 +4517,47 @@ function MyLedger({ onBack }) {
   );
 }
 
-/* --- home-screen icons (inline SVG so they inherit the palette) --- */
-const IconLock = ({ c = C.ball, s = 18 }) => (
-  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="4.5" y="10.5" width="15" height="10" rx="2.4" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
-  </svg>
-);
-const IconInfo = ({ c = C.muted, s = 19 }) => (
-  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><circle cx="12" cy="7.6" r="0.7" fill={c} stroke="none" />
-  </svg>
-);
-const IconChevron = ({ c, s = 18 }) => (
-  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
-);
+/* --- home-screen icons (inline SVG line icons, inherit the palette) --- */
+const IconFlag = ({ c, s = 23 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round"><path d="M6 21V3.5" /><path d="M6 4h11.5l-2.8 3.8L17.5 12H6" /></svg>;
+const IconHash = ({ c, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M9 4L7 20M17 4l-2 16M4 9h16M3 15h16" /></svg>;
+const IconTrip = ({ c, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20s3-2 8-2 8 2 8 2" /><path d="M12 18V7" /><circle cx="12" cy="5" r="2" /><path d="M8 11l8-2" /></svg>;
+const IconPeople = ({ c, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5" /><path d="M16 5.5a3 3 0 0 1 0 5.5M18 20c0-2.6-1-4.2-2.5-5" /></svg>;
+const IconLedger = ({ c, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h9l4 4v14H6z" /><path d="M9 9h6M9 13h6M9 17h3" /></svg>;
+const IconChart = ({ c, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16" /><rect x="6" y="11" width="3" height="6" /><rect x="11" y="6" width="3" height="11" /><rect x="16" y="13" width="3" height="4" /></svg>;
+const IconSun = ({ c, s = 18 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19" /></svg>;
+const IconMoon = ({ c, s = 18 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>;
+const IconLock = ({ c = C.ball, s = 15 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" /></svg>;
+const IconInfo = ({ c = C.muted, s = 18 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><circle cx="12" cy="7.6" r="0.7" fill={c} stroke="none" /></svg>;
+const IconChevron = ({ c, s = 18 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>;
 
-/* One home-screen button. Primary = the mint CTA; locked paid rows carry an (i)
-   and a padlock; soon = greyed with a COMING SOON tag. */
-function HomeRow({ label, onClick, primary, soon, locked, infoKey, onInfo }) {
-  if (soon) {
-    return (
-      <div style={{
-        background: 'transparent', border: `1.5px solid ${C.line}`, borderRadius: 18,
-        padding: '20px 22px', marginBottom: 12, display: 'flex', alignItems: 'center', opacity: 0.5,
-      }}>
-        <span style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 17, color: C.chalk, letterSpacing: '-0.01em' }}>{label}</span>
-        <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', color: C.muted, border: `1px solid ${C.line}`, borderRadius: 40, padding: '6px 11px' }}>COMING SOON</span>
-      </div>
-    );
-  }
-  const base = {
-    width: '100%', textAlign: 'left', cursor: 'pointer', borderRadius: 18,
-    padding: '20px 22px', marginBottom: 12, display: 'flex', alignItems: 'center',
-    fontFamily: F_DISP, letterSpacing: '-0.01em', transition: 'all .12s',
-  };
-  const style = primary
-    ? { ...base, background: C.grad, border: 'none', boxShadow: `0 12px 30px ${C.glow}`, color: C.onBall, fontWeight: 850, fontSize: 20 }
-    : { ...base, background: C.card, border: `1.5px solid ${C.line}`, color: C.chalk, fontWeight: 800, fontSize: 18 };
+/* A sportsbook-style menu row: icon chip, condensed label, right-side meta
+   (chevron, a PRO lock chip for paid features, or a SOON tag). */
+const ProTag = () => (
+  <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.ball + '1F', border: `1px solid ${C.ball}55`, borderRadius: 7, padding: '5px 9px' }}>
+    <IconLock c={C.ink} s={14} />
+    <span style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 11, letterSpacing: '0.14em', color: C.ink }}>PRO</span>
+  </span>
+);
+function HomeRow({ icon, label, onClick, locked, infoKey, onInfo, soon, last }) {
   return (
-    <button onClick={onClick} style={style}>
-      <span>{label}</span>
-      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9 }}>
-        {infoKey && (
-          <span role="button" aria-label={`About ${label}`}
-            onClick={(e) => { e.stopPropagation(); onInfo(infoKey); }}
-            style={{ width: 34, height: 34, borderRadius: 18, background: C.card2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <IconInfo c={C.muted} />
-          </span>
+    <button onClick={soon ? undefined : onClick} style={{
+      width: '100%', textAlign: 'left', background: 'transparent', border: 'none',
+      borderBottom: last ? 'none' : `1px solid ${C.line}`, padding: '16px 2px',
+      display: 'flex', alignItems: 'center', gap: 14, cursor: soon ? 'default' : 'pointer',
+      opacity: soon ? 0.5 : 1,
+    }}>
+      <span style={{ width: 40, height: 40, borderRadius: 11, background: C.card2, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 40px' }}>{icon}</span>
+      <span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 18, letterSpacing: '0.04em', textTransform: 'uppercase', color: C.chalk }}>{label}</span>
+      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {infoKey && !locked && (
+          <span role="button" aria-label={`About ${label}`} onClick={(e) => { e.stopPropagation(); onInfo(infoKey); }} style={{ display: 'flex', padding: 4 }}><IconInfo c={C.muted} /></span>
         )}
-        {locked && (
-          <span style={{ width: 34, height: 34, borderRadius: 18, background: C.ball + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <IconLock c={C.ink} />
-          </span>
+        {infoKey && locked && (
+          <span role="button" aria-label={`About ${label}`} onClick={(e) => { e.stopPropagation(); onInfo(infoKey); }} style={{ display: 'flex', padding: 4 }}><IconInfo c={C.faint || C.muted} /></span>
         )}
-        {primary && <IconChevron c={C.onBall} />}
+        {locked ? <ProTag />
+          : soon ? <span style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 11, letterSpacing: '0.16em', color: C.muted, border: `1px solid ${C.line}`, borderRadius: 7, padding: '6px 10px' }}>SOON</span>
+          : <IconChevron c={C.muted} />}
       </span>
     </button>
   );
@@ -4594,7 +4587,7 @@ function PaywallSheet({ onClose, onUnlock }) {
   return (
     <Sheet onClose={onClose}>
       <div style={{ width: 44, height: 44, borderRadius: 24, background: C.ball + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}><IconLock c={C.ink} s={22} /></div>
-      <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.025em', color: C.chalk, lineHeight: 1.02 }}>Join the {BUNDLE_NAME}</div>
+      <div style={{ fontFamily: F_SCORE, fontSize: 34, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.chalk, lineHeight: 0.98 }}>Join the {BUNDLE_NAME}</div>
       <div style={{ fontFamily: F_DISP, fontSize: 14, color: C.muted, marginTop: 10, lineHeight: 1.45 }}>Keep your whole golf life in one place. Everything below unlocks for a year.</div>
       <div style={{ height: 1, background: C.line, margin: '20px 0' }} />
       {feat('Golf Trips', 'Stack rounds on one leaderboard — perfect for buddy trips.')}
@@ -4613,7 +4606,7 @@ function InfoSheet({ featureKey, locked, onClose, onUnlock }) {
   return (
     <Sheet onClose={onClose}>
       <div style={{ width: 46, height: 46, borderRadius: 24, background: C.ball + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><IconInfo c={C.ink} s={22} /></div>
-      <div style={{ fontFamily: F_DISP, fontWeight: 850, fontSize: 26, letterSpacing: '-0.02em', color: C.chalk }}>{info.title}</div>
+      <div style={{ fontFamily: F_SCORE, fontSize: 30, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.chalk }}>{info.title}</div>
       {info.lines.map((l, i) => (
         <div key={i} style={{ fontFamily: F_DISP, fontSize: 15, color: C.muted, marginTop: 14, lineHeight: 1.5 }}>{l}</div>
       ))}
@@ -4640,67 +4633,106 @@ function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, t
   const openInfo = (key) => setSheet({ type: 'info', key });
   const openPaywall = () => setSheet({ type: 'paywall' });
   const doUnlock = () => { setUnlocked(true); setUnl(true); setSheet(null); };
-  // A paid feature: if locked, show the paywall; otherwise run the real action.
   const paid = (fn) => () => (locked ? openPaywall() : fn());
 
-  const resumeCard = (r, label) => (
-    <div onClick={r.go} style={{ padding: 16, background: C.card2, border: `1.5px solid ${C.ball}`, borderRadius: 18, marginBottom: 14, cursor: 'pointer' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span style={{ width: 7, height: 7, borderRadius: 7, background: C.ink }} />
-        <Eyebrow style={{ color: C.ink }}>{label}</Eyebrow>
+  // Season line (from the device ledger); hidden until there's history.
+  const season = summarizeLedger(loadMyLedger());
+  const cashRate = (season.up + season.down) ? Math.round(season.up / (season.up + season.down) * 100) : null;
+  const money = (n) => (n >= 0 ? '+$' : '−$') + Math.abs(r2(n));
+
+  // In-progress round/trip shown as a "live event" card.
+  const liveCard = (r, tag, tagCol) => {
+    const [head, sub] = (r.label || '').split(' · ');
+    return (
+      <div onClick={r.go} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, overflow: 'hidden', marginBottom: 14, cursor: 'pointer' }}>
+        <div style={{ height: 3, background: C.ball }} />
+        <div style={{ padding: '15px 16px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: tagCol + '1F', borderRadius: 20, padding: '4px 9px' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 7, background: tagCol, boxShadow: `0 0 8px ${tagCol}` }} />
+            <span style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 11, letterSpacing: '0.14em', color: tagCol }}>{tag}</span>
+          </span>
+          <div style={{ fontFamily: F_SCORE, fontSize: 26, color: C.chalk, textTransform: 'uppercase', marginTop: 11, lineHeight: 0.95 }}>{head}</div>
+          <div style={{ display: 'flex', alignItems: 'center', marginTop: 10 }}>
+            <span style={{ fontFamily: F_COND, fontWeight: 500, fontSize: 14, letterSpacing: '0.03em', textTransform: 'uppercase', color: C.muted }}>{sub}</span>
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em', color: C.ink, textTransform: 'uppercase' }}>Open board</span>
+              <IconChevron c={C.ink} s={17} />
+            </span>
+          </div>
+        </div>
       </div>
-      <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk, marginTop: 6, lineHeight: 1.4 }}>{r.label}</div>
-    </div>
-  );
+    );
+  };
 
   return (
-    <div style={{ padding: '52px 18px 48px', maxWidth: 520, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 30 }}>
-        <div>
-          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 42, letterSpacing: '-0.04em', color: C.chalk, lineHeight: 0.9 }}>{APP_NAME}</div>
-          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 42, letterSpacing: '-0.04em', color: C.ink, lineHeight: 0.9 }}>{APP_SUB}</div>
-          <Eyebrow style={{ marginTop: 14 }}>settle it before the parking lot</Eyebrow>
-          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 6 }}>v{BUILD_ID}</div>
+    <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 18px 44px', maxWidth: 520, margin: '0 auto' }}>
+      {/* top bar: logo + theme toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: C.ball, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 6px 18px ${C.glow}` }}><IconFlag c={C.onBall} s={24} /></div>
+          <div style={{ lineHeight: 1 }}>
+            <div style={{ fontFamily: F_SCORE, fontSize: 23, letterSpacing: '0.01em', color: C.chalk, textTransform: 'uppercase' }}>{APP_NAME}</div>
+            <div style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 11, letterSpacing: '0.34em', color: C.ink, textTransform: 'uppercase', marginTop: 1 }}>{APP_SUB}</div>
+          </div>
         </div>
         <button onClick={() => setTheme(theme === 'day' ? 'night' : 'day')}
-          aria-label={theme === 'day' ? 'switch to the night palette' : 'switch to the day palette'}
-          style={{
-            marginLeft: 'auto', marginTop: 4, width: 44, height: 44, borderRadius: 24, cursor: 'pointer',
-            border: `1.5px solid ${C.line}`, background: C.card, color: C.ink, fontSize: 17, lineHeight: 1, padding: 0,
-          }}>{theme === 'day' ? '☾' : '☀'}</button>
+          aria-label={theme === 'day' ? 'switch to the night look' : 'switch to the day look'}
+          style={{ marginLeft: 'auto', width: 42, height: 42, borderRadius: 12, cursor: 'pointer', border: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+          {theme === 'day' ? <IconMoon c={C.muted} /> : <IconSun c={C.muted} />}
+        </button>
       </div>
 
-      {resume && resumeCard(resume, 'round in progress')}
-      {tripResume && resumeCard(tripResume, 'trip in progress')}
+      {/* season ticker */}
+      {season.rounds.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 11, letterSpacing: '0.16em', color: C.faint, textTransform: 'uppercase' }}>Season</span>
+          <span style={{ fontFamily: F_MONO, fontSize: 16, fontWeight: 700, color: season.net >= 0 ? C.up : C.down, marginLeft: 10 }}>{money(season.net)}</span>
+          <span style={{ width: 1, height: 16, background: C.line, margin: '0 12px' }} />
+          <span style={{ fontFamily: F_MONO, fontSize: 13, color: C.muted }}>{season.rounds.length} RDS</span>
+          {cashRate != null && <><span style={{ width: 1, height: 16, background: C.line, margin: '0 12px' }} /><span style={{ fontFamily: F_MONO, fontSize: 13, color: C.muted }}>{cashRate}% CASHED</span></>}
+        </div>
+      )}
 
-      <HomeRow label="Start a round" primary onClick={onNew} />
-      {SHARING_ON && <HomeRow label="Join with a code" onClick={onJoin} />}
-      <HomeRow label="Start a trip" infoKey="trip" locked={locked} onInfo={openInfo} onClick={paid(onTrip)} />
-      {SHARING_ON && <HomeRow label="My Groups" infoKey="groups" locked={locked} onInfo={openInfo} onClick={paid(onGroups)} />}
-      <HomeRow label="My Golf Ledger" infoKey="ledger" locked={locked} onInfo={openInfo} onClick={paid(onLedger)} />
-      <HomeRow label="Analytics" soon />
+      {resume && liveCard(resume, 'LIVE', C.down)}
+      {tripResume && liveCard(tripResume, 'TRIP', C.ink)}
 
+      {/* primary CTA */}
+      <button onClick={onNew} style={{ width: '100%', display: 'flex', alignItems: 'center', background: C.ball, border: 'none', borderRadius: 15, padding: '19px 20px', marginBottom: 18, boxShadow: `0 12px 30px ${C.glow}`, cursor: 'pointer' }}>
+        <IconFlag c={C.onBall} s={24} />
+        <span style={{ fontFamily: F_SCORE, fontSize: 25, letterSpacing: '0.01em', color: C.onBall, textTransform: 'uppercase', marginLeft: 12 }}>Start a round</span>
+        <span style={{ marginLeft: 'auto', display: 'flex' }}><IconChevron c={C.onBall} s={22} /></span>
+      </button>
+
+      {/* menu */}
+      <div style={{ borderTop: `1px solid ${C.line}` }}>
+        {SHARING_ON && <HomeRow icon={<IconHash c={C.ink} />} label="Join with a code" onClick={onJoin} />}
+        <HomeRow icon={<IconTrip c={C.muted} />} label="Start a trip" infoKey="trip" locked={locked} onInfo={openInfo} onClick={paid(onTrip)} />
+        {SHARING_ON && <HomeRow icon={<IconPeople c={C.muted} />} label="My Groups" infoKey="groups" locked={locked} onInfo={openInfo} onClick={paid(onGroups)} />}
+        <HomeRow icon={<IconLedger c={C.muted} />} label="My Golf Ledger" infoKey="ledger" locked={locked} onInfo={openInfo} onClick={paid(onLedger)} />
+        <HomeRow icon={<IconChart c={C.faint} />} label="Analytics" soon last />
+      </div>
+
+      {/* footer */}
       {SHARING_ON && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 22 }}>
-          <span style={{
-            width: 9, height: 9, borderRadius: 9, flex: '0 0 9px',
-            background: conn == null ? C.muted : conn.ok ? C.ink : C.down,
-            boxShadow: conn?.ok ? `0 0 8px ${C.ink}` : 'none',
-          }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20 }}>
+          <span style={{ width: 7, height: 7, borderRadius: 7, flex: '0 0 7px', background: conn == null ? C.muted : conn.ok ? C.up : C.down, boxShadow: conn?.ok ? `0 0 8px ${C.up}` : 'none' }} />
           <span style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: '0.04em', color: conn && !conn.ok ? C.down : C.muted, lineHeight: 1.5 }}>
-            {conn == null ? 'Checking the shared leaderboard…'
-              : conn.ok ? 'Shared leaderboard connected. Your group can follow live.'
+            {conn == null ? 'CHECKING THE SHARED BOARD…'
+              : conn.ok ? 'SHARED BOARD LIVE · GROUP CAN FOLLOW WITH A CODE'
               : (SHARE_STATUS[conn.reason] || 'Shared board: not reachable.')}
           </span>
         </div>
       )}
 
       {locked && (
-        <div onClick={openPaywall} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer' }}>
-          <IconLock c={C.muted} s={15} />
-          <span style={{ fontFamily: F_DISP, fontSize: 12.5, fontWeight: 600, color: C.muted }}>Trips, Groups &amp; Ledger unlock with {BUNDLE_NAME} — {PRICE_LABEL}</span>
+        <div onClick={openPaywall} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: C.card, border: `1px solid ${C.ball}44`, borderRadius: 12, padding: '13px 15px', cursor: 'pointer' }}>
+          <IconLock c={C.ink} s={17} />
+          <span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 13, letterSpacing: '0.05em', textTransform: 'uppercase', color: C.chalk }}>Unlock the {BUNDLE_NAME}</span>
+          <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 13, fontWeight: 700, color: C.ink }}>{PRICE_LABEL}</span>
         </div>
       )}
+
+      <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.faint, marginTop: 16 }}>v{BUILD_ID}</div>
 
       {sheet?.type === 'paywall' && <PaywallSheet onClose={() => setSheet(null)} onUnlock={doUnlock} />}
       {sheet?.type === 'info' && <InfoSheet featureKey={sheet.key} locked={locked} onClose={() => setSheet(null)} onUnlock={doUnlock} />}
@@ -5216,7 +5248,7 @@ export default function App() {
   useEffect(() => {
     const l = document.createElement('link');
     l.rel = 'stylesheet';
-    l.href = 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap';
+    l.href = 'https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap';
     document.head.appendChild(l);
   }, []);
 

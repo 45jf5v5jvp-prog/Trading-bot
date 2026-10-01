@@ -9,7 +9,56 @@ const APP_NAME = 'GOLF BETS';
 const APP_SUB = 'TRACKER';
 // Bump when the deployed build changes, so a stale copy is easy to spot on
 // someone else's phone ("what does yours say at the bottom?").
-const BUILD_ID = '4.3a';
+const BUILD_ID = '5.0';
+
+/* ----------------------------------------------------------------------------
+   PAYWALL (the "Clubhouse" bundle: Trips, Groups, My Golf Ledger — $15/yr)
+
+   PAYWALL_LIVE gates the three paid features behind a lock. Right now there is
+   no real payment system, so "Unlock" just flips a device-local switch — enough
+   to design, demo and test the flow. The real App Store build will replace
+   isUnlocked()/setUnlocked() with an Apple In-App-Purchase entitlement check.
+
+   To push the new LOOK to the web without charging anyone yet (so no current
+   user loses access to the ledger or groups), set PAYWALL_LIVE = false and the
+   locks disappear and everything is open.
+   ---------------------------------------------------------------------------- */
+const PAYWALL_LIVE = true;
+const PRICE_LABEL = '$15 / year';
+const BUNDLE_NAME = 'Clubhouse';
+const UNLOCK_KEY = 'ugb:unlocked';
+function isUnlocked() {
+  if (!PAYWALL_LIVE) return true;
+  try { return localStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
+}
+function setUnlocked(on) {
+  try { on ? localStorage.setItem(UNLOCK_KEY, '1') : localStorage.removeItem(UNLOCK_KEY); } catch {}
+}
+/* Plain-English explainer behind each (i) icon. */
+const FEATURE_INFO = {
+  trip: {
+    title: 'Golf Trips',
+    lines: [
+      'Stack a bunch of rounds onto one running leaderboard — perfect for a buddies trip or a multi-day outing.',
+      'Everyone keeps their own card each round; the trip totals it all up so you know who owes who at the end of the weekend, not just the end of the day.',
+    ],
+  },
+  groups: {
+    title: 'My Groups',
+    lines: [
+      'Set up a permanent group for the guys you play with most. Everyone keeps the same roster round after round — no re-typing names.',
+      'Your group gets a running activity feed (who played, who won), season stats for every member, and group records that update on their own.',
+      'Finish a round and the 19th Hole Snapshot pops up — a shareable recap of the whole day, every game, who took the money.',
+    ],
+  },
+  ledger: {
+    title: 'My Golf Ledger',
+    lines: [
+      'Your own personal season, tracked by name on this phone — every round you play, won and lost, all in one place.',
+      'See your lifetime up/down, your best games, and how you are trending without anyone needing a login.',
+    ],
+  },
+};
 
 /* Two palettes. Day is the default: a golf app is a friendly, social thing and
    a bright card reads that way. Night stays around because a phone at 9% on the
@@ -17,20 +66,25 @@ const BUILD_ID = '4.3a';
    'ink' is the accent used as text, 'onBall' and 'onTone' are what sits on top
    of a filled button. */
 const THEMES = {
-  day: {
-    felt: '#F1F5EC', card: '#FFFFFF', card2: '#FCF3DB', line: '#D6DFCE',
-    chalk: '#17291F', muted: '#576E60', ball: '#F2C230', ink: '#8A6707',
-    up: '#15774A', down: '#C0372B', snake: '#7A3FBF',
-    onBall: '#241B03', onTone: '#FFFFFF',
-  },
+  // Night is the headline look: a deep teal fairway with a bright mint accent.
+  // Strong contrast reads well on a phone, in low light and in the sun.
   night: {
-    felt: '#0C1B14', card: '#132719', card2: '#1A3423', line: '#25452F',
-    chalk: '#E9F0E7', muted: '#7C9A86', ball: '#F5C63D', ink: '#F5C63D',
+    felt: '#0C2A24', card: '#143A31', card2: '#18463B', line: '#2A5346',
+    chalk: '#F3FBF8', muted: '#9FC2B8', ball: '#5FE6C2', ink: '#5FE6C2',
     up: '#4FD48A', down: '#FF6E5B', snake: '#C77DFF',
-    onBall: '#0C1B14', onTone: '#0C1B14',
+    onBall: '#06281F', onTone: '#06281F',
+    grad: 'linear-gradient(135deg,#6EE7B7,#34D399)', glow: 'rgba(52,211,153,.30)',
+  },
+  // Day is the bright-sun companion: airy mint-white with a deep teal accent.
+  day: {
+    felt: '#EAF3EF', card: '#FFFFFF', card2: '#E0F2EA', line: '#CDE3D8',
+    chalk: '#0D2A24', muted: '#5B7A70', ball: '#0FBE98', ink: '#0A8E74',
+    up: '#15774A', down: '#C0372B', snake: '#7A3FBF',
+    onBall: '#04231C', onTone: '#FFFFFF',
+    grad: 'linear-gradient(135deg,#34D399,#0FBE98)', glow: 'rgba(16,185,129,.26)',
   },
 };
-const C = { ...THEMES.day };
+const C = { ...THEMES.night };
 
 /* Style objects built at module load get re-poured when the palette flips. */
 function applyTheme(name) {
@@ -4457,65 +4511,199 @@ function MyLedger({ onBack }) {
   );
 }
 
+/* --- home-screen icons (inline SVG so they inherit the palette) --- */
+const IconLock = ({ c = C.ball, s = 18 }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4.5" y="10.5" width="15" height="10" rx="2.4" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+  </svg>
+);
+const IconInfo = ({ c = C.muted, s = 19 }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><circle cx="12" cy="7.6" r="0.7" fill={c} stroke="none" />
+  </svg>
+);
+const IconChevron = ({ c, s = 18 }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+);
+
+/* One home-screen button. Primary = the mint CTA; locked paid rows carry an (i)
+   and a padlock; soon = greyed with a COMING SOON tag. */
+function HomeRow({ label, onClick, primary, soon, locked, infoKey, onInfo }) {
+  if (soon) {
+    return (
+      <div style={{
+        background: 'transparent', border: `1.5px solid ${C.line}`, borderRadius: 18,
+        padding: '20px 22px', marginBottom: 12, display: 'flex', alignItems: 'center', opacity: 0.5,
+      }}>
+        <span style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 17, color: C.chalk, letterSpacing: '-0.01em' }}>{label}</span>
+        <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', color: C.muted, border: `1px solid ${C.line}`, borderRadius: 40, padding: '6px 11px' }}>COMING SOON</span>
+      </div>
+    );
+  }
+  const base = {
+    width: '100%', textAlign: 'left', cursor: 'pointer', borderRadius: 18,
+    padding: '20px 22px', marginBottom: 12, display: 'flex', alignItems: 'center',
+    fontFamily: F_DISP, letterSpacing: '-0.01em', transition: 'all .12s',
+  };
+  const style = primary
+    ? { ...base, background: C.grad, border: 'none', boxShadow: `0 12px 30px ${C.glow}`, color: C.onBall, fontWeight: 850, fontSize: 20 }
+    : { ...base, background: C.card, border: `1.5px solid ${C.line}`, color: C.chalk, fontWeight: 800, fontSize: 18 };
+  return (
+    <button onClick={onClick} style={style}>
+      <span>{label}</span>
+      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9 }}>
+        {infoKey && (
+          <span role="button" aria-label={`About ${label}`}
+            onClick={(e) => { e.stopPropagation(); onInfo(infoKey); }}
+            style={{ width: 34, height: 34, borderRadius: 18, background: C.card2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconInfo c={C.muted} />
+          </span>
+        )}
+        {locked && (
+          <span style={{ width: 34, height: 34, borderRadius: 18, background: C.ball + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconLock c={C.ink} />
+          </span>
+        )}
+        {primary && <IconChevron c={C.onBall} />}
+      </span>
+    </button>
+  );
+}
+
+/* Bottom sheet shared by the paywall and the (i) explainers. */
+function Sheet({ onClose, children }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,16,12,.78)', zIndex: 70, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.felt, borderTop: `1.5px solid ${C.line}`, borderRadius: '24px 24px 0 0', padding: '26px 20px 30px', width: '100%', maxWidth: 520, maxHeight: '88vh', overflowY: 'auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function PaywallSheet({ onClose, onUnlock }) {
+  const feat = (t, d) => (
+    <div key={t} style={{ display: 'flex', gap: 11, marginBottom: 15 }}>
+      <span style={{ color: C.ink, fontWeight: 900, fontSize: 16, lineHeight: 1.3 }}>✓</span>
+      <div>
+        <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15.5, color: C.chalk }}>{t}</div>
+        <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, marginTop: 2, lineHeight: 1.45 }}>{d}</div>
+      </div>
+    </div>
+  );
+  return (
+    <Sheet onClose={onClose}>
+      <div style={{ width: 44, height: 44, borderRadius: 24, background: C.ball + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}><IconLock c={C.ink} s={22} /></div>
+      <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.025em', color: C.chalk, lineHeight: 1.02 }}>Join the {BUNDLE_NAME}</div>
+      <div style={{ fontFamily: F_DISP, fontSize: 14, color: C.muted, marginTop: 10, lineHeight: 1.45 }}>Keep your whole golf life in one place. Everything below unlocks for a year.</div>
+      <div style={{ height: 1, background: C.line, margin: '20px 0' }} />
+      {feat('Golf Trips', 'Stack rounds on one leaderboard — perfect for buddy trips.')}
+      {feat('My Groups', 'A permanent roster, running stats, and an activity feed for your crew.')}
+      {feat('My Golf Ledger', 'Your personal season — every round, won & lost, tracked by name.')}
+      <button onClick={onUnlock} style={{ width: '100%', border: 'none', cursor: 'pointer', background: C.grad, color: C.onBall, borderRadius: 16, padding: '18px', fontFamily: F_DISP, fontWeight: 850, fontSize: 18, boxShadow: `0 12px 30px ${C.glow}`, marginTop: 10 }}>Unlock for {PRICE_LABEL}</button>
+      <div style={{ textAlign: 'center', fontFamily: F_DISP, fontSize: 12, color: C.muted, marginTop: 12 }}>Billed yearly through the App Store · cancel anytime</div>
+      <div onClick={onUnlock} style={{ textAlign: 'center', fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, marginTop: 16, cursor: 'pointer' }}>Restore purchase</div>
+    </Sheet>
+  );
+}
+
+function InfoSheet({ featureKey, locked, onClose, onUnlock }) {
+  const info = FEATURE_INFO[featureKey];
+  if (!info) return null;
+  return (
+    <Sheet onClose={onClose}>
+      <div style={{ width: 46, height: 46, borderRadius: 24, background: C.ball + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><IconInfo c={C.ink} s={22} /></div>
+      <div style={{ fontFamily: F_DISP, fontWeight: 850, fontSize: 26, letterSpacing: '-0.02em', color: C.chalk }}>{info.title}</div>
+      {info.lines.map((l, i) => (
+        <div key={i} style={{ fontFamily: F_DISP, fontSize: 15, color: C.muted, marginTop: 14, lineHeight: 1.5 }}>{l}</div>
+      ))}
+      <div style={{ height: 1, background: C.line, margin: '22px 0 18px' }} />
+      {locked ? (
+        <div style={{ display: 'flex', gap: 11 }}>
+          <button onClick={onUnlock} style={{ flex: 1, border: 'none', cursor: 'pointer', background: C.ball + '22', color: C.ink, borderRadius: 14, padding: '15px', fontFamily: F_DISP, fontWeight: 800, fontSize: 15 }}>Unlock – {PRICE_LABEL}</button>
+          <button onClick={onClose} style={{ flex: 1, cursor: 'pointer', background: C.card, border: `1.5px solid ${C.line}`, color: C.chalk, borderRadius: 14, padding: '15px', fontFamily: F_DISP, fontWeight: 700, fontSize: 15 }}>Not now</button>
+        </div>
+      ) : (
+        <button onClick={onClose} style={{ width: '100%', cursor: 'pointer', background: C.card, border: `1.5px solid ${C.line}`, color: C.chalk, borderRadius: 14, padding: '15px', fontFamily: F_DISP, fontWeight: 700, fontSize: 15 }}>Got it</button>
+      )}
+    </Sheet>
+  );
+}
+
 function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, theme, setTheme }) {
   const [conn, setConn] = useState(null);
+  const [unlocked, setUnl] = useState(isUnlocked());
+  const [sheet, setSheet] = useState(null); // null | {type:'paywall'} | {type:'info', key}
   useEffect(() => { if (SHARING_ON) remote.ping().then(setConn).catch(() => setConn({ ok: false, reason: 'network' })); }, []);
+
+  const locked = PAYWALL_LIVE && !unlocked;
+  const openInfo = (key) => setSheet({ type: 'info', key });
+  const openPaywall = () => setSheet({ type: 'paywall' });
+  const doUnlock = () => { setUnlocked(true); setUnl(true); setSheet(null); };
+  // A paid feature: if locked, show the paywall; otherwise run the real action.
+  const paid = (fn) => () => (locked ? openPaywall() : fn());
+
+  const resumeCard = (r, label) => (
+    <div onClick={r.go} style={{ padding: 16, background: C.card2, border: `1.5px solid ${C.ball}`, borderRadius: 18, marginBottom: 14, cursor: 'pointer' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <span style={{ width: 7, height: 7, borderRadius: 7, background: C.ink }} />
+        <Eyebrow style={{ color: C.ink }}>{label}</Eyebrow>
+      </div>
+      <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk, marginTop: 6, lineHeight: 1.4 }}>{r.label}</div>
+    </div>
+  );
+
   return (
-    <div style={{ padding: '52px 18px 40px', maxWidth: 520, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 34 }}>
+    <div style={{ padding: '52px 18px 48px', maxWidth: 520, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 30 }}>
         <div>
-          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 40, letterSpacing: '-0.035em', color: C.chalk, lineHeight: 0.92 }}>{APP_NAME}</div>
-          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 40, letterSpacing: '-0.035em', color: C.ink, lineHeight: 0.92 }}>{APP_SUB}</div>
-          <Eyebrow style={{ marginTop: 12 }}>settle it before the parking lot</Eyebrow>
+          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 42, letterSpacing: '-0.04em', color: C.chalk, lineHeight: 0.9 }}>{APP_NAME}</div>
+          <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 42, letterSpacing: '-0.04em', color: C.ink, lineHeight: 0.9 }}>{APP_SUB}</div>
+          <Eyebrow style={{ marginTop: 14 }}>settle it before the parking lot</Eyebrow>
           <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 6 }}>v{BUILD_ID}</div>
         </div>
         <button onClick={() => setTheme(theme === 'day' ? 'night' : 'day')}
           aria-label={theme === 'day' ? 'switch to the night palette' : 'switch to the day palette'}
           style={{
-            marginLeft: 'auto', marginTop: 4, width: 40, height: 40, borderRadius: 20, cursor: 'pointer',
-            border: `1px solid ${C.line}`, background: C.card, fontSize: 15, lineHeight: 1, padding: 0,
+            marginLeft: 'auto', marginTop: 4, width: 44, height: 44, borderRadius: 24, cursor: 'pointer',
+            border: `1.5px solid ${C.line}`, background: C.card, color: C.ink, fontSize: 17, lineHeight: 1, padding: 0,
           }}>{theme === 'day' ? '☾' : '☀'}</button>
       </div>
 
-      {resume && (
-        <div onClick={resume.go} style={{ padding: 15, background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 13, marginBottom: 14, cursor: 'pointer' }}>
-          <Eyebrow style={{ color: C.ink }}>round in progress</Eyebrow>
-          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, marginTop: 4, lineHeight: 1.4 }}>{resume.label}</div>
-        </div>
-      )}
+      {resume && resumeCard(resume, 'round in progress')}
+      {tripResume && resumeCard(tripResume, 'trip in progress')}
 
-      {tripResume && (
-        <div onClick={tripResume.go} style={{ padding: 15, background: C.card2, border: `1px solid ${C.ball}`, borderRadius: 13, marginBottom: 14, cursor: 'pointer' }}>
-          <Eyebrow style={{ color: C.ink }}>trip in progress</Eyebrow>
-          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, marginTop: 4, lineHeight: 1.4 }}>{tripResume.label}</div>
-        </div>
-      )}
-
-      <Btn onClick={onNew} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a round</Btn>
-      <Btn onClick={onTrip} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Start a trip</Btn>
-      {SHARING_ON && <Btn onClick={onJoin} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Join with a code</Btn>}
-      {SHARING_ON && <Btn onClick={onGroups} style={{ width: '100%', padding: '20px', fontSize: 16, marginBottom: 10 }}>Groups</Btn>}
-      <Btn onClick={onLedger} style={{ width: '100%', padding: '20px', fontSize: 16 }}>My Golf Ledger</Btn>
-
-      <div style={{ fontFamily: F_DISP, fontSize: 12.5, color: C.muted, marginTop: 18, lineHeight: 1.6 }}>
-        {SHARING_ON
-          ? 'One person keeps the card. Everybody else joins with the code and watches the money move. A trip is a stack of rounds on one leaderboard.'
-          : 'One phone keeps the card for the group. A trip is a stack of rounds on one leaderboard.'}
-      </div>
+      <HomeRow label="Start a round" primary onClick={onNew} />
+      {SHARING_ON && <HomeRow label="Join with a code" onClick={onJoin} />}
+      <HomeRow label="Start a trip" infoKey="trip" locked={locked} onInfo={openInfo} onClick={paid(onTrip)} />
+      {SHARING_ON && <HomeRow label="My Groups" infoKey="groups" locked={locked} onInfo={openInfo} onClick={paid(onGroups)} />}
+      <HomeRow label="My Golf Ledger" infoKey="ledger" locked={locked} onInfo={openInfo} onClick={paid(onLedger)} />
+      <HomeRow label="Analytics" soon />
 
       {SHARING_ON && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 22 }}>
           <span style={{
-            width: 8, height: 8, borderRadius: 8, flex: '0 0 8px',
-            background: conn == null ? C.muted : conn.ok ? C.up : C.down,
+            width: 9, height: 9, borderRadius: 9, flex: '0 0 9px',
+            background: conn == null ? C.muted : conn.ok ? C.ink : C.down,
+            boxShadow: conn?.ok ? `0 0 8px ${C.ink}` : 'none',
           }} />
           <span style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: '0.04em', color: conn && !conn.ok ? C.down : C.muted, lineHeight: 1.5 }}>
             {conn == null ? 'Checking the shared leaderboard…'
-              : conn.ok ? 'Shared leaderboard connected. The group can follow with a code.'
+              : conn.ok ? 'Shared leaderboard connected. Your group can follow live.'
               : (SHARE_STATUS[conn.reason] || 'Shared board: not reachable.')}
           </span>
         </div>
       )}
+
+      {locked && (
+        <div onClick={openPaywall} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer' }}>
+          <IconLock c={C.muted} s={15} />
+          <span style={{ fontFamily: F_DISP, fontSize: 12.5, fontWeight: 600, color: C.muted }}>Trips, Groups &amp; Ledger unlock with {BUNDLE_NAME} — {PRICE_LABEL}</span>
+        </div>
+      )}
+
+      {sheet?.type === 'paywall' && <PaywallSheet onClose={() => setSheet(null)} onUnlock={doUnlock} />}
+      {sheet?.type === 'info' && <InfoSheet featureKey={sheet.key} locked={locked} onClose={() => setSheet(null)} onUnlock={doUnlock} />}
     </div>
   );
 }
@@ -5010,7 +5198,7 @@ function TripSetup({ onCreate, onBack }) {
    ========================================================================== */
 
 export default function App() {
-  const [theme, setTheme] = useState('day');
+  const [theme, setTheme] = useState('night');
   applyTheme(theme);
   const [screen, setScreen] = useState('home');
   const [round, setRound] = useState(null);       // standalone round

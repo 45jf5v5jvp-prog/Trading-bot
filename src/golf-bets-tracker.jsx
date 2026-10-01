@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
 
 /* ==========================================================================
    ULTIMATE GOLF BETTING
@@ -37,7 +37,7 @@ function setUnlocked(on) {
 /* Plain-English explainer behind each (i) icon. */
 const FEATURE_INFO = {
   trip: {
-    title: 'Golf Trips',
+    title: 'Buddies Trip',
     lines: [
       'Stack a bunch of rounds onto one running leaderboard — perfect for a buddies trip or a multi-day outing.',
       'Everyone keeps their own card each round; the trip totals it all up so you know who owes who at the end of the weekend, not just the end of the day.',
@@ -86,6 +86,10 @@ const THEMES = {
   },
 };
 const C = { ...THEMES.night };
+
+/* Theme is held in App state; this context lets any screen drop in a
+   <ThemeToggle/> (handy mid-round when the sun comes out) without prop drilling. */
+const ThemeCtx = createContext({ theme: 'night', setTheme: () => {} });
 
 /* Style objects built at module load get re-poured when the palette flips. */
 function applyTheme(name) {
@@ -3241,6 +3245,7 @@ function Play({ round, setRound, onQuit, onEditGames, scope, groupNo, guest, cov
         {!guest && onEditGames && (
           <Btn onClick={onEditGames} style={{ fontSize: 10.5, padding: '6px 9px', flex: '0 0 auto' }}>Edit games</Btn>
         )}
+        <ThemeToggle size={32} />
         <button onClick={onQuit} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 17, cursor: 'pointer', padding: 0 }}>×</button>
       </div>
 
@@ -4530,6 +4535,18 @@ const IconLock = ({ c = C.ball, s = 15 }) => <svg width={s} height={s} viewBox="
 const IconInfo = ({ c = C.muted, s = 18 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><circle cx="12" cy="7.6" r="0.7" fill={c} stroke="none" /></svg>;
 const IconChevron = ({ c, s = 18 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>;
 
+/* Light/dark switch usable on any screen (reads theme from context). */
+function ThemeToggle({ size = 36, style = {} }) {
+  const { theme, setTheme } = useContext(ThemeCtx);
+  return (
+    <button onClick={() => setTheme(theme === 'day' ? 'night' : 'day')}
+      aria-label={theme === 'day' ? 'switch to the night look' : 'switch to the day look'}
+      style={{ width: size, height: size, borderRadius: 10, cursor: 'pointer', border: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flex: '0 0 auto', ...style }}>
+      {theme === 'day' ? <IconMoon c={C.muted} /> : <IconSun c={C.muted} />}
+    </button>
+  );
+}
+
 /* A sportsbook-style menu row: icon chip, condensed label, right-side meta
    (chevron, a PRO lock chip for paid features, or a SOON tag). */
 const ProTag = () => (
@@ -4590,7 +4607,7 @@ function PaywallSheet({ onClose, onUnlock }) {
       <div style={{ fontFamily: F_SCORE, fontSize: 34, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.chalk, lineHeight: 0.98 }}>Join the {BUNDLE_NAME}</div>
       <div style={{ fontFamily: F_DISP, fontSize: 14, color: C.muted, marginTop: 10, lineHeight: 1.45 }}>Keep your whole golf life in one place. Everything below unlocks for a year.</div>
       <div style={{ height: 1, background: C.line, margin: '20px 0' }} />
-      {feat('Golf Trips', 'Stack rounds on one leaderboard — perfect for buddy trips.')}
+      {feat('Buddies Trip', 'Stack rounds on one leaderboard — perfect for buddy trips.')}
       {feat('My Groups', 'A permanent roster, running stats, and an activity feed for your crew.')}
       {feat('My Golf Ledger', 'Your personal season — every round, won & lost, tracked by name.')}
       <button onClick={onUnlock} style={{ width: '100%', border: 'none', cursor: 'pointer', background: C.grad, color: C.onBall, borderRadius: 16, padding: '18px', fontFamily: F_DISP, fontWeight: 850, fontSize: 18, boxShadow: `0 12px 30px ${C.glow}`, marginTop: 10 }}>Unlock for {PRICE_LABEL}</button>
@@ -4706,7 +4723,7 @@ function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, t
       {/* menu */}
       <div style={{ borderTop: `1px solid ${C.line}` }}>
         {SHARING_ON && <HomeRow icon={<IconHash c={C.ink} />} label="Join with a code" onClick={onJoin} />}
-        <HomeRow icon={<IconTrip c={C.muted} />} label="Start a trip" infoKey="trip" locked={locked} onInfo={openInfo} onClick={paid(onTrip)} />
+        <HomeRow icon={<IconTrip c={C.muted} />} label="Buddies Trip" infoKey="trip" locked={locked} onInfo={openInfo} onClick={paid(onTrip)} />
         {SHARING_ON && <HomeRow icon={<IconPeople c={C.muted} />} label="My Groups" infoKey="groups" locked={locked} onInfo={openInfo} onClick={paid(onGroups)} />}
         <HomeRow icon={<IconLedger c={C.muted} />} label="My Golf Ledger" infoKey="ledger" locked={locked} onInfo={openInfo} onClick={paid(onLedger)} />
         <HomeRow icon={<IconChart c={C.faint} />} label="Analytics" soon last />
@@ -4895,6 +4912,7 @@ function Viewer({ code, initial, onLeave }) {
           {round.course ? <>{round.course}<br /></> : null}
           {round.games.map(k => gameName(k, n)).join(' · ')}
         </div>
+        <ThemeToggle size={32} />
         <button onClick={onLeave} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 17, cursor: 'pointer', padding: 0 }}>×</button>
       </div>
 
@@ -5196,7 +5214,7 @@ function TripSetup({ onCreate, onBack }) {
 
   return (
     <div style={{ padding: '44px 18px 40px', maxWidth: 520, margin: '0 auto' }}>
-      <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 26, color: C.chalk, letterSpacing: '-0.025em' }}>Start a trip</div>
+      <div style={{ fontFamily: F_SCORE, fontSize: 30, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.chalk }}>Buddies Trip</div>
       <div style={{ fontFamily: F_DISP, fontSize: 13.5, color: C.muted, marginTop: 6, marginBottom: 22, lineHeight: 1.5 }}>
         Set the roster once. Every round you add pulls from it, and the money stacks up across the whole trip.
       </div>
@@ -5360,16 +5378,18 @@ export default function App() {
   const pickTheme = (t) => { setTheme(t); storage.set('ugb:theme', t).catch(() => {}); };
 
   const shell = (kids) => (
-    <div style={{ minHeight: '100vh', background: C.felt, color: C.chalk, WebkitFontSmoothing: 'antialiased' }}>
-      <style>{`
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        button:focus-visible, input:focus-visible { outline: 2px solid ${C.ball}; outline-offset: 2px; }
-        input::placeholder { color: ${C.muted}; opacity: .55; }
-        ::-webkit-scrollbar { height: 0; width: 0; }
-        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
-      `}</style>
-      {kids}
-    </div>
+    <ThemeCtx.Provider value={{ theme, setTheme: pickTheme }}>
+      <div style={{ minHeight: '100vh', background: C.felt, color: C.chalk, WebkitFontSmoothing: 'antialiased' }}>
+        <style>{`
+          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+          button:focus-visible, input:focus-visible { outline: 2px solid ${C.ball}; outline-offset: 2px; }
+          input::placeholder { color: ${C.muted}; opacity: .55; }
+          ::-webkit-scrollbar { height: 0; width: 0; }
+          @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+        `}</style>
+        {kids}
+      </div>
+    </ThemeCtx.Provider>
   );
 
   if (!loaded) return shell(null);

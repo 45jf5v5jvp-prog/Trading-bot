@@ -14,21 +14,22 @@ const BUILD_ID = '5.0';
 /* ----------------------------------------------------------------------------
    PAYWALL (the "Clubhouse" bundle: Trips, Groups, My Golf Ledger — $15/yr)
 
-   PAYWALL_LIVE gates the three paid features behind a lock. Right now there is
-   no real payment system, so "Unlock" just flips a device-local switch — enough
-   to design, demo and test the flow. The real App Store build will replace
-   isUnlocked()/setUnlocked() with an Apple In-App-Purchase entitlement check.
-
-   To push the new LOOK to the web without charging anyone yet (so no current
-   user loses access to the ledger or groups), set PAYWALL_LIVE = false and the
-   locks disappear and everything is open.
+   Two independent switches:
+     SHOW_PRO         — show the PRO badge on the three paid features (marketing
+                        the fact that they'll be a paid bundle later).
+     PAYWALL_ENFORCED — actually gate access behind payment. FALSE during beta,
+                        so everyone can use everything free while the badge still
+                        signals what's coming. Flip to TRUE for the App Store
+                        build, where isUnlocked()/setUnlocked() get replaced by an
+                        Apple In-App-Purchase entitlement check.
    ---------------------------------------------------------------------------- */
-const PAYWALL_LIVE = true;
+const SHOW_PRO = true;
+const PAYWALL_ENFORCED = false; // beta: PRO features are free; the badge is marketing only
 const PRICE_LABEL = '$15 / year';
 const BUNDLE_NAME = 'Clubhouse';
 const UNLOCK_KEY = 'ugb:unlocked';
 function isUnlocked() {
-  if (!PAYWALL_LIVE) return true;
+  if (!PAYWALL_ENFORCED) return true;
   try { return localStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
 }
 function setUnlocked(on) {
@@ -4719,11 +4720,12 @@ function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, t
   const [sheet, setSheet] = useState(null); // null | {type:'paywall'} | {type:'info', key}
   useEffect(() => { if (SHARING_ON) remote.ping().then(setConn).catch(() => setConn({ ok: false, reason: 'network' })); }, []);
 
-  const locked = PAYWALL_LIVE && !unlocked;
+  const gate = PAYWALL_ENFORCED && !unlocked; // whether to actually block access
+  const showPro = SHOW_PRO;                   // whether to badge features PRO
   const openInfo = (key) => setSheet({ type: 'info', key });
   const openPaywall = () => setSheet({ type: 'paywall' });
   const doUnlock = () => { setUnlocked(true); setUnl(true); setSheet(null); };
-  const paid = (fn) => () => (locked ? openPaywall() : fn());
+  const paid = (fn) => () => (gate ? openPaywall() : fn());
 
   // Season line (from the device ledger); hidden until there's history.
   const season = summarizeLedger(loadMyLedger());
@@ -4796,9 +4798,9 @@ function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, t
       {/* menu */}
       <div style={{ borderTop: `1px solid ${C.line}` }}>
         {SHARING_ON && <HomeRow icon={<IconHash c={C.ink} />} label="Join with a code" onClick={onJoin} />}
-        <HomeRow icon={<IconTrip c={C.muted} />} label="Buddies Trip" infoKey="trip" locked={locked} onInfo={openInfo} onClick={paid(onTrip)} />
-        {SHARING_ON && <HomeRow icon={<IconPeople c={C.muted} />} label="My Groups" infoKey="groups" locked={locked} onInfo={openInfo} onClick={paid(onGroups)} />}
-        <HomeRow icon={<IconLedger c={C.muted} />} label="My Golf Ledger" infoKey="ledger" locked={locked} onInfo={openInfo} onClick={paid(onLedger)} />
+        <HomeRow icon={<IconTrip c={C.muted} />} label="Buddies Trip" infoKey="trip" locked={showPro} onInfo={openInfo} onClick={paid(onTrip)} />
+        {SHARING_ON && <HomeRow icon={<IconPeople c={C.muted} />} label="My Groups" infoKey="groups" locked={showPro} onInfo={openInfo} onClick={paid(onGroups)} />}
+        <HomeRow icon={<IconLedger c={C.muted} />} label="My Golf Ledger" infoKey="ledger" locked={showPro} onInfo={openInfo} onClick={paid(onLedger)} />
         <HomeRow icon={<IconChart c={C.faint} />} label="Analytics" soon last />
       </div>
 
@@ -4814,18 +4816,19 @@ function Home({ onNew, onTrip, onJoin, onLedger, onGroups, resume, tripResume, t
         </div>
       )}
 
-      {locked && (
-        <div onClick={openPaywall} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: C.card, border: `1px solid ${C.ball}44`, borderRadius: 12, padding: '13px 15px', cursor: 'pointer' }}>
-          <IconLock c={C.ink} s={17} />
-          <span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 13, letterSpacing: '0.05em', textTransform: 'uppercase', color: C.chalk }}>Unlock the {BUNDLE_NAME}</span>
-          <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 13, fontWeight: 700, color: C.ink }}>{PRICE_LABEL}</span>
+      {showPro && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: C.card, border: `1px solid ${C.ball}33`, borderRadius: 12, padding: '13px 15px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.ball + '1F', border: `1px solid ${C.ball}55`, borderRadius: 7, padding: '4px 8px' }}>
+            <IconLock c={C.ink} s={13} /><span style={{ fontFamily: F_COND, fontWeight: 700, fontSize: 10, letterSpacing: '0.14em', color: C.ink }}>PRO</span>
+          </span>
+          <span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 12.5, letterSpacing: '0.04em', textTransform: 'uppercase', color: C.muted }}>Free for everyone while we're in beta</span>
         </div>
       )}
 
       <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.faint, marginTop: 16 }}>v{BUILD_ID}</div>
 
       {sheet?.type === 'paywall' && <PaywallSheet onClose={() => setSheet(null)} onUnlock={doUnlock} />}
-      {sheet?.type === 'info' && <InfoSheet featureKey={sheet.key} locked={locked} onClose={() => setSheet(null)} onUnlock={doUnlock} />}
+      {sheet?.type === 'info' && <InfoSheet featureKey={sheet.key} locked={gate} onClose={() => setSheet(null)} onUnlock={doUnlock} />}
     </div>
   );
 }

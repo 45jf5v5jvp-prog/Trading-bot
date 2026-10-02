@@ -4417,86 +4417,159 @@ function MyLedger({ onBack }) {
   const [name, setName] = useState(loadMyName());
   const [editName, setEditName] = useState(false);
   const [draft, setDraft] = useState(name);
-  const s = summarizeLedger(l);
-  const has = s.rounds.length > 0;
   const saveName = () => { const v = draft.trim(); saveMyName(v); setName(v); setEditName(false); setL(loadMyLedger()); };
   const clearAll = () => { saveMyLedger({ rounds: {} }); setL({ rounds: {} }); };
-  const bigNet = { color: s.net > 0 ? C.up : s.net < 0 ? C.down : C.chalk };
-  const stat = (label, val, col) => (
-    <div style={{ flex: 1, background: C.card, borderRadius: 11, padding: '11px 12px' }}>
-      <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 18, color: col || C.chalk, marginTop: 3 }}>{val}</div>
+
+  // Scope: this calendar year vs all-time. Default to the year if it has rounds.
+  const CUR = new Date().getFullYear();
+  const yearOf = (ms) => { try { return new Date(ms).getFullYear(); } catch { return 0; } };
+  const allRounds = Object.values(l.rounds || {});
+  const yearCount = allRounds.filter(r => yearOf(r.date) === CUR).length;
+  const [scope, setScope] = useState(yearCount > 0 ? 'year' : 'all');
+  const lScoped = scope === 'year'
+    ? { rounds: Object.fromEntries(Object.entries(l.rounds || {}).filter(([, r]) => yearOf(r.date) === CUR)) }
+    : l;
+  const s = summarizeLedger(lScoped);
+  const has = s.rounds.length > 0;
+
+  const usd = (n) => (n > 0 ? '+' : n < 0 ? '-' : '') + '$' + Math.abs(r2(n)).toFixed(2);
+  const col = (n) => (n > 0 ? C.up : n < 0 ? C.down : C.muted);
+  const dt = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return ''; } };
+  const wonSum = s.rounds.filter(r => r.net > 0).reduce((a, r) => a + r.net, 0);
+  const lostSum = s.rounds.filter(r => r.net < 0).reduce((a, r) => a + r.net, 0);
+  const even = s.rounds.length - s.up - s.down;
+
+  // Bankroll-over-time: cumulative net across rounds, oldest first.
+  const asc = [...s.rounds].sort((a, b) => a.date - b.date);
+  const series = [0]; { let c = 0; for (const r of asc) { c = r2(c + r.net); series.push(c); } }
+  const chart = () => {
+    const W = 320, H = 132, P = 8, n = series.length;
+    const lo = Math.min(0, ...series), hi = Math.max(0, ...series), range = (hi - lo) || 1;
+    const X = (i) => (n <= 1 ? W / 2 : P + (i / (n - 1)) * (W - 2 * P));
+    const Y = (v) => P + (1 - (v - lo) / range) * (H - 2 * P);
+    const c = series[n - 1] >= 0 ? C.up : C.down;
+    const pts = series.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+    const area = `M ${X(0)},${Y(0).toFixed(1)} ` + series.map((v, i) => `L ${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ') + ` L ${X(n - 1).toFixed(1)},${Y(0).toFixed(1)} Z`;
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', height: 'auto' }}>
+        <path d={area} fill={c} opacity="0.12" />
+        <line x1={P} y1={Y(0)} x2={W - P} y2={Y(0)} stroke={C.line} strokeWidth="1" strokeDasharray="3 4" />
+        <polyline points={pts} fill="none" stroke={c} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={X(n - 1)} cy={Y(series[n - 1])} r="4.5" fill={c} />
+      </svg>
+    );
+  };
+
+  const arrow = (up) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={up ? C.up : C.down} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+      {up ? <path d="M12 19V6M6 12l6-6 6 6" /> : <path d="M12 5v13M6 12l6 6 6-6" />}
+    </svg>
+  );
+  const Tile = ({ n, label, c }) => (
+    <div style={{ flex: 1, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 10px', textAlign: 'center' }}>
+      <div style={{ fontFamily: F_SCORE, fontSize: 26, color: c || C.chalk, lineHeight: 1 }}>{n}</div>
+      <div style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, marginTop: 6 }}>{label}</div>
     </div>
   );
-  const dt = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; } };
+  const ScopeChip = ({ v, label }) => (
+    <button onClick={() => setScope(v)} style={{ flex: 1, fontFamily: F_COND, fontWeight: 600, fontSize: 13, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '9px 0', borderRadius: 9, cursor: 'pointer', border: 'none', background: scope === v ? C.ball : 'transparent', color: scope === v ? C.onBall : C.muted }}>{label}</button>
+  );
 
   return (
-    <div style={{ maxWidth: 520, margin: '0 auto', padding: '46px 18px 60px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 6 }}>
-        <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 30, letterSpacing: '-0.03em', color: C.chalk, lineHeight: 1 }}>My Golf Ledger</div>
-        <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', padding: 0 }}>×</button>
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 18px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <button onClick={onBack} aria-label="back" style={{ width: 38, height: 38, borderRadius: 11, background: C.card, border: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transform: 'scaleX(-1)', padding: 0 }}><IconChevron c={C.muted} /></button>
+        <div style={{ fontFamily: F_SCORE, fontSize: 24, letterSpacing: '0.01em', textTransform: 'uppercase', color: C.chalk }}>Your P&amp;L</div>
+        <div style={{ marginLeft: 'auto' }}><ThemeToggle size={38} /></div>
       </div>
-      <Eyebrow style={{ marginBottom: 18 }}>private to this phone · {name ? `you are ${name}` : 'no name set yet'}</Eyebrow>
+      <Eyebrow style={{ marginBottom: 14 }}>{name ? `tracked as ${name}` : 'no name set yet'} · this phone</Eyebrow>
+
+      {allRounds.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, background: C.card, border: `1px solid ${C.line}`, borderRadius: 11, padding: 4, marginBottom: 14 }}>
+          <ScopeChip v="year" label={`${CUR}`} />
+          <ScopeChip v="all" label="All-time" />
+        </div>
+      )}
 
       {!has ? (
-        <div style={{ background: C.card, borderRadius: 13, padding: '18px 16px' }}>
-          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 15, color: C.chalk, marginBottom: 6 }}>Nothing tracked yet.</div>
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 13, padding: '18px 16px' }}>
+          <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 15, color: C.chalk, marginBottom: 6 }}>{scope === 'year' && allRounds.length ? `No rounds yet in ${CUR}.` : 'Nothing tracked yet.'}</div>
           <div style={{ fontFamily: F_DISP, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
-            Finish a round on this phone and tap <b>which player is you</b> — from then on every round you finish here lands in your season ledger automatically.
+            {scope === 'year' && allRounds.length
+              ? <>Switch to <b>All-time</b> to see earlier rounds.</>
+              : <>Finish a round on this phone and tap <b>which player is you</b> — from then on every round you finish here lands in your P&amp;L automatically.</>}
           </div>
         </div>
       ) : (
         <>
-          <div style={{ background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13, padding: '15px 16px', marginBottom: 12 }}>
-            <Eyebrow style={{ color: C.ink }}>season so far</Eyebrow>
-            <div style={{ fontFamily: F_DISP, fontWeight: 900, fontSize: 40, letterSpacing: '-0.02em', marginTop: 2, ...bigNet }}>{money(s.net)}</div>
-            <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.muted, marginTop: 2 }}>{s.rounds.length} round{s.rounds.length === 1 ? '' : 's'} · {s.up} up · {s.down} down</div>
+          {/* net profit hero */}
+          <div style={{ background: C.card, border: `1px solid ${s.net >= 0 ? C.ball + '55' : C.line}`, borderRadius: 16, padding: '16px 18px', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}><IconChart c={C.ink} s={16} /><span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted }}>Net profit</span></span>
+              <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontSize: 12, color: C.muted }}>{s.rounds.length} round{s.rounds.length === 1 ? '' : 's'}</span>
+            </div>
+            <div style={{ fontFamily: F_SCORE, fontSize: 46, letterSpacing: '0.01em', color: col(s.net), lineHeight: 1, marginTop: 8 }}>{usd(s.net)}</div>
+            <div style={{ display: 'flex', gap: 24, marginTop: 14 }}>
+              <div><div style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted }}>Won</div><div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 15, color: C.up, marginTop: 3 }}>{usd(wonSum)}</div></div>
+              <div><div style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted }}>Lost</div><div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 15, color: C.down, marginTop: 3 }}>{usd(lostSum)}</div></div>
+              <div><div style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted }}>Best</div><div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 15, color: C.chalk, marginTop: 3 }}>{s.best ? usd(s.best.net) : '—'}</div></div>
+            </div>
           </div>
 
+          {/* W / L / E tiles */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            {stat('best day', s.best ? money(s.best.net) : '—', C.up)}
-            {stat('worst day', s.worst ? money(s.worst.net) : '—', C.down)}
+            <Tile n={s.up} label="Won" c={C.up} />
+            <Tile n={s.down} label="Lost" c={C.down} />
+            <Tile n={even} label="Even" c={C.muted} />
           </div>
 
+          {/* bankroll chart */}
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: '15px 16px 12px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline' }}>
+              <div style={{ fontFamily: F_DISP, fontWeight: 800, fontSize: 15, color: C.chalk }}>Bankroll over time</div>
+              <div style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: col(s.net) }}>{usd(s.net)}</div>
+            </div>
+            <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted, marginBottom: 10 }}>{s.rounds.length} round{s.rounds.length === 1 ? '' : 's'}</div>
+            {chart()}
+          </div>
+
+          {/* who you've taken */}
           {!!s.rivals.length && (
-            <div style={{ marginBottom: 12 }}>
-              <Eyebrow style={{ marginBottom: 8 }}>who you win from & pay</Eyebrow>
+            <div style={{ marginBottom: 16 }}>
+              <Eyebrow style={{ marginBottom: 8 }}>who you've taken {scope === 'year' ? `in ${CUR}` : ''}</Eyebrow>
               {s.rivals.map(r => (
-                <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: C.card, borderRadius: 10, marginBottom: 5 }}>
-                  <span style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk }}>{r.name}</span>
-                  <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: r.amt > 0 ? C.up : r.amt < 0 ? C.down : C.muted }}>
-                    {r.amt > 0 ? '+' : ''}{money(r.amt)}
-                  </span>
+                <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, marginBottom: 6 }}>
+                  <span style={{ width: 30, height: 30, borderRadius: 15, background: C.card2, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: F_SCORE, fontSize: 14, color: C.muted }}>{(r.name || '?').slice(0, 1).toUpperCase()}</span>
+                  <span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 16, letterSpacing: '0.02em', color: C.chalk }}>{r.name}</span>
+                  <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 15, color: col(r.amt) }}>{usd(r.amt)}</span>
                 </div>
               ))}
-              <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 3 }}>+ you're up on them for the season · − you're down</div>
+              <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.muted, marginTop: 4 }}>+ you're up on them · − you're down</div>
             </div>
           )}
 
-          {!!s.games.length && (
-            <div style={{ marginBottom: 12 }}>
-              <Eyebrow style={{ marginBottom: 8 }}>most-played games</Eyebrow>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {s.games.map(g => (
-                  <div key={g.k} style={{ fontFamily: F_MONO, fontSize: 11, color: C.chalk, background: C.card, borderRadius: 8, padding: '7px 10px' }}>
-                    {GAMES[g.k] ? GAMES[g.k].name(4) : g.k} · {g.n}
+          {/* by round */}
+          <Eyebrow style={{ marginBottom: 8 }}>by round</Eyebrow>
+          {s.rounds.map(r => {
+            const up = r.net > 0, down = r.net < 0;
+            const g0 = (r.games || [])[0];
+            const tag = g0 ? (GAMES[g0] ? GAMES[g0].name(4) : g0) : null;
+            const more = (r.games || []).length - 1;
+            return (
+              <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 12px', background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, marginBottom: 6 }}>
+                <span style={{ width: 36, height: 36, borderRadius: 10, flex: '0 0 36px', background: (up ? C.up : down ? C.down : C.muted) + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{arrow(!down)}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 14, color: C.chalk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.course || 'Round'}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 4 }}>
+                    {tag && <span style={{ fontFamily: F_COND, fontWeight: 600, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: C.ink, background: C.ball + '18', borderRadius: 6, padding: '3px 7px' }}>{tag}{more > 0 ? ` +${more}` : ''}</span>}
+                    <span style={{ fontFamily: F_MONO, fontSize: 10, color: C.muted }}>{dt(r.date)}</span>
                   </div>
-                ))}
+                </div>
+                <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: col(r.net), background: (up ? C.up : down ? C.down : C.muted) + '18', borderRadius: 20, padding: '6px 11px' }}>{usd(r.net)}</span>
+                <button onClick={() => setL(forgetRound(r.key))} aria-label="remove round" style={{ background: 'none', border: 'none', color: C.faint, fontSize: 15, cursor: 'pointer', padding: '0 2px' }}>×</button>
               </div>
-            </div>
-          )}
-
-          <Eyebrow style={{ marginBottom: 8 }}>rounds</Eyebrow>
-          {s.rounds.map(r => (
-            <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: C.card, borderRadius: 10, marginBottom: 5 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: F_DISP, fontWeight: 700, fontSize: 13.5, color: C.chalk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.course || 'Round'}</div>
-                <div style={{ fontFamily: F_MONO, fontSize: 9.5, color: C.muted, marginTop: 2 }}>{dt(r.date)} · {(r.games || []).map(k => (GAMES[k] ? GAMES[k].name(4) : k)).join(', ')}</div>
-              </div>
-              <span style={{ marginLeft: 'auto', fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: r.net > 0 ? C.up : r.net < 0 ? C.down : C.muted }}>{money(r.net)}</span>
-              <button onClick={() => setL(forgetRound(r.key))} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 15, cursor: 'pointer', padding: '0 2px' }}>×</button>
-            </div>
-          ))}
+            );
+          })}
         </>
       )}
 
